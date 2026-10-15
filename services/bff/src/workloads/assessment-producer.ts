@@ -1,4 +1,5 @@
 import { canonicalJson } from '@axiom/ledger';
+import { resolvePublicControlAssessmentSource } from './public-control-assessment-source.js';
 import { canonicalAssessmentInput } from './assessment-input.js';
 import { createHash } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -77,6 +78,7 @@ const controlSchema = z.object({
     .max(5000),
 });
 export interface AssessmentRequestProducer {
+  configurationForTenant?(tenantId: string): boolean;
   request(
     tenantId: string,
     actorId: string,
@@ -155,6 +157,7 @@ export async function composeAssessmentProducer(
       });
     }
     return Object.freeze({
+      configurationForTenant: (tenantId: string) => registry.has(uuid.parse(tenantId)),
       async request(tenantValue: string, actorValue: string, value: AssessmentRequest) {
         const tenantId = uuid.parse(tenantValue),
           actorId = uuid.parse(actorValue),
@@ -163,6 +166,36 @@ export async function composeAssessmentProducer(
           engagementId = input.engagementId.toLowerCase();
         const configured = registry.get(tenantId);
         if (!configured) throw new DispatchRefused();
+        if (input.reviewRef) {
+          const source = await resolvePublicControlAssessmentSource(
+            (ports.writer ?? createHumanActionWriter)(),
+            tenantId,
+            actorId,
+            input,
+          );
+          const context = {
+            jobId,
+            tenantId,
+            actorId,
+            workloadId: configured.workloadId,
+            estateId: source.review.estate_id,
+            engagementId,
+            correlationId: jobId,
+            inputHash: source.inputHash,
+          };
+          const recovered = await configured.dispatch.recover(
+            context,
+            source.derived.expectedQuestionnaire,
+            input.reviewRef,
+          );
+          if (recovered) return recovered;
+          return configured.dispatch.enqueue(
+            context,
+            source.inputText,
+            source.derived.expectedQuestionnaire,
+            input.reviewRef,
+          );
+        }
         const signal = AbortSignal.timeout(10000);
         const read = await db
           .from('engagements')

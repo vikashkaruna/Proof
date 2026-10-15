@@ -773,3 +773,256 @@ it.each([true, false])(
     }
   },
 );
+it('retains an explicit review handoff before sending and reloads the same reference after an unknown outcome', async () => {
+  const reviewRef = {
+    reviewId: run,
+    requestSha256: 'b'.repeat(64),
+    snapshotSha256: 'c'.repeat(64),
+  };
+  fetchMock.mockRejectedValueOnce(new Error('synthetic lost response'));
+  const first = render(panel({ reviewRef }));
+  expect(screen.queryByRole('button', { name: 'Enter questionnaire declarations' })).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Request assessment from recorded review' }));
+  await screen.findByRole('alert');
+  const retained = readAssessmentJournal(localStorage, tenant, actor)!;
+  expect(retained.request.reviewRef).toEqual(reviewRef);
+  expect(retained.request.answers).toEqual({});
+  expect(retained.request.expectedQuestionnaire).toBeUndefined();
+  const originalBody = fetchMock.mock.calls[0]![1].body;
+  expect(JSON.parse(originalBody).reviewRef).toEqual(reviewRef);
+  first.unmount();
+  fetchMock.mockResolvedValueOnce(Response.json(accepted(), { status: 202 }));
+  render(panel({ reviewRef: { ...reviewRef, reviewId: engagement } }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry original request' }));
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  expect(fetchMock.mock.calls[1]![1].body).toBe(originalBody);
+  expect(fetchMock.mock.calls[1]![1].headers['Idempotency-Key']).toBe(operation);
+  expect(readAssessmentJournal(localStorage, tenant, actor)?.request.reviewRef).toEqual(reviewRef);
+});
+it('does not submit a review handoff without request capability', async () => {
+  const reviewRef = {
+    reviewId: run,
+    requestSha256: 'b'.repeat(64),
+    snapshotSha256: 'c'.repeat(64),
+  };
+  render(panel({ reviewRef, canRequest: false }));
+  expect(
+    screen.queryByRole('button', { name: 'Request assessment from recorded review' }),
+  ).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it('sends zero review-bound requests if the exact reference cannot be retained', async () => {
+  const reviewRef = {
+    reviewId: run,
+    requestSha256: 'b'.repeat(64),
+    snapshotSha256: 'c'.repeat(64),
+  };
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('storage unavailable');
+  });
+  render(panel({ reviewRef }));
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Request assessment from recorded review' }));
+  await screen.findByRole('alert');
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+it('blocks only new submission when explicitly unconfigured and keeps source recovery available', async () => {
+  const reviewRef = {
+    reviewId: run,
+    requestSha256: 'b'.repeat(64),
+    snapshotSha256: 'c'.repeat(64),
+  };
+  const view = render(panel({ reviewRef, configuration: 'unconfigured' }));
+  fireEvent.click(screen.getByRole('checkbox'));
+  const start = screen.getByRole('button', { name: 'Request assessment from recorded review' });
+  expect(start).toHaveProperty('disabled', true);
+  fireEvent.click(start);
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(screen.getByText(/Assessment requests are not configured/)).toBeTruthy();
+  view.unmount();
+  retainAssessmentJournal(localStorage, {
+    ...journal(),
+    request: AssessmentRequestSchema.parse({ ...journal().request, reviewRef }),
+  });
+  render(panel({ reviewRef, configuration: 'unconfigured' }));
+  expect(screen.getByRole('button', { name: 'Check retained request' })).toHaveProperty(
+    'disabled',
+    false,
+  );
+  expect(screen.getByRole('button', { name: 'Reconcile source request outcome' })).toHaveProperty(
+    'disabled',
+    false,
+  );
+  expect(screen.getByRole('button', { name: 'Retry original request' })).toHaveProperty(
+    'disabled',
+    false,
+  );
+});
+it('clears an undispatched source journal only after matching positive cancellation and never dispatches automatically', async () => {
+  const reviewRef = {
+    reviewId: run,
+    requestSha256: 'b'.repeat(64),
+    snapshotSha256: 'c'.repeat(64),
+  };
+  const value = {
+    ...journal(),
+    request: AssessmentRequestSchema.parse({ ...journal().request, reviewRef }),
+  };
+  retainAssessmentJournal(localStorage, value);
+  const { canonicalJson } = await import('@axiom/ledger');
+  const reason = 'I no longer want this original source request.';
+  const request_text = canonicalJson(value.request),
+    request_sha256 = 'd'.repeat(64);
+  const row = {
+    id: run,
+    tenant_id: tenant,
+    actor_id: actor,
+    job_id: operation,
+    engagement_id: engagement,
+    request_text,
+    request_sha256,
+    reason,
+    cancellation_text: canonicalJson({
+      version: 1,
+      tenantId: tenant,
+      actorId: actor,
+      jobId: operation,
+      engagementId: engagement,
+      requestSha256: request_sha256,
+      reason,
+    }),
+    cancellation_sha256: 'e'.repeat(64),
+    receipt_id: '77',
+    created_at: '2026-10-16T00:00:00Z',
+  };
+  fetchMock
+    .mockResolvedValueOnce(Response.json({ data: { state: 'not_found' } }))
+    .mockResolvedValueOnce(Response.json({ data: { state: 'cancelled', data: row } }));
+  render(panel({ reviewRef, configuration: 'unconfigured' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Reconcile source request outcome' }));
+  await screen.findByText(/No positive outcome is recorded/);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+  fireEvent.change(screen.getByLabelText('Source intent cancellation reason'), {
+    target: { value: reason },
+  });
+  fireEvent.click(
+    screen.getByRole('checkbox', { name: /I explicitly abandon this exact source request/ }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel unrecorded source intent' }));
+  await waitFor(() => expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull());
+  expect(fetchMock.mock.calls[0]![1].method).toBe('GET');
+  expect(fetchMock.mock.calls[1]![0]).toContain('/cancel-source-intent');
+  expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({ request: value.request, reason });
+  expect(screen.getByText(/cancellation is recorded with receipt 77/)).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+it('keeps the execution monitor journal when source cancellation finds an already-recorded pending job', async () => {
+  const reviewRef = {
+    reviewId: run,
+    requestSha256: 'b'.repeat(64),
+    snapshotSha256: 'c'.repeat(64),
+  };
+  const value = {
+    ...journal(),
+    request: AssessmentRequestSchema.parse({ ...journal().request, reviewRef }),
+  };
+  retainAssessmentJournal(localStorage, value);
+  fetchMock.mockResolvedValueOnce(
+    Response.json({
+      data: { state: 'recorded', jobId: operation, runId: run, expiresAt: '2026-10-16T01:00:00Z' },
+    }),
+  );
+  render(panel({ reviewRef }));
+  fireEvent.change(screen.getByLabelText('Source intent cancellation reason'), {
+    target: { value: 'Abandon only if not dispatched.' },
+  });
+  fireEvent.click(
+    screen.getByRole('checkbox', { name: /I explicitly abandon this exact source request/ }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel unrecorded source intent' }));
+  await screen.findByText(/already has a recorded assessment job/);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+  expect(screen.getByRole('button', { name: 'Check retained request' })).toBeTruthy();
+  expect(
+    screen.queryByRole('button', { name: 'Request assessment from recorded review' }),
+  ).toBeNull();
+  expect(screen.queryByText(/Assessment finalization is recorded/)).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+it.each(['operation', 'reviewRef'] as const)(
+  'does not transfer source cancellation confirmation after another tab changes %s',
+  async (changed) => {
+    const reviewRef = {
+      reviewId: run,
+      requestSha256: 'b'.repeat(64),
+      snapshotSha256: 'c'.repeat(64),
+    };
+    const first = {
+      ...journal(),
+      request: AssessmentRequestSchema.parse({ ...journal().request, reviewRef }),
+    };
+    retainAssessmentJournal(localStorage, first);
+    render(panel({ reviewRef }));
+    fireEvent.change(screen.getByLabelText('Source intent cancellation reason'), {
+      target: { value: 'Cancel only operation A.' },
+    });
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: /I explicitly abandon this exact source request/ }),
+    );
+    expect(screen.getByRole('button', { name: 'Cancel unrecorded source intent' })).toHaveProperty(
+      'disabled',
+      false,
+    );
+    const second = {
+      ...first,
+      request: {
+        ...first.request,
+        ...(changed === 'operation'
+          ? { operationKey: run }
+          : { reviewRef: { ...reviewRef, snapshotSha256: 'd'.repeat(64) } }),
+      },
+    };
+    await act(async () => {
+      localStorage.removeItem(assessmentJournalKey(tenant, actor));
+      window.dispatchEvent(
+        new StorageEvent('storage', { key: assessmentJournalKey(tenant, actor) }),
+      );
+      localStorage.setItem(assessmentJournalKey(tenant, actor), JSON.stringify(second));
+      window.dispatchEvent(
+        new StorageEvent('storage', { key: assessmentJournalKey(tenant, actor) }),
+      );
+    });
+    expect(screen.getByLabelText('Source intent cancellation reason')).toHaveProperty('value', '');
+    expect(
+      screen.getByRole('checkbox', { name: /I explicitly abandon this exact source request/ }),
+    ).toHaveProperty('checked', false);
+    const cancel = screen.getByRole('button', { name: 'Cancel unrecorded source intent' });
+    expect(cancel).toHaveProperty('disabled', true);
+    fireEvent.click(cancel);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(second);
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        data: {
+          state: 'recorded',
+          jobId: second.request.operationKey,
+          runId: run,
+          expiresAt: '2026-10-16T01:00:00Z',
+        },
+      }),
+    );
+    fireEvent.change(screen.getByLabelText('Source intent cancellation reason'), {
+      target: { value: 'Fresh confirmation for operation B.' },
+    });
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: /I explicitly abandon this exact source request/ }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel unrecorded source intent' }));
+    await screen.findByText(/already has a recorded assessment job/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body).request).toEqual(second.request);
+  },
+);

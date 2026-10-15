@@ -5,6 +5,7 @@ import { createSupabaseAdmin, createHumanActionWriter } from '@axiom/supabase';
 import { AssessmentRequestSchema, ASSESSMENT_REQUEST_MAX_BYTES, Capability } from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
 import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
+import { resolvePublicControlAssessmentSource } from '../workloads/public-control-assessment-source.js';
 import { canonicalAssessmentInput } from '../workloads/assessment-input.js';
 import type { Variables } from '../types.js';
 import {
@@ -112,7 +113,16 @@ export function assessmentCancellationRoutes() {
         .parse(runRead.data);
       const original = await readOriginalAssessmentRequest(db, originalJob, originalRun);
       if (!original) return c.json(unavailable, 503);
-      const reviewedInput = input.data as typeof input.data & {
+      const resolvedSource = input.data.reviewRef
+        ? await resolvePublicControlAssessmentSource(
+            createHumanActionWriter(),
+            tenantId,
+            actorId,
+            input.data,
+          )
+        : null;
+      const effectiveInput = resolvedSource?.derived ?? input.data;
+      const reviewedInput = effectiveInput as typeof input.data & {
         expectedQuestionnaire?: RecordedQuestionnaire;
       };
       if (
@@ -126,7 +136,7 @@ export function assessmentCancellationRoutes() {
         tenantId,
         engagement.id,
         original.libraryVersion,
-        input.data,
+        effectiveInput,
       );
       if (Buffer.byteLength(body, 'utf8') > ASSESSMENT_REQUEST_MAX_BYTES)
         return c.json({ error: { code: 'invalid_assessment_cancellation' } }, 400);
@@ -134,14 +144,26 @@ export function assessmentCancellationRoutes() {
       if (inputHash !== originalJob.input_hash)
         return c.json({ error: { code: 'cancellation_conflict' } }, 409);
       const result = await createHumanActionWriter()
-        .rpc('cancel_unclaimed_assessment_request', {
-          p_tenant_id: tenantId,
-          p_actor_id: actorId,
-          p_job_id: jobId.data.toLowerCase(),
-          p_engagement_id: engagement.id,
-          p_library_version: original.libraryVersion,
-          p_input_hash: inputHash,
-        })
+        .rpc(
+          input.data.reviewRef
+            ? 'cancel_public_control_assessment_request'
+            : 'cancel_unclaimed_assessment_request',
+          {
+            ...(input.data.reviewRef
+              ? {
+                  p_review_id: input.data.reviewRef.reviewId,
+                  p_review_request_sha256: input.data.reviewRef.requestSha256,
+                  p_review_snapshot_sha256: input.data.reviewRef.snapshotSha256,
+                }
+              : {}),
+            p_tenant_id: tenantId,
+            p_actor_id: actorId,
+            p_job_id: jobId.data.toLowerCase(),
+            p_engagement_id: engagement.id,
+            p_library_version: original.libraryVersion,
+            p_input_hash: inputHash,
+          },
+        )
         .abortSignal(AbortSignal.timeout(10000));
       if (result.error) return c.json(unavailable, 503);
       const refused = z

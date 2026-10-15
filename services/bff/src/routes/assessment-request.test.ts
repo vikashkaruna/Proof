@@ -198,3 +198,60 @@ describe('human assessment request boundary', () => {
     expect((await send()).status).toBe(503);
   });
 });
+it.each([true, false, undefined])(
+  'reports tenant configuration presence %s without claiming readiness',
+  async (configured) => {
+    const producer: AssessmentRequestProducer = {
+      request: vi.fn(),
+      ...(configured === undefined
+        ? {}
+        : {
+            configurationForTenant: vi.fn((tenant: string) => {
+              expect(tenant).toBe(TENANT);
+              return configured;
+            }),
+          }),
+    };
+    const app = new Hono<{ Variables: Variables }>();
+    app.use('*', async (c, next) => {
+      c.set('tenantId', TENANT);
+      c.set('user', { id: ACTOR } as never);
+      c.set('role', UserRole.OWNER);
+      await next();
+    });
+    app.route('/v1', assessmentRequestRoutes(producer));
+    const result = await app.request('/v1/assessment/configuration');
+    expect(result.status).toBe(200);
+    expect(await result.json()).toEqual({
+      tenantId: TENANT,
+      configuration:
+        configured === undefined ? 'unknown' : configured ? 'configured' : 'unconfigured',
+      executionReadiness: 'not_verified',
+    });
+    expect(producer.request).not.toHaveBeenCalled();
+  },
+);
+it('reports absent producer without secrets and refuses agent configuration reads', async () => {
+  const app = new Hono<{ Variables: Variables }>();
+  app.use('*', async (c, next) => {
+    c.set('tenantId', TENANT);
+    c.set('user', { id: ACTOR } as never);
+    c.set('role', UserRole.OWNER);
+    await next();
+  });
+  app.route('/v1', assessmentRequestRoutes());
+  expect(await (await app.request('/v1/assessment/configuration')).json()).toEqual({
+    tenantId: TENANT,
+    configuration: 'unconfigured',
+    executionReadiness: 'not_verified',
+  });
+  const agent = new Hono<{ Variables: Variables }>();
+  agent.use('*', async (c, next) => {
+    c.set('tenantId', TENANT);
+    c.set('user', { id: ACTOR } as never);
+    c.set('role', UserRole.AGENT);
+    await next();
+  });
+  agent.route('/v1', assessmentRequestRoutes());
+  expect((await agent.request('/v1/assessment/configuration')).status).toBe(403);
+});

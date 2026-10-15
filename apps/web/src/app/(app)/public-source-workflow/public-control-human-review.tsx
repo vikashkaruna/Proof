@@ -40,7 +40,12 @@ const unknownApplicability = () => ({
 });
 const choice = (v: boolean | null) => (v === null ? 'unknown' : v ? 'yes' : 'no');
 const answer = (v: string) => (v === 'yes' ? true : v === 'no' ? false : null);
-type Props = { actorId: string; canReview: boolean; assessment: PublicControlAssessmentV2 };
+type Props = {
+  actorId: string;
+  canReview: boolean;
+  canRun?: boolean;
+  assessment: PublicControlAssessmentV2;
+};
 
 /** Saved human declarations remain distinct from observed facts and compliance conclusions. */
 export function PublicControlHumanReview(props: Props) {
@@ -52,7 +57,7 @@ export function PublicControlHumanReview(props: Props) {
     />
   );
 }
-function HumanReview({ actorId, canReview, assessment }: Props) {
+function HumanReview({ actorId, canReview, canRun = false, assessment }: Props) {
   const source = assessment.source;
   const [head, setHead] = useState<HumanControlReviewHead | null>(null);
   const [judgments, setJudgments] = useState<PublicControlReviewSetRequest['answers']>({});
@@ -356,6 +361,29 @@ function HumanReview({ actorId, canReview, assessment }: Props) {
           .
         </p>
       )}
+      {canRun &&
+        head?.review &&
+        head.review.estate_id === head.estateId &&
+        !dirty &&
+        !busy &&
+        storageReady &&
+        operations.length === 0 && (
+          <p className="text-sm">
+            <Link
+              href={`/assessment?${new URLSearchParams({
+                engagement: source.engagementId,
+                reviewId: head.review.id,
+                requestSha256: head.review.request_sha256,
+                snapshotSha256: head.review.snapshot_sha256,
+              })}`}
+              className="underline"
+            >
+              Request assessment from this recorded human review
+            </Link>
+            . On Assessment, confirm the exact saved review before submitting. No request starts
+            from this link.
+          </p>
+        )}
       <button
         type="button"
         className={button}

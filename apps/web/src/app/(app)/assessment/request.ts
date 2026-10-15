@@ -1,6 +1,10 @@
 import { z } from 'zod';
+import { canonicalJson } from '@axiom/ledger';
 import {
   AssessmentRequestSchema,
+  assessmentSourceOperationSchema,
+  cancelAssessmentSourceIntentSchema,
+  type AssessmentSourceOperation,
   AssessmentRequestReceiptSchema,
   ASSESSMENT_REQUEST_MAX_BYTES,
 } from '@axiom/types';
@@ -324,4 +328,80 @@ export async function cancelUnclaimedAssessmentRequest(
       'Cancellation receipt could not be verified. Keep the original reference and check again.',
     );
   return receipt.data;
+}
+
+/** Positive server proof only; not_found/refusal never clears an unknown intent. */
+export async function resolveAssessmentSourceIntent(value: RetainedAssessment, reason?: string) {
+  const retained = retainedAssessmentSchema.parse(value),
+    request = retained.request;
+  if (!request.reviewRef)
+    throw new AssessmentRequestError('This request has no recorded review reference.');
+  if (reason !== undefined) cancelAssessmentSourceIntentSchema.parse({ request, reason });
+  const params = new URLSearchParams({ engagementId: request.engagementId, ...request.reviewRef });
+  const response = await fetch(
+    `/api/bff/v1/assessment/jobs/${request.operationKey}/${reason === undefined ? `source-operation?${params}` : 'cancel-source-intent'}`,
+    {
+      method: reason === undefined ? 'GET' : 'POST',
+      cache: 'no-store',
+      signal: AbortSignal.timeout(20000),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Tenant-Id': retained.tenantId,
+        'X-Expected-Actor-Id': retained.actorId,
+        'Idempotency-Key': request.operationKey,
+      },
+      ...(reason === undefined ? {} : { body: JSON.stringify({ request, reason }) }),
+    },
+  );
+  const raw = await responseBody(response);
+  const envelope = z.object({ data: assessmentSourceOperationSchema }).strict().parse(raw);
+  const state = envelope.data;
+  if (state.state === 'recorded' && state.jobId !== request.operationKey)
+    throw new AssessmentRequestError('Recorded operation does not match the retained request.');
+  if (state.state === 'cancelled') {
+    const row = state.data;
+    if (
+      row.tenant_id !== retained.tenantId ||
+      row.actor_id !== retained.actorId ||
+      row.job_id !== request.operationKey ||
+      row.engagement_id !== request.engagementId ||
+      row.request_text !== canonicalJson(request) ||
+      row.cancellation_text !==
+        canonicalJson({
+          version: 1,
+          tenantId: row.tenant_id,
+          actorId: row.actor_id,
+          jobId: row.job_id,
+          engagementId: row.engagement_id,
+          requestSha256: row.request_sha256,
+          reason: row.reason,
+        }) ||
+      (reason !== undefined && row.reason !== reason)
+    )
+      throw new AssessmentRequestError(
+        'Cancellation proof does not match the retained source request.',
+      );
+  }
+  return state;
+}
+export function clearCancelledAssessmentSourceJournal(
+  storage: Storage,
+  value: RetainedAssessment,
+  state: AssessmentSourceOperation,
+) {
+  if (
+    state.state !== 'cancelled' ||
+    state.data.tenant_id !== value.tenantId ||
+    state.data.actor_id !== value.actorId ||
+    state.data.job_id !== value.request.operationKey ||
+    state.data.request_text !== canonicalJson(value.request)
+  )
+    throw new AssessmentRequestError(
+      'Only matching positive cancellation proof can archive the browser reference.',
+    );
+  const old = readAssessmentJournal(storage, value.tenantId, value.actorId);
+  if (!old || JSON.stringify(old) !== JSON.stringify(value))
+    throw new AssessmentRequestError('Retained request changed. Reload before continuing.');
+  storage.removeItem(assessmentJournalKey(value.tenantId, value.actorId));
+  window.dispatchEvent(new Event(ASSESSMENT_JOURNAL_CHANGED));
 }

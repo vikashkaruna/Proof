@@ -625,6 +625,7 @@ function Workflow({
       <PublicControlReview
         actorId={actorId}
         canReview={canReview}
+        canRun={canReview && canInvoke}
         tenantId={tenantId}
         engagementId={engagementId}
         checkId={checkId}

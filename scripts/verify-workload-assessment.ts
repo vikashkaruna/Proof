@@ -1,3 +1,7 @@
+import {
+  acceptancePublicWebsiteCapture,
+  verifyPublicControlSourceThroughController,
+} from './lib/acceptance-public-control-source.js';
 /** Real UID-attested worker → private Hono tools → real PostgREST transactions.
  * Only synthetic fixtures in the isolated local parity project. No private
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
@@ -1012,6 +1016,7 @@ except Exception as error:
   );
   const normalApp = applicationModule.createApp({
     assessmentRequests: producer,
+    publicWebsiteCapture: acceptancePublicWebsiteCapture,
   });
   // Standard Node HTTP transport only; every application request goes through
   // the complete mounted app.fetch middleware chain, with no injected Auth state.
@@ -1249,38 +1254,43 @@ except Exception as error:
     );
     outcomes['normal-auth-accepted-is-queued-no-claim-no-launch-no-findings'] = true;
     phase = 'normal-auth-separate-spire-controller';
-    const credential = controllerCredentialFixture(tenantId, status);
-    try {
-      const controllerDb = createClient(url.origin, status.ANON_KEY!, {
-        auth: { persistSession: false, autoRefreshToken: false },
-        global: { headers: { Authorization: `Bearer ${credential.accessToken}` } },
-      });
-      const { requireControllerBackend } =
-        await import('../services/bff/src/workloads/controller-files.js');
-      await requireControllerBackend(controllerDb, tenantId);
-      const controllerDispatch = new AssessmentDispatch(controllerDb, wrapper, policyRevisions);
-      const controller = new AssessmentController(
-        controllerDispatch,
-        new AssessmentChannel(
-          launchSupervised,
-          {
-            start: (value) => callTool('start', value),
-            complete: (value) => callTool('complete', value),
-          },
-          'spiffe://local.axiomproof.test/agent/parikshan',
-        ),
-        new AssessmentConfirmation(controllerDb),
-      );
-      const executed = await controller.run(tenantId, jobId);
-      assert.equal(executed.status, 'confirmed');
-      assert.equal(executed.cleanupConfirmed, true);
-      assert.equal(jobNames.length, launchesBefore + 1);
-      const recovered = await controller.reconcile(tenantId, jobId);
-      assert.equal(recovered.status, 'confirmed');
-      assert.equal(jobNames.length, launchesBefore + 1);
-    } finally {
-      credential.revoke();
-    }
+    const executeNormalJob = async (jobId: string) => {
+      const launchesBeforeExecution = jobNames.length;
+      const credential = controllerCredentialFixture(tenantId, status);
+      try {
+        const controllerDb = createClient(url.origin, status.ANON_KEY!, {
+          auth: { persistSession: false, autoRefreshToken: false },
+          global: { headers: { Authorization: `Bearer ${credential.accessToken}` } },
+        });
+        const { requireControllerBackend } =
+          await import('../services/bff/src/workloads/controller-files.js');
+        await requireControllerBackend(controllerDb, tenantId);
+        const controllerDispatch = new AssessmentDispatch(controllerDb, wrapper, policyRevisions);
+        const controller = new AssessmentController(
+          controllerDispatch,
+          new AssessmentChannel(
+            launchSupervised,
+            {
+              start: (value) => callTool('start', value),
+              complete: (value) => callTool('complete', value),
+            },
+            'spiffe://local.axiomproof.test/agent/parikshan',
+          ),
+          new AssessmentConfirmation(controllerDb),
+        );
+        const executed = await controller.run(tenantId, jobId);
+        assert.equal(executed.status, 'confirmed');
+        assert.equal(executed.cleanupConfirmed, true);
+        assert.equal(jobNames.length, launchesBeforeExecution + 1);
+        const recovered = await controller.reconcile(tenantId, jobId);
+        assert.equal(recovered.status, 'confirmed');
+        assert.equal(jobNames.length, launchesBeforeExecution + 1);
+      } finally {
+        credential.revoke();
+      }
+    };
+    await executeNormalJob(jobId);
+    assert.equal(jobNames.length, launchesBefore + 1);
     outcomes['normal-auth-separate-restricted-controller-single-spire-worker'] = true;
     phase = 'normal-auth-finalized-unknown-readback';
     const finalized = z
@@ -1418,7 +1428,20 @@ except Exception as error:
     outcomes['normal-auth-finalized-library011-46-controls-65-unknown-no-confirmed-compliance'] =
       true;
     outcomes['normal-auth-full-jsonb-packet-hash-one-human-request-zero-chain-violations'] = true;
+    phase = 'normal-auth-reviewed-public-source-controller';
+    const reviewedSourceProof = await verifyPublicControlSourceThroughController({
+      request,
+      headers: ownerHeaders,
+      db,
+      tenantId,
+      actorId,
+      libraryVersion: acceptanceLibrary.version,
+      execute: executeNormalJob,
+      launchCount: () => jobNames.length,
+    });
+    outcomes['normal-auth-real-capture-human-review-source-controller-finalization'] = true;
     finalizedHttpProof = {
+      reviewedSourceProof,
       kind: 'isolated-normal-auth-finalized-assessment',
       projectId: selectedParity.projectId,
       stateDirectory: selectedParity.stateDirectory,

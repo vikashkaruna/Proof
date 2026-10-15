@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentLabel, formatINRCrore, PageHeader } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
-import type { AgentName, AssessmentSnapshot } from '@axiom/types';
+import type { AgentName, AssessmentSnapshot, AssessmentReviewReference } from '@axiom/types';
 import { AssessmentRequestPanel } from './request-panel';
 
 export interface AssessmentClientProps {
@@ -13,6 +13,8 @@ export interface AssessmentClientProps {
   canCreate?: boolean;
   canInvokeAgent?: boolean;
   actorId?: string;
+  reviewRef?: AssessmentReviewReference;
+  configuration?: 'configured' | 'unconfigured' | 'unknown';
 }
 
 export interface PipelineStage {
@@ -66,6 +68,8 @@ export function AssessmentClient({
   canCreate = false,
   canInvokeAgent = false,
   actorId,
+  reviewRef,
+  configuration = 'unknown',
 }: AssessmentClientProps) {
   const router = useRouter();
   const controls = snapshot?.controls ?? [];
@@ -165,6 +169,8 @@ export function AssessmentClient({
           engagementId={snapshot.engagement.id}
           libraryVersion={snapshot.engagement.libraryVersion}
           canRequest={canInvokeAgent}
+          reviewRef={reviewRef}
+          configuration={configuration}
           hasSavedResults={controls.some((control) => control.score !== null)}
           onFinalized={() => router.refresh()}
         />

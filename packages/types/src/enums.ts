@@ -154,6 +154,7 @@ export const LedgerActionType = {
   CLASSIFICATION_REVIEW_QUEUED: 'classification.review_queued',
   ASSESSMENT_REQUESTED: 'assessment.requested',
   ASSESSMENT_REQUEST_CANCELLED: 'assessment.request_cancelled',
+  ASSESSMENT_SOURCE_CANCELLED: 'assessment.source_cancelled',
   ASSESSMENT_STARTED: 'assessment.started',
   ASSESSMENT_SCORED: 'assessment.scored',
   ASSESSMENT_REPORT_GENERATED: 'assessment.report.generated',
