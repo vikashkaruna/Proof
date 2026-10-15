@@ -6,6 +6,14 @@ test('owner declares, edits and archives an estate and system', async ({ page })
   const name = `India estate ${suffix}`;
   await signInFreshOwner(page, 'estate-management.spec-1');
   await selectTenant(page, 'a');
+  // A remote HTTP browser has secure randomness but may omit randomUUID.
+  // Exercise the actual application forms with that API unavailable.
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      value: undefined,
+      configurable: true,
+    });
+  });
   await page.goto('/estate');
   const create = page.locator('form').filter({ has: page.locator('input[name=slug]') });
   await create.getByLabel('Estate name', { exact: true }).fill(name);
@@ -70,13 +78,13 @@ test('owner declares, edits and archives an estate and system', async ({ page })
   const currentVersions = (await currentLibrary.json()) as { version: string }[];
   expect(currentVersions).toHaveLength(1);
   const created = await page.evaluate(
-    async ({ tenantId, libraryVersion, title }) => {
+    async ({ tenantId, libraryVersion, title, requestKey }) => {
       const res = await fetch('/api/bff/v1/engagements', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-Tenant-Id': tenantId,
-          'Idempotency-Key': crypto.randomUUID(),
+          'Idempotency-Key': requestKey,
         },
         body: JSON.stringify({ libraryVersion, title }),
       });
@@ -86,6 +94,7 @@ test('owner declares, edits and archives an estate and system', async ({ page })
       tenantId: state.tenantA.id,
       libraryVersion: currentVersions[0]!.version,
       title: intakeTitle,
+      requestKey: crypto.randomUUID(),
     },
   );
   expect(created.status).toBe(201);

@@ -20,7 +20,7 @@ create function pg_temp.step(w uuid, s text, v integer, body jsonb) returns json
 $$;
 reset role; -- mixed direct fixture inspection; 0098 suite proves writer grants
 do $$
-declare w uuid; again jsonb; r jsonb; estate uuid; other_estate uuid; crm uuid; hr uuid; events bigint;
+declare w uuid; again jsonb; r jsonb; estate uuid; other_estate uuid; crm uuid; hr uuid; events bigint; before_wizard jsonb;
 begin
  r:=public.start_onboarding_wizard('00000000-0000-4000-8000-0000000000b1','00000000-0000-4000-8000-0000000000a2',gen_random_uuid());
  perform pg_temp.ok(r->>'error'='forbidden','viewer cannot start the wizard');
@@ -59,6 +59,12 @@ begin
 
  insert into public.connectors(tenant_id,system_id,descriptor_id,target_binding,name,endpoint_ref,assurance)
  values ('00000000-0000-4000-8000-0000000000b1',crm,'00000000-0000-4000-8000-0000000000c1','sandbox','CRM reader','crm_reader','high');
+ select to_jsonb(x) into before_wizard from public.tenant_onboarding_wizards x where id=w;
+ select count(*) into events from public.audit_ledger;
+ r:=pg_temp.step(w,'connectors',4,jsonb_build_object('manualSystemIds',jsonb_build_array(crm)));
+ perform pg_temp.ok(r->>'error'='connection_path_missing','partial manual declaration is refused');
+ perform pg_temp.ok((select to_jsonb(x)=before_wizard from public.tenant_onboarding_wizards x where id=w),'refused connection step preserves the entire wizard row');
+ perform pg_temp.ok((select count(*)=events from public.audit_ledger),'refused connection step appends no success receipt');
  r:=pg_temp.step(w,'connectors',4,'{"manualSystemIds":[]}');
  perform pg_temp.ok(r->>'error'='connection_path_missing' and r->>'missing'='1','system without connector or manual declaration refused');
  r:=pg_temp.step(w,'connectors',4,jsonb_build_object('manualSystemIds',jsonb_build_array('00000000-0000-4000-8000-0000000000ff')));
@@ -78,6 +84,11 @@ begin
  perform pg_temp.ok(r->>'error'='not_ready','late unconnected system blocks readiness');
  perform pg_temp.ok((select version=6 and status='in_progress' and not ('readiness'=any(completed_steps)) from public.tenant_onboarding_wizards where id=w),'refused readiness rolled back');
  perform pg_temp.ok((select count(*)=events from public.audit_ledger),'refused readiness has no ledger entry');
+ select to_jsonb(x) into before_wizard from public.tenant_onboarding_wizards x where id=w;
+ r:=pg_temp.step(w,'connectors',6,'{"manualSystemIds":[]}');
+ perform pg_temp.ok(r->>'error'='connection_path_missing','incomplete revisit is refused');
+ perform pg_temp.ok((select to_jsonb(x)=before_wizard from public.tenant_onboarding_wizards x where id=w),'rejected revisit retains prior manual declarations, version and completion state');
+ perform pg_temp.ok((select count(*)=events from public.audit_ledger),'rejected revisit appends no success receipt');
  r:=pg_temp.step(w,'connectors',6,jsonb_build_object('manualSystemIds',(select jsonb_agg(id) from public.estate_systems where estate_id=estate and id<>crm)));
  perform pg_temp.ok(r#>>'{resource,version}'='7','revisiting a completed step is allowed');
  r:=pg_temp.step(w,'readiness',7,'{"confirmed":true}');

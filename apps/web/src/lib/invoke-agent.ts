@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AgentName } from '@axiom/types';
+import { generateUUID } from '@axiom/ui';
 
 export class AgentInvocationError extends Error {
   constructor(
@@ -13,14 +14,21 @@ export class AgentInvocationError extends Error {
 /** Presentation contract only. Authority, execution and scoring stay in BFF. */
 export async function invokeAgent(agent: string, input: Record<string, unknown> = {}) {
   const name = z.nativeEnum(AgentName).parse(agent);
-  const correlationId = crypto.randomUUID();
+  let correlationId: string;
+  let requestText: string;
+  try {
+    correlationId = generateUUID();
+    requestText = JSON.stringify({ ...input, correlation_id: correlationId });
+  } catch {
+    throw new AgentInvocationError('The agent request could not be prepared. Nothing was sent.');
+  }
   let response: Response;
   let body: unknown;
   try {
     response = await fetch(`/api/bff/v1/agents/${name}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...input, correlation_id: correlationId }),
+      body: requestText,
       redirect: 'error',
     });
     body = await response.json();
