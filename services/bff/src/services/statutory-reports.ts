@@ -22,7 +22,7 @@ import {
   renderHtmlToPdf,
   buildAuditorAssessmentPack,
   renderAuditorAssessmentPackHtml,
-  AuditorAssessmentPackV2Schema,
+  AuditorAssessmentPackSchema,
 } from '@axiom/report-kit';
 import { EvidenceError, type EvidenceDatabase } from './evidence-ingestion.js';
 
@@ -282,8 +282,11 @@ export class StatutoryReportService {
         return { validatedContent, html };
       }
       case 'auditor': {
-        if (rawContent.schema_version === 2 && rawContent.kind === 'auditor_pack') {
-          const validatedContent = AuditorAssessmentPackV2Schema.parse(rawContent);
+        if (
+          (rawContent.schema_version === 2 || rawContent.schema_version === 3) &&
+          rawContent.kind === 'auditor_pack'
+        ) {
+          const validatedContent = AuditorAssessmentPackSchema.parse(rawContent);
           return { validatedContent, html: renderAuditorAssessmentPackHtml(validatedContent) };
         }
         const validatedContent = AuditorPackContentV1Schema.parse(rawContent);
@@ -373,7 +376,8 @@ export class StatutoryReportService {
     const raw = report.content_text ? JSON.parse(report.content_text) : report.content;
     if (
       report.kind === 'auditor' &&
-      (raw as Record<string, unknown>)?.schema_version === 2 &&
+      ((raw as Record<string, unknown>)?.schema_version === 2 ||
+        (raw as Record<string, unknown>)?.schema_version === 3) &&
       report.status === 'published'
     ) {
       throw new EvidenceError('retained_pdf_required', 409);

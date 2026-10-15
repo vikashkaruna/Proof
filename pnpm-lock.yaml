@@ -343,6 +343,12 @@ importers:
 
   packages/report-kit:
     dependencies:
+      '@axiom/control-library':
+        specifier: workspace:*
+        version: link:../control-library
+      '@axiom/ledger':
+        specifier: workspace:*
+        version: link:../ledger
       '@axiom/types':
         specifier: workspace:*
         version: link:../types

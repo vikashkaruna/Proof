@@ -12,3 +12,4 @@ export * from './renderer';
 export * from './archive';
 export * from './pramaan-archive';
 export * from './assessment-interpretation';
+export * from './public-control-provenance';
