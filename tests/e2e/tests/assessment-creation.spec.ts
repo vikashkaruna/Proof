@@ -52,10 +52,17 @@ test('an assessment creator can start an intake and open its saved assessment', 
 
   await signInAs(page, account.email, account.password, account.totpSecret!);
   await page.context().addCookies([tenantCookie(slug)]);
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      configurable: true,
+      value: undefined,
+    });
+  });
   await page.goto('/assessment');
   await expect(page.getByTestId('assessment-provenance')).toContainText('No saved assessment');
   await page.getByRole('link', { name: 'Create an assessment' }).click();
   await expect(page).toHaveURL(/\/engagements$/);
+  expect(await page.evaluate(() => typeof globalThis.crypto.randomUUID)).toBe('undefined');
   await expect(page.getByRole('form', { name: 'Create assessment' })).toBeVisible();
   await page.getByRole('textbox', { name: 'Assessment title' }).fill('October source review');
   const createRequest = page.waitForRequest(
@@ -63,7 +70,9 @@ test('an assessment creator can start an intake and open its saved assessment', 
   );
   await page.getByRole('button', { name: 'Create assessment' }).click();
   const posted = (await createRequest).postDataJSON() as Record<string, unknown>;
-  expect(posted.requestKey).toMatch(/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i);
+  expect(posted.requestKey).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
   expect((await createRequest).headers()['idempotency-key']).toBe(posted.requestKey);
   // In dev, a late post-login refresh can replace the client success state.
   // The saved engagement must still offer an assessment link in its table row.
