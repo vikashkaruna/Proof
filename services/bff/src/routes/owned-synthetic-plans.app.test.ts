@@ -20,6 +20,7 @@ const state = vi.hoisted(() => {
     cache: vi.fn(),
     lookup: vi.fn(),
     source: vi.fn(),
+    reference: vi.fn(),
   };
 });
 const id = (n: number) => `89170000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -70,7 +71,7 @@ vi.mock('../services/saakshi-staging-composition.js', () => ({
 vi.mock('@supabase/supabase-js', () => ({ createClient: () => ({ rpc: state.cache }) }));
 vi.mock('@axiom/supabase', async (importOriginal) => ({
   ...(await importOriginal<typeof ActualSupabase>()),
-  createSupabaseAdmin: () => ({ from: state.lookup }),
+  createSupabaseAdmin: () => ({ from: state.lookup, rpc: state.reference }),
 }));
 import { createApp } from '../app.js';
 function fixture(enabled = true) {
@@ -221,3 +222,25 @@ it.each(['founder', 'axiom_analyst'] as const)(
     expect(state.source).not.toHaveBeenCalled();
   },
 );
+
+it('mounted reference read retains auth/MFA gates and never becomes a catalogue write', async () => {
+  state.reference.mockReset().mockReturnValue({
+    abortSignal: async () => ({
+      data: null,
+      error: { code: 'P0001', message: 'catalogue context unavailable' },
+    }),
+  });
+  const path = '/v1/control-catalogue/publications/reference-v1';
+  state.authenticated = false;
+  expect((await fixture().request(path)).status).toBe(401);
+  expect(state.reference).not.toHaveBeenCalled();
+  state.authenticated = true;
+  state.mfa = false;
+  expect((await fixture().request(path)).status).toBe(401);
+  expect(state.reference).not.toHaveBeenCalled();
+  state.mfa = true;
+  expect((await fixture().request(path)).status).toBe(404);
+  expect(state.reference).toHaveBeenCalledExactlyOnceWith('read_mapping_context_publication', {
+    p_publication_version: 'reference-v1',
+  });
+});

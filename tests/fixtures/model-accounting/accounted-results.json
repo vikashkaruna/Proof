@@ -1,0 +1,327 @@
+{
+  "schema_version": 2,
+  "witness_origin": "synthetic_fixture_not_persisted_or_peer_authority",
+  "live_acceptance": false,
+  "cases": [
+    {
+      "name": "no_model",
+      "wire_text": "{\"schema_version\":2,\"tenant_id\":\"10000000-0000-0000-0000-000000000001\",\"run_id\":\"10000000-0000-0000-0000-000000000002\",\"correlation_id\":\"10000000-0000-0000-0000-000000000003\",\"request_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"agent\":\"sudhaar\",\"agent_version\":\"0.1.0\",\"kind\":\"accounted_agent_result\",\"status\":\"succeeded\",\"latency_ms\":1,\"input_tokens\":0,\"output_tokens\":0,\"cost_usd\":\"0.000000\",\"error\":null,\"runtime_output_text\":\"{\\\"inventory\\\": [], \\\"score\\\": 3.0}\",\"ledger_entry_ids\":[\"2\",\"5\"],\"accounting_reference\":{\"calls_sha256\":\"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945\",\"receipt\":{\"id\":\"6\",\"entry_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\"}}}",
+      "expected": {
+        "binding": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0"
+        },
+        "seal": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0",
+          "serialization": "postgres-jsonb-text-v1",
+          "calls_text": "[]",
+          "calls_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+          "summary": {
+            "schema_version": 2,
+            "basis": "no_model",
+            "call_count": 0,
+            "known_usage_call_count": 0,
+            "known_estimate_call_count": 0,
+            "unknown_attempt_usage": false,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "estimate_usd": "0",
+            "known_input_tokens": 0,
+            "known_output_tokens": 0,
+            "known_total_tokens": 0,
+            "known_estimate_usd": "0"
+          },
+          "requested_receipt": {
+            "id": "1",
+            "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "agent_started_receipt": {
+            "id": "2",
+            "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "agent_completed_receipt": {
+            "id": "5",
+            "entry_hash": "5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "accounting_receipt": {
+            "id": "6",
+            "entry_hash": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        },
+        "terminal_status": "succeeded",
+        "runtime_output_sha256": "8ea73345fff66bbd29d6a9679f362e71ee77313b8b41281c35b1ffc5d77d6cc9"
+      },
+      "basis": "no_model",
+      "cost_projection": "0.000000",
+      "runtime_output_text": "{\"inventory\": [], \"score\": 3.0}"
+    },
+    {
+      "name": "known_tiny",
+      "wire_text": "{\"schema_version\":2,\"tenant_id\":\"10000000-0000-0000-0000-000000000001\",\"run_id\":\"10000000-0000-0000-0000-000000000002\",\"correlation_id\":\"10000000-0000-0000-0000-000000000003\",\"request_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"agent\":\"sudhaar\",\"agent_version\":\"0.1.0\",\"kind\":\"accounted_agent_result\",\"status\":\"succeeded\",\"latency_ms\":1,\"input_tokens\":4,\"output_tokens\":6,\"cost_usd\":\"0.000000\",\"error\":null,\"runtime_output_text\":\"{\\\"inventory\\\": [], \\\"score\\\": 3.0}\",\"ledger_entry_ids\":[\"2\",\"5\"],\"accounting_reference\":{\"calls_sha256\":\"3d3a157cd7e3bd7891b85d04c744ae9517959fc50d643d0b0242530c01b68af5\",\"receipt\":{\"id\":\"6\",\"entry_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\"}}}",
+      "expected": {
+        "binding": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0"
+        },
+        "seal": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0",
+          "serialization": "postgres-jsonb-text-v1",
+          "calls_text": "[{\"agent\": \"sudhaar\", \"agent_version\": \"0.1.0\", \"attempts\": [{\"model\": \"qwen/Qwen3\", \"outcome\": \"succeeded\", \"provider\": \"self_hosted\"}], \"call_id\": \"10000000-0000-0000-0000-000000000011\", \"commitments\": {\"basis\": \"sdk_handoff_not_http_wire\", \"composed_sha256\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", \"sdk_handoff_sha256\": \"1111111111111111111111111111111111111111111111111111111111111111\", \"transport_prompt_sha256\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"}, \"content_sha256\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"correlation_id\": \"10000000-0000-0000-0000-000000000003\", \"failure_code\": null, \"model_selector\": \"fast\", \"planned\": {\"model\": \"qwen/Qwen3\", \"provider\": \"self_hosted\"}, \"pricing\": {\"basis\": \"configuration_estimate\", \"config_sha256\": \"2222222222222222222222222222222222222222222222222222222222222222\", \"estimate_usd\": \"0.000000000001\", \"scope\": \"successful_response_only\"}, \"request_json_basis\": \"canonical_decoded_request_not_http_wire\", \"request_json_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"run_id\": \"10000000-0000-0000-0000-000000000002\", \"schema_version\": 2, \"serving\": {\"model\": \"qwen/Qwen3\", \"provider\": \"self_hosted\", \"reported_model\": null}, \"state\": \"completed\", \"task\": \"reasoning\", \"template_sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"tenant_id\": \"10000000-0000-0000-0000-000000000001\", \"usage\": {\"availability\": \"reported\", \"input_tokens\": 4, \"output_tokens\": 6, \"total_tokens\": 10}}]",
+          "calls_sha256": "3d3a157cd7e3bd7891b85d04c744ae9517959fc50d643d0b0242530c01b68af5",
+          "summary": {
+            "schema_version": 2,
+            "basis": "all_known",
+            "call_count": 1,
+            "known_usage_call_count": 1,
+            "known_estimate_call_count": 1,
+            "unknown_attempt_usage": false,
+            "input_tokens": 4,
+            "output_tokens": 6,
+            "total_tokens": 10,
+            "estimate_usd": "0.000000000001",
+            "known_input_tokens": 4,
+            "known_output_tokens": 6,
+            "known_total_tokens": 10,
+            "known_estimate_usd": "0.000000000001"
+          },
+          "requested_receipt": {
+            "id": "1",
+            "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "agent_started_receipt": {
+            "id": "2",
+            "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "agent_completed_receipt": {
+            "id": "5",
+            "entry_hash": "5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "accounting_receipt": {
+            "id": "6",
+            "entry_hash": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        },
+        "terminal_status": "succeeded",
+        "runtime_output_sha256": "8ea73345fff66bbd29d6a9679f362e71ee77313b8b41281c35b1ffc5d77d6cc9"
+      },
+      "basis": "all_known",
+      "cost_projection": "0.000000",
+      "runtime_output_text": "{\"inventory\": [], \"score\": 3.0}"
+    },
+    {
+      "name": "unknown_success",
+      "wire_text": "{\"schema_version\":2,\"tenant_id\":\"10000000-0000-0000-0000-000000000001\",\"run_id\":\"10000000-0000-0000-0000-000000000002\",\"correlation_id\":\"10000000-0000-0000-0000-000000000003\",\"request_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"agent\":\"sudhaar\",\"agent_version\":\"0.1.0\",\"kind\":\"accounted_agent_result\",\"status\":\"succeeded\",\"latency_ms\":1,\"input_tokens\":null,\"output_tokens\":null,\"cost_usd\":null,\"error\":null,\"runtime_output_text\":\"{\\\"inventory\\\": [], \\\"score\\\": 3.0}\",\"ledger_entry_ids\":[\"2\",\"5\"],\"accounting_reference\":{\"calls_sha256\":\"d8d47a9009efcb259d0dbd40bd7dc6a433f7beeb67e3cc97016b1adf0ff36cc6\",\"receipt\":{\"id\":\"6\",\"entry_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\"}}}",
+      "expected": {
+        "binding": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0"
+        },
+        "seal": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0",
+          "serialization": "postgres-jsonb-text-v1",
+          "calls_text": "[{\"agent\": \"sudhaar\", \"agent_version\": \"0.1.0\", \"attempts\": [{\"model\": \"qwen/Qwen3\", \"outcome\": \"succeeded\", \"provider\": \"self_hosted\"}], \"call_id\": \"10000000-0000-0000-0000-000000000011\", \"commitments\": {\"basis\": \"sdk_handoff_not_http_wire\", \"composed_sha256\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", \"sdk_handoff_sha256\": \"1111111111111111111111111111111111111111111111111111111111111111\", \"transport_prompt_sha256\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"}, \"content_sha256\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"correlation_id\": \"10000000-0000-0000-0000-000000000003\", \"failure_code\": null, \"model_selector\": \"fast\", \"planned\": {\"model\": \"qwen/Qwen3\", \"provider\": \"self_hosted\"}, \"pricing\": {\"basis\": \"unavailable\", \"config_sha256\": \"2222222222222222222222222222222222222222222222222222222222222222\", \"estimate_usd\": null, \"scope\": \"successful_response_only\"}, \"request_json_basis\": \"canonical_decoded_request_not_http_wire\", \"request_json_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"run_id\": \"10000000-0000-0000-0000-000000000002\", \"schema_version\": 2, \"serving\": {\"model\": \"qwen/Qwen3\", \"provider\": \"self_hosted\", \"reported_model\": null}, \"state\": \"completed\", \"task\": \"reasoning\", \"template_sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"tenant_id\": \"10000000-0000-0000-0000-000000000001\", \"usage\": {\"availability\": \"unavailable\", \"input_tokens\": null, \"output_tokens\": null, \"total_tokens\": null}}]",
+          "calls_sha256": "d8d47a9009efcb259d0dbd40bd7dc6a433f7beeb67e3cc97016b1adf0ff36cc6",
+          "summary": {
+            "schema_version": 2,
+            "basis": "unknown",
+            "call_count": 1,
+            "known_usage_call_count": 0,
+            "known_estimate_call_count": 0,
+            "unknown_attempt_usage": false,
+            "input_tokens": null,
+            "output_tokens": null,
+            "total_tokens": null,
+            "estimate_usd": null,
+            "known_input_tokens": 0,
+            "known_output_tokens": 0,
+            "known_total_tokens": 0,
+            "known_estimate_usd": "0"
+          },
+          "requested_receipt": {
+            "id": "1",
+            "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "agent_started_receipt": {
+            "id": "2",
+            "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "agent_completed_receipt": {
+            "id": "5",
+            "entry_hash": "5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "accounting_receipt": {
+            "id": "6",
+            "entry_hash": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        },
+        "terminal_status": "succeeded",
+        "runtime_output_sha256": "8ea73345fff66bbd29d6a9679f362e71ee77313b8b41281c35b1ffc5d77d6cc9"
+      },
+      "basis": "unknown",
+      "cost_projection": null,
+      "runtime_output_text": "{\"inventory\": [], \"score\": 3.0}"
+    },
+    {
+      "name": "known_partial",
+      "wire_text": "{\"schema_version\":2,\"tenant_id\":\"10000000-0000-0000-0000-000000000001\",\"run_id\":\"10000000-0000-0000-0000-000000000002\",\"correlation_id\":\"10000000-0000-0000-0000-000000000003\",\"request_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"agent\":\"sudhaar\",\"agent_version\":\"0.1.0\",\"kind\":\"accounted_agent_result\",\"status\":\"succeeded\",\"latency_ms\":1,\"input_tokens\":null,\"output_tokens\":null,\"cost_usd\":null,\"error\":null,\"runtime_output_text\":\"{\\\"inventory\\\": [], \\\"score\\\": 3.0}\",\"ledger_entry_ids\":[\"2\",\"5\"],\"accounting_reference\":{\"calls_sha256\":\"e5168727109b0a230e0055691398c2c623600089fec4b88c5e277037d368a2d7\",\"receipt\":{\"id\":\"6\",\"entry_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\"}}}",
+      "expected": {
+        "binding": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0"
+        },
+        "seal": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0",
+          "serialization": "postgres-jsonb-text-v1",
+          "calls_text": "[{\"agent\": \"sudhaar\", \"agent_version\": \"0.1.0\", \"attempts\": [{\"model\": \"qwen/Qwen3\", \"outcome\": \"succeeded\", \"provider\": \"self_hosted\"}], \"call_id\": \"10000000-0000-0000-0000-000000000011\", \"commitments\": {\"basis\": \"sdk_handoff_not_http_wire\", \"composed_sha256\": \"eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\", \"sdk_handoff_sha256\": \"1111111111111111111111111111111111111111111111111111111111111111\", \"transport_prompt_sha256\": \"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"}, \"content_sha256\": \"dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\", \"correlation_id\": \"10000000-0000-0000-0000-000000000003\", \"failure_code\": null, \"model_selector\": \"fast\", \"planned\": {\"model\": \"qwen/Qwen3\", \"provider\": \"self_hosted\"}, \"pricing\": {\"basis\": \"configuration_estimate\", \"config_sha256\": \"2222222222222222222222222222222222222222222222222222222222222222\", \"estimate_usd\": \"0.000000000001\", \"scope\": \"successful_response_only\"}, \"request_json_basis\": \"canonical_decoded_request_not_http_wire\", \"request_json_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"run_id\": \"10000000-0000-0000-0000-000000000002\", \"schema_version\": 2, \"serving\": {\"model\": \"qwen/Qwen3\", \"provider\": \"self_hosted\", \"reported_model\": null}, \"state\": \"completed\", \"task\": \"reasoning\", \"template_sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"tenant_id\": \"10000000-0000-0000-0000-000000000001\", \"usage\": {\"availability\": \"reported\", \"input_tokens\": 4, \"output_tokens\": 6, \"total_tokens\": 10}}, {\"agent\": \"sudhaar\", \"agent_version\": \"0.1.0\", \"attempts\": null, \"call_id\": \"10000000-0000-0000-0000-000000000012\", \"commitments\": null, \"content_sha256\": null, \"correlation_id\": \"10000000-0000-0000-0000-000000000003\", \"failure_code\": \"gateway_unavailable\", \"model_selector\": \"fast\", \"planned\": null, \"pricing\": {\"basis\": \"unavailable\", \"config_sha256\": null, \"estimate_usd\": null, \"scope\": \"successful_response_only\"}, \"request_json_basis\": \"canonical_decoded_request_not_http_wire\", \"request_json_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"run_id\": \"10000000-0000-0000-0000-000000000002\", \"schema_version\": 2, \"serving\": null, \"state\": \"failed\", \"task\": \"reasoning\", \"template_sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"tenant_id\": \"10000000-0000-0000-0000-000000000001\", \"usage\": {\"availability\": \"unavailable\", \"input_tokens\": null, \"output_tokens\": null, \"total_tokens\": null}}]",
+          "calls_sha256": "e5168727109b0a230e0055691398c2c623600089fec4b88c5e277037d368a2d7",
+          "summary": {
+            "schema_version": 2,
+            "basis": "known_partial",
+            "call_count": 2,
+            "known_usage_call_count": 1,
+            "known_estimate_call_count": 1,
+            "unknown_attempt_usage": true,
+            "input_tokens": null,
+            "output_tokens": null,
+            "total_tokens": null,
+            "estimate_usd": null,
+            "known_input_tokens": 4,
+            "known_output_tokens": 6,
+            "known_total_tokens": 10,
+            "known_estimate_usd": "0.000000000001"
+          },
+          "requested_receipt": {
+            "id": "1",
+            "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "agent_started_receipt": {
+            "id": "2",
+            "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "agent_completed_receipt": {
+            "id": "5",
+            "entry_hash": "5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "accounting_receipt": {
+            "id": "6",
+            "entry_hash": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        },
+        "terminal_status": "succeeded",
+        "runtime_output_sha256": "8ea73345fff66bbd29d6a9679f362e71ee77313b8b41281c35b1ffc5d77d6cc9"
+      },
+      "basis": "known_partial",
+      "cost_projection": null,
+      "runtime_output_text": "{\"inventory\": [], \"score\": 3.0}"
+    },
+    {
+      "name": "failed_unknown",
+      "wire_text": "{\"schema_version\":2,\"tenant_id\":\"10000000-0000-0000-0000-000000000001\",\"run_id\":\"10000000-0000-0000-0000-000000000002\",\"correlation_id\":\"10000000-0000-0000-0000-000000000003\",\"request_sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"agent\":\"sudhaar\",\"agent_version\":\"0.1.0\",\"kind\":\"accounted_agent_result\",\"status\":\"failed\",\"latency_ms\":1,\"input_tokens\":null,\"output_tokens\":null,\"cost_usd\":null,\"error\":\"agent_failed\",\"runtime_output_text\":null,\"ledger_entry_ids\":[\"2\",\"5\"],\"accounting_reference\":{\"calls_sha256\":\"64e7ed8ee4e6f26a25a85c55cc3952e8fc618fab4979d39704b03249a641dc01\",\"receipt\":{\"id\":\"6\",\"entry_hash\":\"6666666666666666666666666666666666666666666666666666666666666666\"}}}",
+      "expected": {
+        "binding": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0"
+        },
+        "seal": {
+          "schema_version": 2,
+          "tenant_id": "10000000-0000-0000-0000-000000000001",
+          "run_id": "10000000-0000-0000-0000-000000000002",
+          "correlation_id": "10000000-0000-0000-0000-000000000003",
+          "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "agent": "sudhaar",
+          "agent_version": "0.1.0",
+          "serialization": "postgres-jsonb-text-v1",
+          "calls_text": "[{\"agent\": \"sudhaar\", \"agent_version\": \"0.1.0\", \"attempts\": null, \"call_id\": \"10000000-0000-0000-0000-000000000011\", \"commitments\": null, \"content_sha256\": null, \"correlation_id\": \"10000000-0000-0000-0000-000000000003\", \"failure_code\": \"gateway_unavailable\", \"model_selector\": \"fast\", \"planned\": null, \"pricing\": {\"basis\": \"unavailable\", \"config_sha256\": null, \"estimate_usd\": null, \"scope\": \"successful_response_only\"}, \"request_json_basis\": \"canonical_decoded_request_not_http_wire\", \"request_json_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\", \"request_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\", \"run_id\": \"10000000-0000-0000-0000-000000000002\", \"schema_version\": 2, \"serving\": null, \"state\": \"failed\", \"task\": \"reasoning\", \"template_sha256\": \"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"tenant_id\": \"10000000-0000-0000-0000-000000000001\", \"usage\": {\"availability\": \"unavailable\", \"input_tokens\": null, \"output_tokens\": null, \"total_tokens\": null}}]",
+          "calls_sha256": "64e7ed8ee4e6f26a25a85c55cc3952e8fc618fab4979d39704b03249a641dc01",
+          "summary": {
+            "schema_version": 2,
+            "basis": "unknown",
+            "call_count": 1,
+            "known_usage_call_count": 0,
+            "known_estimate_call_count": 0,
+            "unknown_attempt_usage": true,
+            "input_tokens": null,
+            "output_tokens": null,
+            "total_tokens": null,
+            "estimate_usd": null,
+            "known_input_tokens": 0,
+            "known_output_tokens": 0,
+            "known_total_tokens": 0,
+            "known_estimate_usd": "0"
+          },
+          "requested_receipt": {
+            "id": "1",
+            "entry_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          },
+          "agent_started_receipt": {
+            "id": "2",
+            "entry_hash": "2222222222222222222222222222222222222222222222222222222222222222"
+          },
+          "agent_completed_receipt": {
+            "id": "5",
+            "entry_hash": "5555555555555555555555555555555555555555555555555555555555555555"
+          },
+          "accounting_receipt": {
+            "id": "6",
+            "entry_hash": "6666666666666666666666666666666666666666666666666666666666666666"
+          }
+        },
+        "terminal_status": "failed",
+        "runtime_output_sha256": null
+      },
+      "basis": "unknown",
+      "cost_projection": null,
+      "runtime_output_text": null
+    }
+  ]
+}

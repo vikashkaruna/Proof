@@ -69,7 +69,7 @@ select jsonb_build_object('schema_version',1,'fixture_kind','disposable_postgres
   'run_id',j->'run_id','request_text',j->'request_text','source_sha256',j->'source_sha256')) from journal;
 SQL
 mkdir -m 700 "$output_dir/runtime"
-export PYTHONPATH="$(pwd)/services/agent-runtime/src:$(pwd)/packages/offline-license-python"
+export PYTHONPATH="$(pwd)/services/agent-runtime/src:$(pwd)/packages/offline-license-python:$(pwd)/packages/model-accounting-python"
 "$runtime_python" services/agent-runtime/tests/prativedan_assessment_runtime_interop.py --container-id "$container_id" --fixture "$output_dir/pg-requested.json" --output-dir "$output_dir/runtime"
 # Independently query actual SQL witness; never copy the runtime envelope as proof.
 python3 - "$output_dir/runtime/runtime-envelope.json" <<'PYCODE' | sql > "$output_dir/runtime/pg-runtime-witness.json"

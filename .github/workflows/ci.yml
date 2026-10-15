@@ -869,10 +869,10 @@ jobs:
       - run: uv sync --extra dev
         working-directory: services/agent-runtime
       - name: Strict runtime source types
-        run: uv run mypy src/axiom
+        run: uv run mypy src/axiom ../../packages/model-accounting-python/axiom_model_accounting.py
         working-directory: services/agent-runtime
       - name: Runtime source lint
-        run: uv run ruff check src/axiom
+        run: uv run ruff check src/axiom ../../packages/model-accounting-python
         working-directory: services/agent-runtime
       - run: uv run pytest --cov --cov-report=xml --cov-fail-under=80
         working-directory: services/agent-runtime
@@ -884,6 +884,8 @@ jobs:
   test-python-temporal:
     name: Python (temporal workers) tests
     runs-on: ubuntu-latest
+    # Fail closed on stalled test-server startup or tests; never run indefinitely.
+    timeout-minutes: 20
     needs: lint-and-typecheck
     steps:
       - uses: actions/checkout@v5
@@ -893,9 +895,10 @@ jobs:
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
       - run: uv sync --extra dev
         working-directory: services/temporal-workers
-      - run: uv run pytest --cov --cov-report=xml --cov-fail-under=80
+      - run: timeout --signal=TERM --kill-after=10s 15m uv run pytest --cov --cov-report=xml --cov-fail-under=80
         working-directory: services/temporal-workers
         env:
+          PYTHONUNBUFFERED: '1'
           AXIOM_TEMPORAL_ACCEPTANCE_REPORT: ../../.axiom-runtime/temporal/results.json
       - uses: actions/upload-artifact@v7
         if: always()
