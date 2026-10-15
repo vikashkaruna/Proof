@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
 import {
@@ -68,6 +68,7 @@ function Workflow({
   canInvoke: boolean;
   canReview?: boolean;
 }) {
+  const helpId = useId();
   const [reviewLocked, setReviewLocked] = useState(true);
   const [choices, setChoices] = useState<Choices | null>(null);
   const [checks, setChecks] = useState<Checks>([]);
@@ -394,6 +395,45 @@ function Workflow({
     });
   }
   const locked = busy || pending !== null;
+  const lockedReason = busy
+    ? 'Loading recorded state. Wait for the current action to finish.'
+    : pending
+      ? 'Reconcile the retained request before starting another action.'
+      : undefined;
+  const writeReason =
+    lockedReason ??
+    (!storageReady
+      ? 'Restore browser request storage before starting an action; keep any retained request intact.'
+      : reviewLocked
+        ? 'Wait for human-review state to load, or reconcile a retained review shown below.'
+        : undefined);
+  const previewReason =
+    lockedReason ??
+    (!engagementId
+      ? 'Choose an engagement first.'
+      : !checkId
+        ? 'Choose a saved public website check first.'
+        : undefined);
+  const bindReason =
+    writeReason ??
+    (!preview
+      ? 'Preview the saved source first.'
+      : preview.binding_id
+        ? 'The source binding is already recorded. Continue with Drishti or retained observations.'
+        : undefined);
+  const drishtiReason =
+    writeReason ??
+    (!preview
+      ? 'Preview the saved source first.'
+      : !preview.binding_id
+        ? 'Record the source binding first.'
+        : undefined);
+  const vibhaagReason =
+    drishtiReason ??
+    (selectedDrishti?.agent !== 'drishti'
+      ? 'Select a retained Drishti observation below, or run Drishti to create one.'
+      : undefined);
+
   const selectedChoice = selectedEngagement ?? choices?.data.find((row) => row.id === engagementId);
   const engagementChoices =
     selectedChoice && !choices?.data.some((row) => row.id === selectedChoice.id)
@@ -448,6 +488,7 @@ function Workflow({
             className={field}
             value={engagementId}
             disabled={locked}
+            aria-describedby={`${helpId}-choices`}
             onChange={(event) => {
               setEngagement(event.target.value);
               setSelectedEngagement(
@@ -477,7 +518,7 @@ function Workflow({
           <select
             className={field}
             aria-label="Saved public website check"
-            aria-describedby="source-check-help"
+            aria-describedby={`source-check-help ${helpId}-choices`}
             value={checkId}
             disabled={locked}
             onChange={(event) => {
@@ -509,6 +550,7 @@ function Workflow({
           type="button"
           className={button}
           disabled={locked}
+          aria-describedby={`${helpId}-choices`}
           onClick={() =>
             void task(() => Promise.all([readChoices(), readChecks()]).then(() => undefined))
           }
@@ -519,6 +561,7 @@ function Workflow({
           type="button"
           className={button}
           disabled={locked || !choices?.meta.hasMore}
+          aria-describedby={`${helpId}-next-engagements`}
           onClick={() => void task(() => readChoices(choices?.meta.nextCursor ?? undefined))}
         >
           Next engagements
@@ -526,7 +569,8 @@ function Workflow({
         <button
           type="button"
           className={button}
-          disabled={locked || !engagementId || !checkId}
+          disabled={!!previewReason}
+          aria-describedby={`${helpId}-preview`}
           onClick={() =>
             void task(async () => {
               const value = await readPreview(engagementId, checkId);
@@ -536,6 +580,22 @@ function Workflow({
         >
           Preview saved source
         </button>
+      </div>
+      <div className="space-y-1 text-sm text-slate-600">
+        <p id={`${helpId}-choices`}>
+          Choices: {lockedReason ?? 'Ready to select or refresh saved choices.'}
+        </p>
+        <p id={`${helpId}-next-engagements`}>
+          Next engagements:{' '}
+          {lockedReason ??
+            (!choices?.meta.hasMore
+              ? 'No additional engagements are available in the current list.'
+              : 'Ready to load more engagements.')}
+        </p>
+        <p id={`${helpId}-preview`}>
+          Preview saved source:{' '}
+          {previewReason ?? 'Ready to inspect the saved source without starting an agent.'}
+        </p>
       </div>
       {preview && <SourceProjectionView preview={preview} />}
       {pending && (
@@ -549,14 +609,26 @@ function Workflow({
           <p className="break-all">
             Operation key: <code>{pending.operationKey}</code>
           </p>
-          <button type="button" className={button} disabled={busy} onClick={reconcile}>
+          <button
+            type="button"
+            className={button}
+            disabled={busy}
+            aria-describedby={`${helpId}-reconcile`}
+            onClick={reconcile}
+          >
             Reconcile retained request
           </button>
+          <p id={`${helpId}-reconcile`}>
+            {busy
+              ? 'Loading recorded state. Wait before reconciling.'
+              : 'Reconcile this retained request to check its recorded outcome without starting another run.'}
+          </p>
           {canRetry && canInvoke && !reviewLocked && (
             <button
               type="button"
               className={`${button} ml-2`}
               disabled={busy}
+              aria-describedby={`${helpId}-retry`}
               onClick={() =>
                 void task(async () => {
                   setCanRetry(false);
@@ -567,6 +639,13 @@ function Workflow({
               Retry exact retained request
             </button>
           )}
+          <p id={`${helpId}-retry`}>
+            {busy
+              ? 'Loading recorded state. Wait before retrying.'
+              : canRetry && canInvoke && !reviewLocked
+                ? 'Ready to retry only the exact retained key and body.'
+                : 'Exact retry requires explicit not-found reconciliation, invocation access and a resolved review journal.'}
+          </p>
         </section>
       )}
       {canInvoke && (
@@ -574,7 +653,8 @@ function Workflow({
           <button
             type="button"
             className={button}
-            disabled={locked || reviewLocked || !storageReady || !preview || !!preview.binding_id}
+            disabled={!!bindReason}
+            aria-describedby={`${helpId}-bind`}
             onClick={() => start('bind')}
           >
             Record source binding
@@ -582,7 +662,8 @@ function Workflow({
           <button
             type="button"
             className={button}
-            disabled={locked || reviewLocked || !storageReady || !preview?.binding_id}
+            disabled={!!drishtiReason}
+            aria-describedby={`${helpId}-drishti`}
             onClick={() => start('drishti')}
           >
             Run Drishti on saved source
@@ -590,17 +671,26 @@ function Workflow({
           <button
             type="button"
             className={button}
-            disabled={
-              locked ||
-              reviewLocked ||
-              !storageReady ||
-              !preview?.binding_id ||
-              selectedDrishti?.agent !== 'drishti'
-            }
+            disabled={!!vibhaagReason}
+            aria-describedby={`${helpId}-vibhaag`}
             onClick={() => start('vibhaag')}
           >
             Run Vibhaag on selected observation
           </button>
+        </div>
+      )}
+      {canInvoke && (
+        <div className="space-y-1 text-sm text-slate-600">
+          <p id={`${helpId}-bind`}>
+            Record source binding: {bindReason ?? 'Ready to record the selected source binding.'}
+          </p>
+          <p id={`${helpId}-drishti`}>
+            Run Drishti: {drishtiReason ?? 'Ready to run Drishti on the bound saved source.'}
+          </p>
+          <p id={`${helpId}-vibhaag`}>
+            Run Vibhaag:{' '}
+            {vibhaagReason ?? 'Ready to run Vibhaag on the selected retained Drishti observation.'}
+          </p>
         </div>
       )}
       {preview?.binding_id && (
@@ -620,6 +710,7 @@ function Workflow({
                   type="button"
                   className={button}
                   disabled={busy}
+                  aria-describedby={`${helpId}-observations`}
                   onClick={() =>
                     void task(() =>
                       readObservation(row.observation_id, preview, row.agent, row).then(
@@ -638,6 +729,7 @@ function Workflow({
               type="button"
               className={button}
               disabled={busy}
+              aria-describedby={`${helpId}-observations`}
               onClick={() => void task(() => readHistory(preview))}
             >
               Refresh observations
@@ -646,6 +738,7 @@ function Workflow({
               type="button"
               className={button}
               disabled={busy || !history?.meta.hasMore}
+              aria-describedby={`${helpId}-next-observations`}
               onClick={() =>
                 void task(() => readHistory(preview, history?.meta.nextCursor ?? undefined))
               }
@@ -653,6 +746,18 @@ function Workflow({
               Next observations
             </button>
           </div>
+          <p id={`${helpId}-observations`}>
+            {busy
+              ? 'Loading recorded state. Wait before reading observations.'
+              : 'Ready to refresh or select retained observations.'}
+          </p>
+          <p id={`${helpId}-next-observations`}>
+            {busy
+              ? 'Loading recorded state. Wait before reading observations.'
+              : !history?.meta.hasMore
+                ? 'No additional retained observations are available in the current list.'
+                : 'Ready to load more retained observations.'}
+          </p>
           {selectedDrishti && (
             <p className="break-all text-xs">
               Selected Drishti observation: <code>{selectedDrishti.observation_id}</code>

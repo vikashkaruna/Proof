@@ -6,7 +6,11 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { canonicalJson, sha256 } from '@axiom/ledger';
 import { PublicSourceWorkflow } from './source-workflow';
 import { loadSourceOperation, operationStorageKey } from './source-request';
-import { reviewOperationSchema, saveReviewOperation } from './source-review-request';
+import {
+  reviewOperationSchema,
+  saveReviewOperation,
+  reviewStorageKey,
+} from './source-review-request';
 
 vi.mock('next/link', () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
@@ -340,6 +344,9 @@ it.each(['unknown', 'running', 'completed_without_observation'])(
     );
     expect(screen.queryByRole('button', { name: 'Retry exact retained request' })).toBeNull();
     expect(f.fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+    expect(actionStatus('Run Drishti on saved source').message).toContain(
+      'Reconcile the retained request',
+    );
     expect(loadSourceOperation(localStorage, TENANT, ACTOR)).toEqual(original);
     const read = f.fetcher.mock.calls.find(([url]) => String(url).includes('/request?'))!;
     expect(new Headers(read[1]!.headers).get('X-Public-Source-Request-Key')).toBe(
@@ -439,6 +446,7 @@ it('preserves invalid journal refusal even when choices fail, and never dispatch
   render(<PublicSourceWorkflow tenantId={TENANT} actorId={ACTOR} canInvoke />);
   await waitFor(() => expect(screen.queryByText('Loading recorded state…')).toBeNull());
   expect(screen.getByRole('alert').textContent).toContain('Retained request storage');
+  expect(actionStatus('Record source binding').message).toContain('browser request storage');
   expect(fetcher.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
 });
 
@@ -495,8 +503,10 @@ it('locks source mutations while a separate human review journal remains unconfi
     'Record source binding',
     'Run Drishti on saved source',
     'Run Vibhaag on selected observation',
-  ])
+  ]) {
     expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+    expect(actionStatus(name).message).toContain('human-review state');
+  }
   expect(f.fetcher.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
 });
 it('keeps reviewer access distinct from invocation controls in the full workflow', async () => {
@@ -506,4 +516,73 @@ it('keeps reviewer access distinct from invocation controls in the full workflow
   expect(screen.getByText(/Human review is available/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: 'Run Drishti on saved source' })).toBeNull();
   expect(screen.getByRole('heading', { name: 'Human source review' })).toBeTruthy();
+});
+
+function actionStatus(name: string) {
+  const action = screen.getByRole('button', { name }) as HTMLButtonElement;
+  const id = action.getAttribute('aria-describedby');
+  expect(id).toBeTruthy();
+  const message = document.getElementById(id!);
+  expect(message).not.toBeNull();
+  return { action, message: message!.textContent ?? '' };
+}
+it('explains disabled prerequisites and readiness through source binding and retained Drishti selection', async () => {
+  const f = await fixture();
+  view();
+  expect(actionStatus('Preview saved source').message).toContain('Loading recorded state');
+  await ready();
+  expect(actionStatus('Preview saved source').message).toContain('Choose an engagement');
+  await waitFor(() =>
+    expect(actionStatus('Record source binding').message).toContain('Preview the saved source'),
+  );
+  fireEvent.change(screen.getByLabelText('Engagement'), { target: { value: ENGAGEMENT } });
+  expect(actionStatus('Preview saved source').message).toContain(
+    'Choose a saved public website check',
+  );
+  fireEvent.change(screen.getByLabelText('Saved public website check'), {
+    target: { value: CHECK },
+  });
+  expect(actionStatus('Preview saved source').action.disabled).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'Preview saved source' }));
+  await ready();
+  expect(actionStatus('Record source binding').action.disabled).toBe(false);
+  expect(actionStatus('Run Drishti on saved source').message).toContain(
+    'Record the source binding',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Record source binding' }));
+  await screen.findByText(/Source binding recorded/);
+  await ready();
+  expect(actionStatus('Record source binding').message).toContain('already recorded');
+  expect(actionStatus('Run Drishti on saved source').action.disabled).toBe(false);
+  expect(actionStatus('Run Vibhaag on selected observation').message).toContain(
+    'Select a retained Drishti observation',
+  );
+  f.observations.set(DRISHTI, f.drishti);
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh observations' }));
+  await ready();
+  fireEvent.click(await screen.findByRole('button', { name: 'Select Drishti observation' }));
+  await screen.findByRole('heading', { name: 'Drishti public observation' });
+  await ready();
+  expect(actionStatus('Run Vibhaag on selected observation').action.disabled).toBe(false);
+  expect(actionStatus('Run Vibhaag on selected observation').message).toContain('Ready');
+});
+
+it('explains a review-storage lock even after the chosen bound preview loads', async () => {
+  const f = await fixture();
+  f.setBound();
+  localStorage.setItem(reviewStorageKey(TENANT, ACTOR), '{broken');
+  view();
+  await selectSource();
+  await ready();
+  expect(screen.getByRole('alert').textContent).toContain('Review request storage');
+  for (const name of [
+    'Record source binding',
+    'Run Drishti on saved source',
+    'Run Vibhaag on selected observation',
+  ]) {
+    expect(actionStatus(name).action.disabled).toBe(true);
+    expect(actionStatus(name).message).toContain('human-review state');
+  }
+  expect(actionStatus('Preview saved source').action.disabled).toBe(false);
+  expect(f.fetcher.mock.calls.every(([, init]) => init?.method === 'GET')).toBe(true);
 });
