@@ -7,7 +7,13 @@ import {
   type PublicAgentObservation,
 } from '@axiom/types';
 
-export class SourceWorkflowError extends Error {}
+export class SourceWorkflowError extends Error {
+  readonly readRefusal?: { status: 409; code: 'website_recapture_required' };
+  constructor(message: string, readRefusal?: { status: 409; code: 'website_recapture_required' }) {
+    super(message);
+    if (readRefusal) this.readRefusal = readRefusal;
+  }
+}
 
 const uuid = z.uuid().transform((value) => value.toLowerCase());
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -135,6 +141,16 @@ export async function sourceRequest(
         ? 'Response interrupted. Reconcile the retained request before any retry.'
         : 'Recorded state is unavailable. Refresh when the connection is available.',
     );
+  }
+  if (!response.ok && !operation && !options.requestKey && response.status === 409) {
+    const refusal = z
+      .object({ error: z.object({ code: z.literal('website_recapture_required') }) })
+      .safeParse(await response.json().catch(() => null));
+    if (refusal.success)
+      throw new SourceWorkflowError('This saved website check needs a fresh public capture.', {
+        status: 409,
+        code: 'website_recapture_required',
+      });
   }
   if (!response.ok)
     throw new SourceWorkflowError(

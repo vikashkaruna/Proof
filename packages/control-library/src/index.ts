@@ -99,3 +99,7 @@ export type {
   MappingContextReferenceProof,
   MappingContextAdoptionPorts,
 } from './mapping-context-publication';
+
+export * from './public-evidence-mapping-v2';
+
+export { parseCatalogueJson } from './catalogue-json';
