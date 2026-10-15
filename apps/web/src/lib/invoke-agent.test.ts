@@ -78,3 +78,30 @@ it('rejects invalid agent paths before dispatch', async () => {
   await expect(invokeAgent('../admin')).rejects.toThrow();
   expect(transport).not.toHaveBeenCalled();
 });
+
+it('invokes using a secure UUID fallback when HTTP does not expose randomUUID', async () => {
+  const getRandomValues = vi.fn((bytes: Uint8Array) => {
+    bytes.fill(17);
+    return bytes;
+  });
+  vi.stubGlobal('crypto', { getRandomValues });
+  transport.mockImplementation(async (_url, init) => Response.json(result(init)));
+  const reply = await invokeAgent('drishti');
+  expect(reply.correlation_id).toMatch(
+    /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+  );
+  expect(getRandomValues).toHaveBeenCalledOnce();
+  expect(transport).toHaveBeenCalledOnce();
+});
+it.each(['rng', 'serialization'])(
+  'reports a never-sent %s invocation failure separately from unknown outcomes',
+  async (failure) => {
+    vi.stubGlobal('crypto', failure === 'rng' ? {} : { randomUUID: () => 'correlation-test' });
+    const input: Record<string, unknown> = {};
+    if (failure === 'serialization') input.self = input;
+    await expect(invokeAgent('drishti', input)).rejects.toThrow(
+      'The agent request could not be prepared. Nothing was sent.',
+    );
+    expect(transport).not.toHaveBeenCalled();
+  },
+);

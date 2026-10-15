@@ -35,16 +35,27 @@ test('owner registers a connector without claiming connectivity and manages its 
     },
     { tenantId: state.tenantA.id, suffix },
   );
+  // The registration and lifecycle forms must also work without randomUUID.
+  // Keep the real MFA sign-in and fixture setup above unchanged.
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      value: undefined,
+      configurable: true,
+    });
+  });
   await page.goto('/connectors');
   await expect(page.getByRole('region', { name: 'Available connector options' })).toContainText(
     'postgresql',
   );
-  await expect(page.getByRole('region', { name: 'Connection setup' })).toContainText(
-    'broker credential',
+  const setup = page.getByRole('region', { name: 'Connection setup' });
+  await expect(setup).toContainText(
+    'Private system connections are not available in this deployment.',
   );
-  await expect(
-    page.getByText('Connector execution is not yet available.', { exact: false }),
-  ).toBeVisible();
+  await expect(setup).toContainText('Connector registrations save setup records only');
+  await expect(setup.getByRole('link', { name: 'Continue with manual evidence' })).toHaveAttribute(
+    'href',
+    '/estate/setup',
+  );
   const create = page.getByRole('region', { name: 'Register connector', exact: true });
   await create.getByRole('combobox', { name: 'System', exact: true }).selectOption(system.id);
   await create

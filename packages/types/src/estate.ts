@@ -8,7 +8,10 @@ const key = z
   .string()
   .min(1)
   .max(80)
-  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+  .regex(
+    /^[a-z0-9]+(-[a-z0-9]+)*$/,
+    'Use lowercase letters and numbers separated by single hyphens, for example production-india.',
+  );
 const lifecycle = z.enum(['active', 'archived']);
 export const EstateSchema = z.object({
   id: z.uuid(),

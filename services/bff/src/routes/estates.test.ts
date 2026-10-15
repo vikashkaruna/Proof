@@ -98,3 +98,22 @@ describe('estate API boundaries', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+it('returns actionable field validation before writing an invalid founder estate', async () => {
+  const res = await post(UserRole.FOUNDER, { slug: 'Client Estate', name: 'Client Estate' });
+  expect(res.status).toBe(400);
+  expect(await res.json()).toMatchObject({
+    error: {
+      code: 'invalid_request',
+      issues: [
+        { path: ['slug'], message: expect.stringContaining('Use lowercase letters and numbers') },
+      ],
+    },
+  });
+  expect(calls).toHaveLength(0);
+  expect(
+    (await post(UserRole.FOUNDER, { slug: 'client-estate', name: 'Client Estate' })).status,
+  ).toBe(201);
+  expect(calls).toHaveLength(1);
+  expect(calls[0]).toMatchObject({ p_tenant_id: TENANT, p_actor_id: USER });
+});
