@@ -141,3 +141,126 @@ it('labels email and telephone indicators as tentative and keeps unknowns and pr
   expect(screen.getByText('Review retained receipts and hashes')).toBeTruthy();
   expect(screen.getByText('19')).toBeTruthy();
 });
+it('explains the retained structural scope without asserting a whole-site or legal assessment', () => {
+  const preview = publicSourcePreviewSchema.parse({
+    runtime_binding: binding,
+    projection: {
+      version: 1,
+      pages: [{ page: 'root', status: 'checked', content_sha256: 'a'.repeat(64) }],
+    },
+  });
+  const original = JSON.stringify(preview);
+  render(<SourceProjectionView preview={preview} />);
+  expect(
+    screen.getByText(/starting page and up to three linked privacy, contact and terms pages/),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      /do not assess legal wording, consent widgets or their behaviour, or the entire website/,
+    ),
+  ).toBeTruthy();
+  expect(JSON.stringify(preview)).toBe(original);
+});
+it('renders a completed Drishti check as inspected pages rather than missing forms or legal conclusions', () => {
+  const result = publicAgentObservationSchema.parse({
+    observation_id: id,
+    dispatch_id: id,
+    binding_id: id,
+    run_id: id,
+    output_sha256: 'c'.repeat(64),
+    completion_receipt: '20',
+    agent: 'drishti',
+    output: {
+      mode: 'public_website',
+      observation: {
+        version: 1,
+        binding,
+        private_facts,
+        requires_human_review: true,
+        pages: ['root', 'privacy', 'contact', 'terms'].map((page) => ({
+          page,
+          status: 'checked',
+          content_sha256: 'a'.repeat(64),
+          form_state: 'observed',
+          form_metadata: {
+            version: 1,
+            scope: 'static_html_form_descendants',
+            sourceSha256: 'a'.repeat(64),
+            observedFormCount: page === 'contact' ? 1 : 0,
+            formsTruncated: false,
+            forms:
+              page === 'contact'
+                ? [
+                    {
+                      ordinal: 1,
+                      method: 'get',
+                      observedControlCount: 8,
+                      excludedControlCount: 1,
+                      controlsTruncated: false,
+                      controls: Array.from({ length: 7 }, (_, index) => ({
+                        ordinal: index + 1,
+                        element: 'input',
+                        inputType: index === 0 ? 'email' : 'text',
+                        requiredAttribute: false,
+                        disabledAttribute: false,
+                      })),
+                    },
+                  ]
+                : [],
+          },
+        })),
+      },
+    },
+  });
+  const original = JSON.stringify(result);
+  render(<SourceResultView observation={result} />);
+  expect(screen.getAllByText('Page retrieved · Static forms inspected')).toHaveLength(4);
+  expect(
+    screen.getAllByText('No static HTML form elements were observed on this inspected page.'),
+  ).toHaveLength(3);
+  expect(
+    screen.getByText(/8 controls observed · 1 excluded · 7 control details recorded/),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(
+      /do not assess legal wording, consent widgets or their behaviour, or the entire website/,
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(/does not close an assessment or confirm a personal-data classification/),
+  ).toBeTruthy();
+  expect(JSON.stringify(result)).toBe(original);
+});
+
+it('distinguishes an unbound source preview from a bound preview without guessing whether agents ran', () => {
+  const unbound = publicSourcePreviewSchema.parse({
+    runtime_binding: binding,
+    projection: {
+      version: 1,
+      pages: [{ page: 'root', status: 'checked', content_sha256: 'a'.repeat(64) }],
+    },
+  });
+  const original = JSON.stringify(unbound);
+  const { rerender } = render(<SourceProjectionView preview={unbound} />);
+  expect(screen.getByText('Source preview · Not a control assessment')).toBeTruthy();
+  expect(
+    screen.getByText(
+      /Next: Record source binding → Run Drishti on saved source → Select Drishti observation → Run Vibhaag on selected observation/,
+    ),
+  ).toBeTruthy();
+  const bound = publicSourcePreviewSchema.parse({
+    ...unbound,
+    binding_id: id,
+    creation_receipt: '21',
+  });
+  rerender(<SourceProjectionView preview={bound} />);
+  expect(screen.getByText('Source preview · Not a control assessment')).toBeTruthy();
+  expect(screen.queryByText(/Next: Record source binding/)).toBeNull();
+  expect(
+    screen.getByText(
+      'This preview is separate from retained agent findings. Review the recorded agent results to see their observations.',
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/agents? (have|has) not run|no agent results/i)).toBeNull();
+  expect(JSON.stringify(unbound)).toBe(original);
+});

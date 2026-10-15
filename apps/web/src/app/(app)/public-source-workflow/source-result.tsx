@@ -3,6 +3,16 @@
 import type { PublicAgentObservation, PublicSourcePreview } from '@axiom/types';
 import { PublicFormFacts } from '../connectors/public-form-facts';
 
+function PublicSourceScope() {
+  return (
+    <p className="text-sm text-slate-600">
+      Coverage is limited to the starting page and up to three linked privacy, contact and terms
+      pages. These structural facts do not assess legal wording, consent widgets or their behaviour,
+      or the entire website.
+    </p>
+  );
+}
+
 export function SourceProjectionView({ preview }: { preview: PublicSourcePreview }) {
   return (
     <section
@@ -10,6 +20,20 @@ export function SourceProjectionView({ preview }: { preview: PublicSourcePreview
       className="space-y-3 rounded-xl border border-slate-200 p-4"
     >
       <h3 className="font-semibold text-[#1E2A4A]">Retained public HTML facts</h3>
+      <p className="text-sm font-medium text-[#1E2A4A]">
+        Source preview · Not a control assessment
+      </p>
+      {preview.binding_id ? (
+        <p className="text-sm text-slate-600">
+          This preview is separate from retained agent findings. Review the recorded agent results
+          to see their observations.
+        </p>
+      ) : (
+        <p className="text-sm text-slate-600">
+          Next: Record source binding → Run Drishti on saved source → Select Drishti observation →
+          Run Vibhaag on selected observation.
+        </p>
+      )}
       <p className="text-sm text-slate-600">
         These saved pages describe static HTML only. Private hosting, backend personal data and
         cross-border processing remain unknown.
@@ -21,6 +45,7 @@ export function SourceProjectionView({ preview }: { preview: PublicSourcePreview
       {preview.creation_receipt && (
         <p className="text-sm">Binding receipt: {preview.creation_receipt}</p>
       )}
+      <PublicSourceScope />
       {preview.projection.pages.map((page) => (
         <div key={page.page} className="space-y-1 rounded-lg bg-slate-50 p-3">
           <h4 className="font-medium capitalize">{page.page}</h4>
@@ -56,6 +81,7 @@ export function SourceResultView({ observation }: { observation: PublicAgentObse
         Private hosting: unknown · Backend personal data: unknown · Cross-border processing:
         unknown. This result does not close an assessment or confirm a personal-data classification.
       </p>
+      <PublicSourceScope />
       {drishti?.pages.map((page) => (
         <div key={page.page} className="rounded-lg bg-slate-50 p-3">
           <h4 className="font-medium capitalize">{page.page}</h4>
