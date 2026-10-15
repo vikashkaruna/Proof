@@ -11,6 +11,12 @@ import {
 import { z } from 'zod';
 import { publicFormMetadataSchema } from '@axiom/types';
 import { generateUUID } from '@axiom/ui';
+import {
+  loadContextualCapture,
+  retainContextualCapture,
+  clearContextualCapture,
+  type ContextualCaptureJournal,
+} from './contextual-capture-journal';
 import { PublicFormFacts } from './public-form-facts';
 
 const checkSchema = z
@@ -195,9 +201,23 @@ const completedCheckErrors = new Set([
 export function PublicWebsiteClient({
   tenantId,
   canManage,
+  context,
+  disabledReason,
+  onRecorded,
+  onOperationStateChange,
 }: {
   tenantId: string;
   canManage: boolean;
+  context?: {
+    id: string;
+    actorId: string;
+    url: string;
+    engagementTitle: string;
+    estateName: string | null;
+  };
+  disabledReason?: string;
+  onRecorded?: (check: WebsiteCheck) => void;
+  onOperationStateChange?: (blocked: boolean) => void;
 }) {
   const hydrated = useSyncExternalStore(subscribeHydration, hydratedSnapshot, serverSnapshot);
   const [history, setHistory] = useState<{ tenantId: string; checks: WebsiteCheck[] }>({
@@ -205,6 +225,14 @@ export function PublicWebsiteClient({
     checks: [],
   });
   const visibleHistory = history.tenantId === tenantId ? history.checks : [];
+  const scopeIdentity = context ? `${context.actorId}/${context.id}` : null;
+  const currentScope = useRef<string | null>(scopeIdentity);
+  useLayoutEffect(() => {
+    currentScope.current = scopeIdentity;
+    return () => {
+      currentScope.current = null;
+    };
+  }, [scopeIdentity]);
   const currentTenant = useRef<string | null>(tenantId);
   useLayoutEffect(() => {
     currentTenant.current = tenantId;
@@ -218,13 +246,64 @@ export function PublicWebsiteClient({
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [message, setMessage] = useState('');
+  const [journalReady, setJournalReady] = useState(!context);
+  const [journalError, setJournalError] = useState(false);
+  const [retainedContext, setRetainedContext] = useState<ContextualCaptureJournal | null>(null);
+  const [savedAwaitingCleanup, setSavedAwaitingCleanup] = useState<{
+    check: WebsiteCheck;
+    journal: ContextualCaptureJournal;
+  } | null>(null);
+  useEffect(() => {
+    onOperationStateChange?.(busy || uncertain || journalError || Boolean(savedAwaitingCleanup));
+  }, [busy, uncertain, journalError, savedAwaitingCleanup, onOperationStateChange]);
   const pending = useRef<{
     key: string;
     body: string;
     tenantId: string;
     method: 'POST';
+    contextId: string | null;
+    journal?: ContextualCaptureJournal;
     outcomeUnknown: boolean;
   } | null>(null);
+
+  function restorePending(stored: ContextualCaptureJournal) {
+    pending.current = {
+      key: stored.key,
+      body: stored.body,
+      tenantId: stored.tenantId,
+      method: 'POST',
+      contextId: `${stored.actorId}/${stored.contextId}`,
+      journal: stored,
+      outcomeUnknown: true,
+    };
+    setRetainedContext(stored);
+    setUncertain(true);
+    setMessage(
+      'A retained website capture may have been sent. Return to its original engagement and saved check, then retry this exact request.',
+    );
+  }
+  useEffect(() => {
+    if (!context) return;
+    let disposed = false;
+    void Promise.resolve().then(() => {
+      if (disposed) return;
+      try {
+        const stored = loadContextualCapture(localStorage, tenantId, context.actorId);
+        if (stored && !pending.current) {
+          restorePending(stored);
+        }
+        setJournalReady(true);
+      } catch {
+        setJournalError(true);
+        setMessage(
+          'Website capture storage is unavailable or contains an invalid retained request. Preserve it and restore storage before continuing.',
+        );
+      }
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [tenantId, context]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -255,18 +334,42 @@ export function PublicWebsiteClient({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy) return;
+    if (
+      !canManage ||
+      busy ||
+      journalError ||
+      !journalReady ||
+      savedAwaitingCleanup ||
+      (!pending.current && disabledReason)
+    )
+      return;
     if (!pending.current) {
       try {
         const form = new FormData(event.currentTarget);
         pending.current = {
           key: generateUUID(),
-          body: JSON.stringify({ url: String(form.get('url') ?? '').trim() }),
+          body: JSON.stringify({ url: context?.url ?? String(form.get('url') ?? '').trim() }),
+          contextId: scopeIdentity,
           tenantId,
           method: 'POST',
           outcomeUnknown: false,
         };
+        if (context) {
+          const journal = {
+            tenantId,
+            actorId: context.actorId,
+            contextId: context.id,
+            key: pending.current.key,
+            url: context.url,
+            body: pending.current.body,
+          };
+          retainContextualCapture(localStorage, journal);
+          pending.current.journal = journal;
+          setRetainedContext(journal);
+        }
       } catch {
+        pending.current = null;
+        if (context) setJournalError(true);
         // A preparation error precedes transport: no uncertain operation exists.
         setUncertain(false);
         setMessage(
@@ -276,9 +379,11 @@ export function PublicWebsiteClient({
       }
     }
     const attempt = pending.current;
-    const sameScope = () => currentTenant.current === attempt.tenantId;
-    const scopeMessage =
-      'Return to the original organisation to resolve and retry this same public website check.';
+    const sameScope = () =>
+      currentTenant.current === attempt.tenantId && currentScope.current === attempt.contextId;
+    const scopeMessage = context
+      ? 'Return to the original organisation, engagement and saved check to resolve this same request.'
+      : 'Return to the original organisation to resolve and retry this same public website check.';
     if (!sameScope()) {
       setUncertain(true);
       setMessage(scopeMessage);
@@ -308,7 +413,21 @@ export function PublicWebsiteClient({
           (response.status >= 500 && !completedCheckErrors.has(name));
         attempt.outcomeUnknown = outcomeUncertain;
         setUncertain(outcomeUncertain);
-        if (!outcomeUncertain) pending.current = null;
+        if (!outcomeUncertain) {
+          if (attempt.journal) {
+            try {
+              clearContextualCapture(localStorage, attempt.journal);
+            } catch {
+              setJournalError(true);
+              setMessage(
+                'This capture was refused, but its retained request could not be cleared. Preserve the journal and restore storage before continuing.',
+              );
+              return;
+            }
+          }
+          pending.current = null;
+          setRetainedContext(null);
+        }
         if (!sameScope()) {
           setMessage(
             outcomeUncertain
@@ -326,8 +445,31 @@ export function PublicWebsiteClient({
         return;
       }
       const check = z.object({ data: checkSchema }).parse(payload).data;
+      if (attempt.journal && new URL(check.requestedUrl).href !== new URL(attempt.journal.url).href)
+        throw new Error('capture_response_scope_refused');
       pending.current = null;
       setUncertain(false);
+      if (attempt.journal) {
+        try {
+          clearContextualCapture(localStorage, attempt.journal);
+          const remaining = loadContextualCapture(
+            localStorage,
+            attempt.journal.tenantId,
+            attempt.journal.actorId,
+          );
+          if (remaining) {
+            restorePending(remaining);
+            return;
+          }
+        } catch {
+          setSavedAwaitingCleanup({ check, journal: attempt.journal });
+          setMessage(
+            'Website capture saved. Its request journal could not be cleared. Reconcile saved capture storage; do not submit a new capture.',
+          );
+          return;
+        }
+      }
+      setRetainedContext(null);
       if (!sameScope()) {
         setMessage(
           'The public check in the original organisation completed. Return there to review it.',
@@ -346,6 +488,11 @@ export function PublicWebsiteClient({
       setHistoryError(false);
       setLoading(false);
       setMessage('Public website audit recorded.');
+      try {
+        onRecorded?.(check);
+      } catch {
+        setMessage('Public website audit recorded. Refresh saved checks to review it.');
+      }
     } catch {
       attempt.outcomeUnknown = true;
       setUncertain(true);
@@ -368,11 +515,62 @@ export function PublicWebsiteClient({
       <div>
         <h2 className="text-lg font-semibold text-indigo-900">Public website content audit</h2>
         <p className="text-sm text-slate-700">
-          Check a public HTML page and up to three same-site privacy, contact and terms pages linked
-          from it. Record retrievable pages and links that are missing or unavailable. This is a
-          limited public-content audit, not a full crawl or a legal compliance verdict.
+          Check a public HTML page and up to four same-site linked notice pages: privacy, contact,
+          terms and an optional consent page for richer evidence review (five pages maximum). Record
+          retrievable pages and links that are missing or unavailable. This is a limited
+          public-content audit, not a full crawl or a legal compliance verdict.
         </p>
       </div>
+      {context && (
+        <p className="text-sm">
+          Engagement: {context.engagementTitle}. Estate: {context.estateName ?? 'Unassigned'}.
+          Previous saved check remains unchanged. No system or registered connector association is
+          recorded. Keep this form open until this request is resolved.
+        </p>
+      )}
+      {(retainedContext || savedAwaitingCleanup) && (
+        <p className="text-sm" aria-label="Original retained capture context">
+          Original context identifier:{' '}
+          {(retainedContext ?? savedAwaitingCleanup?.journal)?.contextId}. Frozen public URL:{' '}
+          {(retainedContext ?? savedAwaitingCleanup?.journal)?.url}. Return to these original
+          selections to reconcile this request.
+        </p>
+      )}
+      {disabledReason && <p role="status">{disabledReason}</p>}
+      {savedAwaitingCleanup && (
+        <button
+          type="button"
+          onClick={() => {
+            try {
+              clearContextualCapture(localStorage, savedAwaitingCleanup.journal, true);
+              const saved = savedAwaitingCleanup;
+              setSavedAwaitingCleanup(null);
+              const remaining = loadContextualCapture(
+                localStorage,
+                saved.journal.tenantId,
+                saved.journal.actorId,
+              );
+              if (remaining) {
+                restorePending(remaining);
+                return;
+              }
+              setRetainedContext(null);
+              setMessage('Saved capture storage reconciled.');
+              if (
+                currentTenant.current === saved.journal.tenantId &&
+                currentScope.current === `${saved.journal.actorId}/${saved.journal.contextId}`
+              )
+                onRecorded?.(saved.check);
+            } catch {
+              setMessage(
+                'Saved capture storage could not be reconciled. Preserve the journal; no new request was sent.',
+              );
+            }
+          }}
+        >
+          Reconcile saved capture storage
+        </button>
+      )}
       {canManage ? (
         <form onSubmit={(event) => void submit(event)} className="space-y-3">
           <label htmlFor="public-website-url" className="block text-sm font-medium text-indigo-900">
@@ -383,13 +581,22 @@ export function PublicWebsiteClient({
             name="url"
             type="url"
             required
+            value={context?.url}
+            readOnly={Boolean(context)}
             placeholder="https://example.com/privacy"
             disabled={busy || uncertain}
             className="block w-full rounded-md border border-slate-300 p-2 text-sm"
           />
           <button
             type="submit"
-            disabled={!hydrated || busy}
+            disabled={
+              !hydrated ||
+              busy ||
+              !journalReady ||
+              journalError ||
+              Boolean(savedAwaitingCleanup) ||
+              Boolean(disabledReason && !uncertain)
+            }
             className="rounded-md bg-teal-700 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50"
           >
             {busy

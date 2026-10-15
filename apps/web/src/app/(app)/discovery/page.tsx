@@ -54,6 +54,10 @@ export default async function DiscoveryPage() {
       <PublicSourceWorkflow
         tenantId={tenantId}
         actorId={userId}
+        canCapture={
+          can(Capability.CONNECTOR_MANAGE, { role }) &&
+          (role !== UserRole.FOUNDER || isAxiomInternal)
+        }
         canReview={
           can(Capability.ASSESSMENT_RUN, { role }) &&
           ((role !== UserRole.FOUNDER && role !== UserRole.AXIOM_ANALYST) || isAxiomInternal)

@@ -176,7 +176,7 @@ it('offers a fresh capture for a typed legacy-check refusal without exposing raw
   click();
   expect(await screen.findByRole('alert')).toHaveProperty(
     'textContent',
-    expect.stringContaining('Audit the website again'),
+    expect.stringContaining('Capture fresh evidence'),
   );
   expect(
     screen.getByRole('link', { name: 'Audit website again in Connectors' }).getAttribute('href'),

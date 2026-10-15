@@ -90,11 +90,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 async function openForm(label: string) {
-  await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Refresh records' }).hasAttribute('disabled')).toBe(
-      false,
-    ),
-  );
+  // Let the mount effect and mocked response settle before the cold role lookup.
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const refresh = screen.getByRole('button', { name: 'Refresh records' });
+  await waitFor(() => expect(refresh.hasAttribute('disabled')).toBe(false));
   fireEvent.click(screen.getByText(label));
 }
 async function processingForm() {

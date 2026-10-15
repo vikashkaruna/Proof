@@ -221,6 +221,7 @@ it.each([
 });
 
 afterEach(() => {
+  localStorage.clear();
   cleanup();
   vi.unstubAllGlobals();
 });
@@ -671,3 +672,319 @@ it.each([400, 401, 403, 409, 502])(
     });
   },
 );
+
+const recaptureContext = {
+  id: 'tenant-1/engagement-1/check-1',
+  actorId: '22222222-2222-4222-8222-222222222222',
+  url: 'https://example.com/privacy',
+  engagementTitle: 'Selected engagement',
+  estateName: 'Selected estate',
+};
+const contextualCheck = { ...check, requestedUrl: recaptureContext.url };
+it('keeps contextual capture URL and exact uncertain request locked to its original engagement', async () => {
+  const saved = vi.fn();
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== 'POST') return Response.json({ data: [] });
+    const posts = fetcher.mock.calls.filter(([, i]) => i?.method === 'POST');
+    if (posts.length === 1) throw new Error('connection lost');
+    return Response.json({ data: contextualCheck }, { status: 201 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(
+    <PublicWebsiteClient
+      tenantId="11111111-1111-4111-8111-111111111111"
+      canManage
+      context={recaptureContext}
+      onRecorded={saved}
+    />,
+  );
+  expect(screen.getByLabelText('Public page URL')).toHaveProperty('readOnly', true);
+  expect(document.body.textContent).toContain('Selected estate');
+  expect(document.body.textContent).toContain('optional consent page');
+  expect(document.body.textContent).toContain('five pages maximum');
+  expect(document.body.textContent).toContain('No system or registered connector association');
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Audit public website' })).toHaveProperty(
+      'disabled',
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Audit public website' }));
+  await screen.findByRole('button', { name: 'Retry same check' });
+  view.rerender(
+    <PublicWebsiteClient
+      tenantId="11111111-1111-4111-8111-111111111111"
+      canManage
+      context={{ ...recaptureContext, id: 'other', url: 'https://example.com/other' }}
+      onRecorded={saved}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+  await screen.findByText(/Return to the original organisation, engagement/);
+  expect(fetcher.mock.calls.filter(([, i]) => i?.method === 'POST')).toHaveLength(1);
+  view.rerender(
+    <PublicWebsiteClient
+      tenantId="11111111-1111-4111-8111-111111111111"
+      canManage
+      context={recaptureContext}
+      onRecorded={saved}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+  await waitFor(() => expect(saved).toHaveBeenCalledWith(contextualCheck));
+  const posts = fetcher.mock.calls.filter(([, i]) => i?.method === 'POST');
+  expect(posts[1]?.[1]).toEqual(posts[0]?.[1]);
+  expect(posts[0]?.[1]?.body).toBe(JSON.stringify({ url: recaptureContext.url }));
+});
+it('blocks contextual capture behind source workflow prerequisites without sending a POST', async () => {
+  const fetcher = vi.fn(async () => Response.json({ data: [] }));
+  vi.stubGlobal('fetch', fetcher);
+  render(
+    <PublicWebsiteClient
+      tenantId="11111111-1111-4111-8111-111111111111"
+      canManage
+      context={recaptureContext}
+      disabledReason="Reconcile retained source request first."
+    />,
+  );
+  const submit = screen.getByRole('button', { name: 'Audit public website' });
+  expect(submit).toHaveProperty('disabled', true);
+  fireEvent.submit(submit.closest('form')!);
+  expect(fetcher.mock.calls).toHaveLength(1);
+});
+
+it('restores a contextual uncertain request across reload and keeps its key after an authorization refusal', async () => {
+  const posted: RequestInit[] = [];
+  let phase = 0;
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== 'POST') return Response.json({ data: [] });
+    posted.push(init);
+    phase++;
+    if (phase === 1) throw new Error('lost reply');
+    if (phase === 2) return Response.json({ error: { code: 'forbidden' } }, { status: 403 });
+    return Response.json({ data: contextualCheck }, { status: 201 });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const saved = vi.fn();
+  const first = render(
+    <PublicWebsiteClient
+      tenantId={tenantId}
+      canManage
+      context={recaptureContext}
+      onRecorded={saved}
+    />,
+  );
+  const audit = await screen.findByRole('button', { name: 'Audit public website' });
+  await waitFor(() => expect(audit).toHaveProperty('disabled', false));
+  fireEvent.click(audit);
+  await screen.findByRole('button', { name: 'Retry same check' });
+  first.unmount();
+  render(
+    <PublicWebsiteClient
+      tenantId={tenantId}
+      canManage
+      context={recaptureContext}
+      onRecorded={saved}
+    />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry same check' }));
+  await screen.findByText(/The result is uncertain/);
+  expect(saved).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+  await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  expect(posted).toHaveLength(3);
+  expect(posted[1]).toEqual(posted[0]);
+  expect(posted[2]).toEqual(posted[0]);
+});
+it('never selects a saved result in another engagement', async () => {
+  let resolve!: (value: Response) => void;
+  const saved = vi.fn();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? new Promise<Response>((r) => {
+            resolve = r;
+          })
+        : Promise.resolve(Response.json({ data: [] })),
+    ),
+  );
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const view = render(
+    <PublicWebsiteClient
+      tenantId={tenantId}
+      canManage
+      context={recaptureContext}
+      onRecorded={saved}
+    />,
+  );
+  const audit = await screen.findByRole('button', { name: 'Audit public website' });
+  await waitFor(() => expect(audit).toHaveProperty('disabled', false));
+  fireEvent.click(audit);
+  view.rerender(
+    <PublicWebsiteClient
+      tenantId={tenantId}
+      canManage
+      context={{ ...recaptureContext, id: 'different' }}
+      onRecorded={saved}
+    />,
+  );
+  await act(async () => resolve(Response.json({ data: contextualCheck }, { status: 201 })));
+  expect(saved).not.toHaveBeenCalled();
+});
+
+it('keeps a confirmed save known when journal cleanup fails and reconciles without another POST', async () => {
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const saved = vi.fn();
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) =>
+    init?.method === 'POST'
+      ? Response.json({ data: contextualCheck }, { status: 201 })
+      : Response.json({ data: [] }),
+  );
+  vi.stubGlobal('fetch', fetcher);
+  const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementationOnce(() => {
+    throw new Error('storage denied');
+  });
+  render(
+    <PublicWebsiteClient
+      tenantId={tenantId}
+      canManage
+      context={recaptureContext}
+      onRecorded={saved}
+    />,
+  );
+  const audit = screen.getByRole('button', { name: 'Audit public website' });
+  await waitFor(() => expect(audit).toHaveProperty('disabled', false));
+  fireEvent.click(audit);
+  const reconcile = await screen.findByRole('button', { name: 'Reconcile saved capture storage' });
+  expect(saved).not.toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: 'Retry same check' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Audit public website' })).toHaveProperty(
+    'disabled',
+    true,
+  );
+  remove.mockRestore();
+  fireEvent.click(reconcile);
+  await waitFor(() => expect(saved).toHaveBeenCalledExactlyOnceWith(contextualCheck));
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+});
+it('does not call the original view after its capture resolves following unmount', async () => {
+  let resolve!: (response: Response) => void;
+  const saved = vi.fn();
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? new Promise<Response>((r) => {
+            resolve = r;
+          })
+        : Promise.resolve(Response.json({ data: [] })),
+    ),
+  );
+  const view = render(
+    <PublicWebsiteClient
+      tenantId={tenantId}
+      canManage
+      context={recaptureContext}
+      onRecorded={saved}
+    />,
+  );
+  const audit = screen.getByRole('button', { name: 'Audit public website' });
+  await waitFor(() => expect(audit).toHaveProperty('disabled', false));
+  fireEvent.click(audit);
+  view.unmount();
+  await act(async () => resolve(Response.json({ data: contextualCheck }, { status: 201 })));
+  expect(saved).not.toHaveBeenCalled();
+});
+
+it('retains the exact request when a valid-looking saved response belongs to a different submitted URL', async () => {
+  const saved = vi.fn();
+  let count = 0;
+  const posted: RequestInit[] = [];
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method !== 'POST') return Response.json({ data: [] });
+    posted.push(init);
+    count++;
+    return Response.json(
+      {
+        data:
+          count === 1
+            ? { ...contextualCheck, requestedUrl: 'https://other.org/' }
+            : contextualCheck,
+      },
+      { status: 201 },
+    );
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(
+    <PublicWebsiteClient
+      tenantId="11111111-1111-4111-8111-111111111111"
+      canManage
+      context={recaptureContext}
+      onRecorded={saved}
+    />,
+  );
+  const audit = screen.getByRole('button', { name: 'Audit public website' });
+  await waitFor(() => expect(audit).toHaveProperty('disabled', false));
+  fireEvent.click(audit);
+  await screen.findByRole('button', { name: 'Retry same check' });
+  expect(saved).not.toHaveBeenCalled();
+  const original = screen.getByLabelText('Original retained capture context');
+  expect(original.textContent).toContain(recaptureContext.id);
+  expect(original.textContent).toContain(recaptureContext.url);
+  expect(original.querySelector('a')).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+  await waitFor(() => expect(saved).toHaveBeenCalledExactlyOnceWith(contextualCheck));
+  expect(posted[1]).toEqual(posted[0]);
+});
+it('reconciles a known save whose own entry cleared before remaining-journal validation failed without deleting another entry', async () => {
+  const tenantId = '11111111-1111-4111-8111-111111111111';
+  const saved = vi.fn();
+  let posts = 0;
+  const other = {
+    tenantId,
+    actorId: recaptureContext.actorId,
+    contextId: recaptureContext.id,
+    key: '44444444-4444-4444-8444-444444444444',
+    url: recaptureContext.url,
+    body: JSON.stringify({ url: recaptureContext.url }),
+  };
+  const otherKey = `axiom:public-recapture:v1:${tenantId}:${other.actorId}:${other.key}`;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method !== 'POST') return Response.json({ data: [] });
+      posts++;
+      if (posts === 1)
+        localStorage.setItem(otherKey, JSON.stringify({ ...other, body: 'corrupted fixture' }));
+      return Response.json({ data: contextualCheck }, { status: 201 });
+    }),
+  );
+  render(
+    <PublicWebsiteClient
+      tenantId={tenantId}
+      canManage
+      context={recaptureContext}
+      onRecorded={saved}
+    />,
+  );
+  const audit = screen.getByRole('button', { name: 'Audit public website' });
+  await waitFor(() => expect(audit).toHaveProperty('disabled', false));
+  fireEvent.click(audit);
+  const reconcile = await screen.findByRole('button', { name: 'Reconcile saved capture storage' });
+  expect(saved).not.toHaveBeenCalled();
+  expect(localStorage.getItem(otherKey)).toContain('corrupted fixture');
+  // Repair only this test's synthetic competing record; reconciliation must
+  // preserve that different operation and restore it rather than send new work.
+  localStorage.setItem(otherKey, JSON.stringify(other));
+  fireEvent.click(reconcile);
+  await screen.findByRole('button', { name: 'Retry same check' });
+  expect(posts).toBe(1);
+  expect(saved).not.toHaveBeenCalled();
+  expect(localStorage.getItem(otherKey)).toBe(JSON.stringify(other));
+  fireEvent.click(screen.getByRole('button', { name: 'Retry same check' }));
+  await waitFor(() => expect(saved).toHaveBeenCalledExactlyOnceWith(contextualCheck));
+  expect(posts).toBe(2);
+});
