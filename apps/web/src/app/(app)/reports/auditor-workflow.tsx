@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
-import { reportRequest } from './report-request';
+import { prepareReportOperationKey, reportRequest } from './report-request';
 import { button, field, panel, failure } from './report-ui';
 import { detailSchema } from './report-contract';
 
@@ -158,12 +158,14 @@ export function AuditorWorkflow({
     return () => controller.abort();
   }, [tenantId, canManage, selected?.reportId, revision]);
 
-  async function act(path: string, body: unknown) {
+  async function act(path: string, body: unknown | (() => unknown)) {
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const response = await reportRequest(tenantId, path, { body });
+      const response = await reportRequest(tenantId, path, {
+        body: typeof body === 'function' ? body() : body,
+      });
       const result = await response.json();
       setMessage(
         response.status === 202
@@ -214,12 +216,14 @@ export function AuditorWorkflow({
         onSubmit={(event) => {
           event.preventDefault();
           if (!chosen || !confirmed || !title.trim()) return;
-          requestKey.current ??= crypto.randomUUID();
-          void act('/reports/statutory/auditor/requests', {
-            engagementId: chosen.engagementId,
-            assessmentRunId: chosen.assessmentRunId,
-            title: title.trim(),
-            operationKey: requestKey.current,
+          void act('/reports/statutory/auditor/requests', () => {
+            requestKey.current ??= prepareReportOperationKey();
+            return {
+              engagementId: chosen.engagementId,
+              assessmentRunId: chosen.assessmentRunId,
+              title: title.trim(),
+              operationKey: requestKey.current,
+            };
           }).then((result) => {
             if (result) {
               requestKey.current = null;
@@ -423,9 +427,9 @@ export function AuditorWorkflow({
                   className={button}
                   disabled={busy}
                   onClick={() => {
-                    buildKey.current ??= crypto.randomUUID();
-                    void act(`/reports/statutory/${selected.reportId}/artifacts`, {
-                      operationKey: buildKey.current,
+                    void act(`/reports/statutory/${selected.reportId}/artifacts`, () => {
+                      buildKey.current ??= prepareReportOperationKey();
+                      return { operationKey: buildKey.current };
                     });
                   }}
                 >

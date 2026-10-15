@@ -1,6 +1,18 @@
+import { generateUUID } from '@axiom/ui';
 import { z } from 'zod';
 
 const errorSchema = z.object({ error: z.object({ code: z.string().max(100) }) });
+
+/** Preparation fails before transport; callers retain their existing mutation intent. */
+export function prepareReportOperationKey(): string {
+  try {
+    return generateUUID();
+  } catch {
+    throw new Error(
+      'Request not sent. Secure browser randomness is unavailable. Use a supported browser and retry.',
+    );
+  }
+}
 
 /** No automatic mutation retries: an interrupted response can follow a committed write. */
 export async function reportRequest(
@@ -9,6 +21,7 @@ export async function reportRequest(
   options: { body?: unknown; signal?: AbortSignal } = {},
 ): Promise<Response> {
   const writing = options.body !== undefined;
+  const idempotencyKey = writing ? prepareReportOperationKey() : undefined;
   let response: Response;
   try {
     response = await fetch(`/api/bff/v1${path}`, {
@@ -20,7 +33,7 @@ export async function reportRequest(
       headers: {
         'x-tenant-id': tenantId,
         ...(writing
-          ? { 'content-type': 'application/json', 'idempotency-key': crypto.randomUUID() }
+          ? { 'content-type': 'application/json', 'idempotency-key': idempotencyKey! }
           : {}),
       },
       ...(writing ? { body: JSON.stringify(options.body) } : {}),
@@ -75,6 +88,14 @@ export function preparePackBody(
   return parsed.data;
 }
 
+/** Hash verification is mandatory; insecure origins often omit Web Crypto digest. */
+export function requireArchiveVerification(): void {
+  if (typeof crypto === 'undefined' || typeof crypto.subtle?.digest !== 'function')
+    throw new Error(
+      'Archive download not started. SHA-256 verification requires HTTPS or localhost in a supported browser. Open the app through a secure URL and retry.',
+    );
+}
+
 /** Bound the actual response stream before retaining or hashing an archive. */
 export async function readReleasedArchive(
   response: Response,
@@ -88,6 +109,7 @@ export async function readReleasedArchive(
     !/^[a-f0-9]{64}$/.test(expectedHash)
   )
     throw new Error('A valid archive release receipt is required.');
+  requireArchiveVerification();
   if (!response.body) throw new Error('The archive response has no bytes.');
   const reader = response.body.getReader();
   let timer: ReturnType<typeof setTimeout> | undefined;

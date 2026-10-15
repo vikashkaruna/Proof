@@ -13,7 +13,12 @@ import {
   type ReportDetail,
   type ReportSummary,
 } from './report-contract';
-import { reportRequest, readReleasedArchive } from './report-request';
+import {
+  prepareReportOperationKey,
+  reportRequest,
+  readReleasedArchive,
+  requireArchiveVerification,
+} from './report-request';
 import { ClosureDossiersTab } from './closure-dossiers-tab';
 import { AgentIcon, DataPlaceholder, PageHeader } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
@@ -444,12 +449,14 @@ function ReportInspector({
       });
     return () => controller.abort();
   }, [access.tenantId, reportId, revision]);
-  async function act(path: string, body: unknown) {
+  async function act(path: string, body: unknown | (() => unknown)) {
     setBusy(true);
     setError('');
     setMessage('');
     try {
-      const response = await reportRequest(access.tenantId, path, { body });
+      const response = await reportRequest(access.tenantId, path, {
+        body: typeof body === 'function' ? body() : body,
+      });
       setMessage(
         response.status === 202
           ? 'Storage is still pending. Reconcile to check the recorded version; no second upload is attempted.'
@@ -470,6 +477,7 @@ function ReportInspector({
     setError('');
     setMessage('');
     try {
+      requireArchiveVerification();
       const response = await reportRequest(
         access.tenantId,
         `/evidence-packs/${report.pack.id}/content`,
@@ -623,9 +631,9 @@ function ReportInspector({
                         className={button}
                         disabled={busy || !confirmed}
                         onClick={() => {
-                          buildKey.current ??= crypto.randomUUID();
-                          void act(`/evidence-packs/${report.pack!.id}/build`, {
-                            operationKey: buildKey.current,
+                          void act(`/evidence-packs/${report.pack!.id}/build`, () => {
+                            buildKey.current ??= prepareReportOperationKey();
+                            return { operationKey: buildKey.current };
                           });
                         }}
                       >

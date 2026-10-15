@@ -1,12 +1,20 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { BoardWorkflow } from './board-workflow';
+import { AuditorWorkflow } from './auditor-workflow';
 import { reportRequest } from './report-request';
 
-vi.mock('./report-request', () => ({ reportRequest: vi.fn() }));
-afterEach(cleanup);
+vi.mock('./report-request', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./report-request')>()),
+  reportRequest: vi.fn(),
+}));
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 it('reselects the current board request by reading fresh reviewed state without a mutation', async () => {
   const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -99,6 +107,11 @@ it('reselects the current board request by reading fresh reviewed state without 
     screen.getByRole('button', { name: 'Build and retain reviewed source and PDF' }),
   ).toBeTruthy();
   expect(request.mock.calls.filter(([, path]) => path === `/reports/${id}`)).toHaveLength(2);
+  vi.stubGlobal('crypto', {});
+  fireEvent.click(screen.getByRole('button', { name: 'Build and retain reviewed source and PDF' }));
+  await screen.findByText(/Request not sent/);
+  expect(request.mock.calls.every(([, , options]) => options?.body === undefined)).toBe(true);
+  vi.unstubAllGlobals();
   status = 'draft';
   fireEvent.click(screen.getByRole('button', { name: 'Refresh board state' }));
   await screen.findByText(/Report status: draft/);
@@ -107,3 +120,71 @@ it('reselects the current board request by reading fresh reviewed state without 
   ).toBeNull();
   expect(request.mock.calls.every(([, , options]) => options?.body === undefined)).toBe(true);
 });
+
+it.each([BoardWorkflow, AuditorWorkflow])(
+  'shows pre-send preparation failure and supports a secure fallback in %s',
+  async (Workflow) => {
+    const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const request = vi.mocked(reportRequest);
+    request.mockReset();
+    request.mockImplementation((_tenant, path, options) => {
+      if (path.includes('assessment-options'))
+        return Promise.resolve(
+          Response.json({
+            assessments: [
+              {
+                assessmentRunId: id,
+                engagementId: id,
+                engagementTitle: 'Finalized fixture',
+                finalizedAt: '2026-10-01T00:00:00Z',
+                libraryVersion: '0.1.1',
+              },
+            ],
+            total: 1,
+            limit: 20,
+            offset: 0,
+          }),
+        );
+      if (options?.body !== undefined) return Promise.resolve(Response.json({ requestId: id }));
+      return Promise.resolve(Response.json({ requests: [], total: 0, limit: 20, offset: 0 }));
+    });
+    vi.stubGlobal('crypto', {});
+    render(
+      <Workflow
+        tenantId={id}
+        canRequest
+        canManage={false}
+        onOpenReport={vi.fn()}
+        onChanged={vi.fn()}
+      />,
+    );
+    const form = await screen.findByRole('form');
+    await within(form).findByRole('option', { name: /Finalized fixture/ });
+    fireEvent.change(within(form).getByLabelText('Assessment'), { target: { value: id } });
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Reviewed source' } });
+    fireEvent.click(within(form).getByRole('checkbox'));
+    fireEvent.submit(form);
+    await screen.findByText(/Request not sent/);
+    expect(request.mock.calls.filter(([, , options]) => options?.body !== undefined)).toHaveLength(
+      0,
+    );
+    expect(within(form).getByRole('textbox')).toHaveProperty('value', 'Reviewed source');
+    vi.stubGlobal('crypto', {
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.fill(9);
+        return bytes;
+      },
+    });
+    fireEvent.submit(form);
+    await waitFor(() =>
+      expect(
+        request.mock.calls.filter(([, , options]) => options?.body !== undefined),
+      ).toHaveLength(1),
+    );
+    const body = request.mock.calls.find(([, , options]) => options?.body !== undefined)![2]!
+      .body as { operationKey: string };
+    expect(body.operationKey).toMatch(
+      /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/,
+    );
+  },
+);
