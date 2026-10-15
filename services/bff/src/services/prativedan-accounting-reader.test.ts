@@ -40,12 +40,13 @@ it('fresh independent126 context per read; scoped original identity', async () =
 it('refuses inherited argument names before obtaining controller authority', async () => {
   const port = { verifiedContext: vi.fn(), call: vi.fn() };
   const reader = prativedanAccountingReader(binding, port);
-  const args: Record<string, unknown> = { unexpected: 1, extra: 2, unrelated: 3 };
-  Object.setPrototypeOf(args, {
+  const prototype = {
     t: binding.tenant_id,
     r: binding.run_id,
     rh: binding.request_sha256,
-  });
+  };
+  const args = Object.create(prototype) as typeof prototype;
+  Object.assign(args, { unexpected: 1, extra: 2, unrelated: 3 });
   await expect(reader.call('read_model_accounting_result', args)).rejects.toThrow(
     'accounted_result_contract_refused',
   );
