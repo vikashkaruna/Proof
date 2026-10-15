@@ -116,7 +116,8 @@ const SESSION_VERIFY_ATTEMPT_BUDGET = { limit: 10, windowSeconds: 3600 } as cons
 const ADDRESS_CHALLENGE_ISSUE_BUDGET = { limit: 200, windowSeconds: 3600 } as const;
 const ADDRESS_VERIFY_ATTEMPT_BUDGET = { limit: 200, windowSeconds: 3600 } as const;
 
-export type MfaChallengePurpose = 'login' | 'approval_issuance' | 'enrolment' | 'factor_revocation';
+export type MfaChallengePurpose =
+  'login' | 'approval_issuance' | 'enrolment' | 'factor_revocation' | 'catalogue_adoption';
 
 export interface ApprovalBinding {
   planId: string;
@@ -295,6 +296,8 @@ export type VerifyChallengeResult =
     };
 
 export interface ConsumeChallengeOptions {
+  /** Required for catalogue adoption; its session is additionally bound in the digest. */
+  tenantId?: string;
   challengeId: string | null | undefined;
   userId: string;
   purpose: MfaChallengePurpose;
@@ -304,7 +307,7 @@ export interface ConsumeChallengeOptions {
 }
 
 export type ConsumeChallengeResult =
-  | { ok: true; challengeId: string; satisfiedAt: string }
+  | { ok: true; challengeId: string; satisfiedAt: string; expiresAt?: string; factorId?: string }
   | {
       ok: false;
       reason:
@@ -313,7 +316,8 @@ export type ConsumeChallengeResult =
         | 'challenge_not_satisfied'
         | 'challenge_expired'
         | 'challenge_already_consumed'
-        | 'binding_mismatch';
+        | 'binding_mismatch'
+        | 'factor_changed';
       detail?: string;
     };
 
@@ -855,6 +859,16 @@ export function createMfaService(
     },
 
     async issueChallenge(opts) {
+      if (
+        opts.purpose === 'catalogue_adoption' &&
+        (!opts.sessionId ||
+          !opts.boundResourceRef ||
+          !/^[0-9a-f]{64}$/.test(opts.boundPayloadSha256 ?? '') ||
+          !Number.isFinite(opts.ttlMs) ||
+          (opts.ttlMs ?? 0) <= 0 ||
+          (opts.ttlMs ?? Infinity) > APPROVAL_CHALLENGE_TTL_MS)
+      )
+        throw new Error('Catalogue challenge requires a bounded reviewed source');
       // Budget first. Otherwise an attacker refreshes the per-challenge
       // attempt counter for free by opening challenge after challenge.
       //
@@ -1096,6 +1110,11 @@ export function createMfaService(
       if (error || !data) return { ok: false, reason: 'challenge_not_found' };
 
       const challenge = data as ChallengeRow;
+      if (
+        opts.purpose === 'catalogue_adoption' &&
+        (!opts.tenantId || challenge.tenant_id !== opts.tenantId)
+      )
+        return { ok: false, reason: 'binding_mismatch' };
       if (!challenge.satisfied_at) return { ok: false, reason: 'challenge_not_satisfied' };
       if (challenge.consumed_at) return { ok: false, reason: 'challenge_already_consumed' };
       if (new Date(challenge.expires_at).getTime() <= Date.now()) {
@@ -1111,6 +1130,18 @@ export function createMfaService(
         !sameDigest(challenge.bound_payload_sha256, opts.boundPayloadSha256)
       ) {
         return { ok: false, reason: 'binding_mismatch' };
+      }
+
+      // New interactive authority remains tied to the factor that actually
+      // satisfied the challenge. Replacement B cannot revive factor A.
+      // Existing signed approval tokens keep their normal expiry/revocation.
+      if (opts.purpose === 'catalogue_adoption' || opts.purpose === 'approval_issuance') {
+        const activeFactor = await activeTotpFactor(opts.userId);
+        if (!challenge.factor_id || activeFactor?.id !== challenge.factor_id)
+          return {
+            ok: false,
+            reason: opts.purpose === 'approval_issuance' ? 'factor_changed' : 'binding_mismatch',
+          };
       }
 
       // Atomic single use — the same conditional-update pattern the execution
@@ -1129,7 +1160,14 @@ export function createMfaService(
         return { ok: false, reason: 'challenge_already_consumed' };
       }
 
-      return { ok: true, challengeId: challenge.id, satisfiedAt: challenge.satisfied_at };
+      return {
+        ok: true,
+        challengeId: challenge.id,
+        satisfiedAt: challenge.satisfied_at,
+        ...(opts.purpose === 'catalogue_adoption'
+          ? { expiresAt: challenge.expires_at, factorId: challenge.factor_id! }
+          : {}),
+      };
     },
   };
 }

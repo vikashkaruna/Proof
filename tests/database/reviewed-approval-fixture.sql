@@ -20,5 +20,12 @@ values
 update public.remediation_actions
    set dry_run_status = 'dry_run_complete', rollback_validated = true,
        dry_run_expires_at = now() + interval '1 hour',
-       dry_run_result = jsonb_build_object('recordsAffected', 12);
+       dry_run_result = jsonb_build_object('recordsAffected', 12)
+ where tenant_id='10000000-0000-0000-0000-0000000000c1';
 
+
+insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypted) values
+ ('10000000-0000-0000-0000-0000000000e1','10000000-0000-0000-0000-0000000000a9','totp','active','fixture-only');
+insert into public.mfa_challenges(id,user_id,tenant_id,factor_id,purpose,bound_resource_ref,bound_payload_sha256,expires_at,satisfied_at,consumed_at,consumed_for)
+ values('10000000-0000-0000-0000-0000000000f1','10000000-0000-0000-0000-0000000000a9','10000000-0000-0000-0000-0000000000c1','10000000-0000-0000-0000-0000000000e1',
+ 'approval_issuance','10000000-0000-0000-0000-0000000000c3',repeat('a',64),clock_timestamp()+interval '5 minutes',clock_timestamp(),clock_timestamp(),'10000000-0000-0000-0000-0000000000c3');

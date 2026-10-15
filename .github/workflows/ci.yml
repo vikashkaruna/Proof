@@ -1028,11 +1028,4 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push
         run: |
-          IMAGE_TAG=${{ github.sha }}
-          OWNER_LC=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          for component in web marketing bff agent-runtime model-gateway temporal-worker; do
-            docker buildx build --load -f infra/docker/Dockerfile.${component} \
-              -t ghcr.io/${OWNER_LC}/axiom-${component}:${IMAGE_TAG} \
-              .
-            docker push ghcr.io/${OWNER_LC}/axiom-${component}:${IMAGE_TAG}
-          done
+          bash .github/ci/publish_images.sh
