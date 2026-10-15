@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentLabel } from '@axiom/ui';
 import { z } from 'zod';
+import { ReportRequestRecovery, useReportRequestRecovery } from './report-request-journal';
 import { detailSchema, type ReportDetail } from './report-contract';
 import { prepareReportOperationKey, reportRequest } from './report-request';
 import { button, field, panel, failure } from './report-ui';
@@ -64,6 +65,7 @@ const date = (value: string) => new Date(value).toLocaleString();
 
 type BoardWorkflowProps = {
   tenantId: string;
+  actorId?: string;
   canRequest: boolean;
   canManage: boolean;
   onOpenReport: (reportId: string) => void;
@@ -71,11 +73,12 @@ type BoardWorkflowProps = {
 };
 
 export function BoardWorkflow(props: BoardWorkflowProps) {
-  return <TenantBoardWorkflow key={props.tenantId} {...props} />;
+  return <TenantBoardWorkflow key={`${props.tenantId}/${props.actorId ?? 'unknown'}`} {...props} />;
 }
 
 function TenantBoardWorkflow({
   tenantId,
+  actorId,
   canRequest,
   canManage,
   onOpenReport,
@@ -102,7 +105,6 @@ function TenantBoardWorkflow({
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [revision, setRevision] = useState(0);
-  const requestKey = useRef<string | null>(null);
   const buildKey = useRef<string | null>(null);
   const selected = requests.find((item) => item.id === selectedRequest) ?? null;
   const report =
@@ -115,6 +117,20 @@ function TenantBoardWorkflow({
     setDetailState(null);
     setRevision((value) => value + 1);
   }, []);
+
+  const recovery = useReportRequestRecovery({
+    tenantId,
+    actorId,
+    kind: 'board',
+    canRequest,
+    onConfirmed: () => {
+      setTitle('');
+      setSelectedRun('');
+      setConfirmed(false);
+      refresh();
+      onChanged();
+    },
+  });
 
   useEffect(() => {
     if (!canRequest) return;
@@ -235,26 +251,17 @@ function TenantBoardWorkflow({
           {message}
         </p>
       )}
+      <ReportRequestRecovery recovery={recovery} />
       <form
         aria-label="Request board report"
         className="grid gap-3 rounded-lg border border-slate-200 p-4"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!chosen || !confirmed || !title.trim()) return;
-          void act('/reports/board/request', () => {
-            requestKey.current ??= prepareReportOperationKey();
-            return {
-              engagementId: chosen.engagementId,
-              assessmentRunId: chosen.assessmentRunId,
-              title: title.trim(),
-              operationKey: requestKey.current,
-            };
-          }).then((result) => {
-            if (!result) return;
-            requestKey.current = null;
-            setTitle('');
-            setSelectedRun('');
-            setConfirmed(false);
+          if (!chosen || !confirmed || !title.trim() || recovery.blocked) return;
+          void recovery.send({
+            engagementId: chosen.engagementId,
+            assessmentRunId: chosen.assessmentRunId,
+            title: title.trim(),
           });
         }}
       >
@@ -267,7 +274,7 @@ function TenantBoardWorkflow({
             id="board-assessment"
             className={`${field} mt-1 w-full`}
             value={selectedRun}
-            disabled={busy || loading}
+            disabled={busy || loading || recovery.blocked}
             onChange={(event) => {
               setSelectedRun(event.target.value);
               setConfirmed(false);
@@ -318,7 +325,7 @@ function TenantBoardWorkflow({
             value={title}
             maxLength={300}
             required
-            disabled={busy}
+            disabled={busy || recovery.blocked}
             onChange={(event) => {
               setTitle(event.target.value);
               setConfirmed(false);
@@ -329,7 +336,7 @@ function TenantBoardWorkflow({
           <input
             type="checkbox"
             checked={confirmed}
-            disabled={busy || !chosen}
+            disabled={busy || !chosen || recovery.blocked}
             onChange={(event) => setConfirmed(event.target.checked)}
           />
           I request a draft bound to this finalized assessment and its recorded control library.
@@ -337,7 +344,7 @@ function TenantBoardWorkflow({
         <button
           type="submit"
           className={button}
-          disabled={busy || !chosen || !confirmed || !title.trim()}
+          disabled={busy || !chosen || !confirmed || !title.trim() || recovery.blocked}
         >
           Request board draft
         </button>

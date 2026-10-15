@@ -6,7 +6,7 @@ import { canAccessClosureDossiers } from '@/lib/closure-dossier-access';
 export const dynamic = 'force-dynamic';
 
 export default async function ReportsPage() {
-  const { tenantId, role, isAxiomInternal } = await requireTenantContext();
+  const { tenantId, userId, role, isAxiomInternal } = await requireTenantContext();
   if (!can(Capability.REPORT_READ, { role }))
     return <p role="alert">Your role cannot view reports.</p>;
   const canViewClosureDossiers = canAccessClosureDossiers(role, isAxiomInternal);
@@ -14,6 +14,7 @@ export default async function ReportsPage() {
     <ReportsClient
       key={tenantId}
       tenantId={tenantId}
+      actorId={userId}
       canPrepare={can(Capability.EVIDENCE_RECORD, { role })}
       canReview={isAxiomInternal && can(Capability.REPORT_REVIEW, { role })}
       canRelease={isAxiomInternal && can(Capability.REPORT_RELEASE, { role })}

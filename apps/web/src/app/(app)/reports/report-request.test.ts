@@ -168,3 +168,21 @@ describe('browser cryptography preparation', () => {
     expect(response.bodyUsed).toBe(false);
   });
 });
+
+it('binds report request transport to the explicitly supplied current actor', async () => {
+  const request = vi.fn().mockResolvedValue(Response.json({}));
+  vi.stubGlobal('fetch', request);
+  await reportRequest(id, '/reports/board/request', {
+    body: { operationKey: id },
+    expectedActorId: id.toUpperCase(),
+  });
+  expect(request.mock.calls[0]![1].headers['x-expected-actor-id']).toBe(id);
+});
+it('refuses malformed expected actor before transport', async () => {
+  const request = vi.fn();
+  vi.stubGlobal('fetch', request);
+  await expect(
+    reportRequest(id, '/reports/board/request', { body: {}, expectedActorId: 'broken' }),
+  ).rejects.toThrow();
+  expect(request).not.toHaveBeenCalled();
+});

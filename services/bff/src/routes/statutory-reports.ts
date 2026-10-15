@@ -107,6 +107,13 @@ export function statutoryReportRoutes(
   app.post('/reports/statutory/auditor/requests', async (c) => {
     const denied = requireCapability(c, Capability.REPORT_GENERATE);
     if (denied) return denied;
+    const expectedActorHeader = c.req.header('X-Expected-Actor-Id');
+    if (expectedActorHeader !== undefined) {
+      const expected = z.uuid().safeParse(expectedActorHeader);
+      if (!expected.success) return c.json({ error: { code: 'expected_actor_required' } }, 400);
+      if (expected.data.toLowerCase() !== c.get('user').id.toLowerCase())
+        return c.json({ error: { code: 'report_actor_changed' } }, 409);
+    }
     const body = await c.req.json().catch(() => null);
     const parsed = requestAuditorPackInputSchema.safeParse(body);
     if (!parsed.success) return invalid(c, 'Invalid auditor pack request');

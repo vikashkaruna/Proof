@@ -18,8 +18,12 @@ export function prepareReportOperationKey(): string {
 export async function reportRequest(
   tenantId: string,
   path: string,
-  options: { body?: unknown; signal?: AbortSignal } = {},
+  options: { body?: unknown; signal?: AbortSignal; expectedActorId?: string } = {},
 ): Promise<Response> {
+  const expectedActor =
+    options.expectedActorId === undefined
+      ? undefined
+      : z.uuid().parse(options.expectedActorId).toLowerCase();
   const writing = options.body !== undefined;
   const idempotencyKey = writing ? prepareReportOperationKey() : undefined;
   let response: Response;
@@ -32,6 +36,7 @@ export async function reportRequest(
         : AbortSignal.timeout(120_000),
       headers: {
         'x-tenant-id': tenantId,
+        ...(expectedActor ? { 'x-expected-actor-id': expectedActor } : {}),
         ...(writing
           ? { 'content-type': 'application/json', 'idempotency-key': idempotencyKey! }
           : {}),
