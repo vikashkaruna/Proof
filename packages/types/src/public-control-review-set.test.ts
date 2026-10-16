@@ -1,6 +1,9 @@
 import { expect, it } from 'vitest';
 import {
   publicControlReviewSetRequestSchema,
+  publicControlReviewSetRequestV2Schema,
+  parsePublicControlReviewSetAnyRequestText,
+  publicControlReviewSetAnyRowSchema,
   validatePublicControlReviewSet,
 } from './public-control-review-set';
 const tenantId = '11111111-1111-4111-8111-111111111111',
@@ -247,5 +250,70 @@ it('requires a positive immutable cancellation receipt rather than treating notf
   ).toBe(true);
   expect(
     cancelPublicControlReviewOperationRequestSchema.safeParse({ request, reason: ' ' }).success,
+  ).toBe(false);
+});
+
+const associationRef = {
+  associationId: '55555555-5555-4555-8555-555555555555',
+  associationSha256: digest,
+  targetId: '66666666-6666-4666-8666-666666666666',
+  targetSha256: digest,
+  associationReceipt: { id: '12', entryHash: digest },
+};
+const linkedRequest = () => ({
+  ...request,
+  version: 2,
+  expectedEstateId: tenantId,
+  associationRef,
+});
+it('keeps the v1 object/parser contract while explicitly admitting exact canonical v2', () => {
+  const v2 = linkedRequest();
+  expect(publicControlReviewSetRequestSchema.safeParse(v2).success).toBe(false);
+  expect(publicControlReviewSetRequestV2Schema.parse(v2)).toEqual(v2);
+  const canonical = (v: unknown): string => {
+    if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';
+    if (v && typeof v === 'object')
+      return (
+        '{' +
+        Object.entries(v)
+          .sort(([a], [b]) => (a < b ? -1 : 1))
+          .map(([k, x]) => JSON.stringify(k) + ':' + canonical(x))
+          .join(',') +
+        '}'
+      );
+    return JSON.stringify(v);
+  };
+  const text = canonical(v2);
+  expect(parsePublicControlReviewSetAnyRequestText(text)).toEqual(v2);
+  expect(() =>
+    parsePublicControlReviewSetAnyRequestText(text.replace('{', '{"version":2,')),
+  ).toThrow();
+  expect(() => parsePublicControlReviewSetAnyRequestText(text + ' ')).toThrow();
+});
+it.each([
+  null,
+  undefined,
+  { ...associationRef, associationReceipt: undefined },
+  { ...associationRef, associationSha256: 'bad' },
+  { ...associationRef, invented: true },
+])('requires full retained association commitments %#', (ref) => {
+  expect(
+    publicControlReviewSetRequestV2Schema.safeParse({ ...linkedRequest(), associationRef: ref })
+      .success,
+  ).toBe(false);
+});
+it('refuses v2 estate omission and version masquerading', () => {
+  expect(
+    publicControlReviewSetRequestV2Schema.safeParse({ ...linkedRequest(), expectedEstateId: null })
+      .success,
+  ).toBe(false);
+  expect(
+    publicControlReviewSetRequestSchema.safeParse({ ...linkedRequest(), version: 1 }).success,
+  ).toBe(false);
+  expect(
+    publicControlReviewSetAnyRowSchema.safeParse({
+      request_codec: 'axiom-public-control-review-request-canonical-json-2',
+      snapshot_codec: 'axiom-public-control-review-snapshot-pg-canonical-json-1',
+    }).success,
   ).toBe(false);
 });

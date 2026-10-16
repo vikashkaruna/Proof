@@ -5,6 +5,8 @@ import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
 import {
   FrozenHumanControlReviewSchema,
+  FrozenHumanControlReviewV2Schema,
+  verifyFrozenHumanControlReviewWithAsset,
   verifyFrozenHumanControlReview,
 } from './public-control-provenance';
 import { BoardReportContentSchema, renderBoardReportHtml } from './board-report';
@@ -47,6 +49,12 @@ const sourceV2Schema = sourceSchema
 export const FrozenBoardSourceSchema = z.discriminatedUnion('schema_version', [
   sourceSchema,
   sourceV2Schema,
+  sourceV2Schema
+    .extend({
+      schema_version: z.literal(3),
+      human_control_review: FrozenHumanControlReviewV2Schema,
+    })
+    .strict(),
 ]);
 const controlSchema = z.object({
   id: z.string().min(1).max(100),
@@ -112,7 +120,7 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
     throw new Error('Board source or review digest mismatch');
   }
   let sourceRaw = parseBounded(input.sourceText, 4 * 1024 * 1024);
-  if ((sourceRaw as Record<string, unknown>)?.schema_version === 2)
+  if ((sourceRaw as Record<string, unknown>)?.schema_version !== 1)
     sourceRaw = parseCatalogueJson(input.sourceText, 4 * 1024 * 1024);
   const source = FrozenBoardSourceSchema.parse(sourceRaw);
   if (source.schema_version === 1 && Object.hasOwn(sourceRaw as object, 'human_control_review'))
@@ -148,7 +156,11 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
   same(content.signatures.prepared_by.agent, 'board-report-builder');
   same(content.action_plan.length, 0);
 
-  if ((source.schema_version === 2) !== (content.schema_version === 3))
+  if (
+    (source.schema_version === 3 && content.schema_version !== 4) ||
+    (source.schema_version === 2 && content.schema_version !== 3) ||
+    (source.schema_version === 1 && content.schema_version >= 3)
+  )
     throw new Error('Board document provenance downgrade refused');
   if (source.schema_version === 2 && content.schema_version === 3) {
     const appendix = verifyFrozenHumanControlReview(source.human_control_review, {
@@ -160,6 +172,21 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
       resultText: source.result_text,
     });
     if (!isDeepStrictEqual(content.public_review_appendix, appendix))
+      throw new Error('Board document differs from frozen source');
+  }
+  if (source.schema_version === 3 && content.schema_version === 4) {
+    const expected = verifyFrozenHumanControlReviewWithAsset(source.human_control_review, {
+      tenantId: input.tenantId,
+      engagementId: input.engagementId,
+      assessmentRunId: input.assessmentRunId,
+      libraryVersion: source.library_version,
+      controlsText: source.controls_text,
+      resultText: source.result_text,
+    });
+    if (
+      !isDeepStrictEqual(content.public_review_appendix, expected.public_review_appendix) ||
+      !isDeepStrictEqual(content.asset_scope, expected.asset_scope)
+    )
       throw new Error('Board document differs from frozen source');
   }
   const controlsById = new Map(controls.map((item) => [item.id, item]));

@@ -16,10 +16,16 @@ import {
   PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC,
   parsePublicControlReviewSetRequestText,
   publicControlReviewSetSnapshotSchema,
+  PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2,
+  PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2,
+  parsePublicControlReviewSetAnyRequestText,
+  publicControlReviewSetSnapshotV2Schema,
   publicControlPayloadV2Schema,
   publicEvidenceCandidateV2Schema,
   validateQuestionnaireProvenance,
 } from '@axiom/types';
+
+import { verifyFrozenPublicWebsiteAssetProvenance } from './public-website-asset-provenance';
 
 const uuid = z.uuid();
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -108,6 +114,61 @@ export const FrozenHumanControlReviewSchema = z
     review_required: z.literal(true),
   })
   .strict();
+/** Source3 carries the asset packet exclusively inside the exact review2 snapshot. */
+export const FrozenHumanControlReviewV2Schema = FrozenHumanControlReviewSchema.extend({
+  schema_version: z.literal(2),
+  estate_id: uuid,
+  review: FrozenHumanControlReviewSchema.shape.review
+    .extend({
+      request_codec: z.literal(PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2),
+      snapshot_codec: z.literal(PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2),
+    })
+    .strict(),
+}).strict();
+export const PublicWebsiteAssetScopeSchema = z
+  .object({
+    label: z.literal('human-declared asset scope'),
+    tenant_id: uuid,
+    estate: z
+      .object({ id: uuid, name: z.string().max(200), version: z.number().int().positive() })
+      .strict(),
+    system: z
+      .object({ id: uuid, name: z.string().max(200), version: z.number().int().positive() })
+      .strict(),
+    target: z
+      .object({
+        id: uuid,
+        version: z.number().int().positive(),
+        url: z.string().max(2048),
+        sha256: digest,
+        declared_by: uuid,
+        receipt,
+      })
+      .strict(),
+    association: z
+      .object({
+        id: uuid,
+        sha256: digest,
+        declared_by: uuid,
+        receipt,
+        check_id: uuid,
+        payload_sha256: digest,
+        capture_receipt: z.object({ id: receipt.shape.id, entryHash: digest }).strict(),
+        requested_url: z.string().max(2048),
+        final_url: z.string().max(2048),
+        checked_at: timestamp,
+      })
+      .strict(),
+    ownership_verified: z.literal(false),
+    connector_access_granted: z.literal(false),
+    review_required: z.literal(true),
+    qualification: z.literal(
+      'Human-declared asset scope retained with this review. It does not verify website ownership, grant connector access, or establish current inventory or authority.',
+    ),
+  })
+  .strict();
+export type PublicWebsiteAssetScope = z.infer<typeof PublicWebsiteAssetScopeSchema>;
+export type FrozenHumanControlReviewV2 = z.infer<typeof FrozenHumanControlReviewV2Schema>;
 export type FrozenHumanControlReview = z.infer<typeof FrozenHumanControlReviewSchema>;
 const hash = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 const same = (a: unknown, b: unknown) => {
@@ -131,7 +192,7 @@ function safeUrl(value: string) {
 }
 /** The exact frozen source, not a caller-selected live review, derives every
  * appendix claim. Omitted questions stay Unknown and have no invented rationale. */
-export function verifyFrozenHumanControlReview(
+function verifyReview(
   raw: unknown,
   scope: {
     tenantId: string;
@@ -141,8 +202,11 @@ export function verifyFrozenHumanControlReview(
     controlsText: string;
     resultText: string;
   },
+  assetBound = false,
 ) {
-  const v = FrozenHumanControlReviewSchema.parse(raw);
+  const v = assetBound
+    ? FrozenHumanControlReviewV2Schema.parse(raw)
+    : FrozenHumanControlReviewSchema.parse(raw);
   same(
     [v.tenant_id, v.engagement_id, v.assessment_run_id, v.catalogue.library_version],
     [scope.tenantId, scope.engagementId, scope.assessmentRunId, scope.libraryVersion],
@@ -157,13 +221,39 @@ export function verifyFrozenHumanControlReview(
   ])
     same(hash(bytes!), digestValue);
   same(v.catalogue.manifest_text, PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT);
-  const request = parsePublicControlReviewSetRequestText(v.review.request_text);
-  const snapshot = parsedCanonical(
-    v.review.snapshot_text,
-    publicControlReviewSetSnapshotSchema,
-    524288,
-  );
+  const request = assetBound
+    ? parsePublicControlReviewSetAnyRequestText(v.review.request_text)
+    : parsePublicControlReviewSetRequestText(v.review.request_text);
+  const snapshot = assetBound
+    ? parsedCanonical(v.review.snapshot_text, publicControlReviewSetSnapshotV2Schema, 524288)
+    : parsedCanonical(v.review.snapshot_text, publicControlReviewSetSnapshotSchema, 524288);
   const payload = parsedCanonical(v.capture.payload_text, publicControlPayloadV2Schema, 524288);
+  if (assetBound) {
+    if (snapshot.version !== 2 || request.version !== 2 || !v.estate_id)
+      throw new Error('public_review_asset_source_refused');
+    const asset = verifyFrozenPublicWebsiteAssetProvenance(snapshot.assetProvenance, {
+      tenantId: v.tenant_id,
+      estateId: v.estate_id,
+      checkId: v.capture.check_id,
+      payloadSha256: v.capture.payload_sha256,
+      captureReceipt: v.capture.capture_receipt,
+      associationRef: request.associationRef,
+    });
+    const root = v.capture.page_sources.find((p) => p.page === 'root');
+    same(root?.requestedUrl, asset.target.url);
+    same(root?.finalUrl, asset.association.final_url);
+    // Retain both exact strings in their hashed packets; compare the instant
+    // without discarding PostgreSQL microseconds as Date.parse alone would.
+    const instant = (value: string) => {
+      const fractional = /\.(\d+)(?=Z|[+-]\d{2}:\d{2}$)/.exec(value);
+      return [
+        Date.parse(value.replace(/\.\d+(?=Z|[+-]\d{2}:\d{2}$)/, '')),
+        (fractional?.[1] ?? '').replace(/0+$/, ''),
+      ];
+    };
+    same(instant(asset.association.checked_at), instant(v.capture.checked_at));
+  }
+
   same(canonicalJson(snapshot.request), v.review.request_text);
   same(
     [
@@ -423,6 +513,35 @@ export function verifyFrozenHumanControlReview(
     requiresHumanReview: true as const,
   });
 }
+export function verifyFrozenHumanControlReview(
+  raw: unknown,
+  scope: Parameters<typeof verifyReview>[1],
+) {
+  return verifyReview(raw, scope);
+}
+export function verifyFrozenHumanControlReviewWithAsset(
+  raw: unknown,
+  scope: Parameters<typeof verifyReview>[1],
+) {
+  const public_review_appendix = verifyReview(raw, scope, true);
+  const v = FrozenHumanControlReviewV2Schema.parse(raw);
+  const snapshot = parsedCanonical(
+    v.review.snapshot_text,
+    publicControlReviewSetSnapshotV2Schema,
+    524288,
+  );
+  const asset_scope = PublicWebsiteAssetScopeSchema.parse(
+    verifyFrozenPublicWebsiteAssetProvenance(snapshot.assetProvenance, {
+      tenantId: v.tenant_id,
+      estateId: v.estate_id,
+      checkId: v.capture.check_id,
+      payloadSha256: v.capture.payload_sha256,
+      captureReceipt: v.capture.capture_receipt,
+      associationRef: snapshot.request.associationRef,
+    }),
+  );
+  return { public_review_appendix, asset_scope };
+}
 const evidenceRequirement = z
   .object({
     type: z.enum([
@@ -526,13 +645,32 @@ const escape = (s: string) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-export function renderPublicControlReportAppendix(raw: PublicControlReportAppendix) {
+export function renderPublicControlReportAppendix(
+  raw: PublicControlReportAppendix,
+  asset?: PublicWebsiteAssetScope,
+) {
   const value = PublicControlReportAppendixSchema.parse(raw);
+  const scope = asset === undefined ? null : PublicWebsiteAssetScopeSchema.parse(asset);
+  if (
+    scope &&
+    (scope.estate.id !== value.estateId ||
+      scope.association.payload_sha256 !== value.capturePayloadSha256 ||
+      !isDeepStrictEqual(scope.association.capture_receipt, {
+        id: value.captureReceipt.id,
+        entryHash: value.captureReceipt.entry_hash,
+      }))
+  )
+    throw new Error('public_review_asset_scope_refused');
   const controls = value.controls
     .map(
       (c) =>
         `<section><h3>${escape(c.controlId)} · ${escape(c.title)}</h3>${c.questions.map((q) => `<p><strong>${escape(q.questionId)}: ${escape(q.prompt)}</strong> — ${q.type !== 'boolean' ? 'Unsupported by Boolean questionnaire; internal verification required' : q.judgment === 'omitted' ? 'Omitted judgment — Unknown' : q.answer === null ? 'Explicit Unknown' : q.answer ? 'Human declaration: Yes (unverified)' : 'Human declaration: No (unverified)'}. ${q.rationale ? escape(q.rationale) : 'No human rationale recorded.'} Available mapped public candidates (partial only): ${q.availableCandidateOrdinals.join(', ') || 'none captured'}.</p>${q.candidates.map((a) => `<blockquote>Candidate ${a.ordinal}: ${escape(a.facet)}; ${escape(a.kind)}; context ${escape(a.context)}; page ${escape(a.locator.page)}; body SHA-256 ${a.locator.contentSha256}. ${escape(a.excerpt)}</blockquote>`).join('')}`).join('')}<p>Internal evidence requirements remain unverified: ${c.evidenceRequirements.map((r) => escape(r.requirement.description) + ' (available partial public candidates: ' + (r.availableCandidateOrdinals.join(', ') || 'none captured') + ')').join('; ')}.</p></section>`,
     )
     .join('');
-  return `<section aria-label="Recorded public-source human review"><h2>Recorded public-source human review</h2><p>Human declarations and public signals remain unverified. This appendix establishes neither implementation, statutory breach, verified evidence, independent audit nor compliance certification. Public excerpts may describe demonstrations, quotations or ambiguous content. Scores and exposure are provisional. Internal evidence and legal review are required.</p><p>Estate context comes from the reviewed engagement. This website capture has no retained system or registered connector association and does not verify asset ownership.</p><p>Review ${escape(value.reviewId)} · actor ${escape(value.reviewActorId)} · ${escape(value.reviewedAt)} · capture ${escape(value.captureCheckedAt)} · payload SHA-256 ${value.capturePayloadSha256}.</p><p>Catalogue ${escape(value.catalogue.library_version)} · baseline ${escape(value.catalogue.baseline)} · default commencement ${escape(value.catalogue.defaultEffectiveFrom)} · capture assessment date ${escape(value.captureAssessmentDate)}. Per-control effective dates are not present in this catalogue; current statutory applicability requires assessment-date and legal review. This is not a declaration of an enforceable breach.</p><p>Applicability: ${escape(JSON.stringify(value.applicability))}. Unavailable or unexamined pages do not establish absence. Candidates truncated: ${value.candidatesTruncated}.</p>${value.pages.map((p) => `<p>${escape(p.page)}: ${escape(p.state)}; partial ${p.truncated}; reasons ${escape(p.coverageReasons.join(', ') || 'none recorded')}.</p>`).join('')}<h3>All retained public candidates (including uncited signals)</h3>${value.publicCandidates.map((a) => `<blockquote>Candidate ${a.ordinal}: ${escape(a.facet)}; ${escape(a.kind)}; context ${escape(a.context)}; page ${escape(a.locator.page)}; body SHA-256 ${a.locator.contentSha256}. ${escape(a.excerpt)}</blockquote>`).join('')}${controls}</section>`;
+  return `<section aria-label="Recorded public-source human review"><h2>Recorded public-source human review</h2><p>Human declarations and public signals remain unverified. This appendix establishes neither implementation, statutory breach, verified evidence, independent audit nor compliance certification. Public excerpts may describe demonstrations, quotations or ambiguous content. Scores and exposure are provisional. Internal evidence and legal review are required.</p>${scope ? renderPublicWebsiteAssetScope(scope) : '<p>Estate context comes from the reviewed engagement. This website capture has no retained system or registered connector association and does not verify asset ownership.</p>'}<p>Review ${escape(value.reviewId)} · actor ${escape(value.reviewActorId)} · ${escape(value.reviewedAt)} · capture ${escape(value.captureCheckedAt)} · payload SHA-256 ${value.capturePayloadSha256}.</p><p>Catalogue ${escape(value.catalogue.library_version)} · baseline ${escape(value.catalogue.baseline)} · default commencement ${escape(value.catalogue.defaultEffectiveFrom)} · capture assessment date ${escape(value.captureAssessmentDate)}. Per-control effective dates are not present in this catalogue; current statutory applicability requires assessment-date and legal review. This is not a declaration of an enforceable breach.</p><p>Applicability: ${escape(JSON.stringify(value.applicability))}. Unavailable or unexamined pages do not establish absence. Candidates truncated: ${value.candidatesTruncated}.</p>${value.pages.map((p) => `<p>${escape(p.page)}: ${escape(p.state)}; partial ${p.truncated}; reasons ${escape(p.coverageReasons.join(', ') || 'none recorded')}.</p>`).join('')}<h3>All retained public candidates (including uncited signals)</h3>${value.publicCandidates.map((a) => `<blockquote>Candidate ${a.ordinal}: ${escape(a.facet)}; ${escape(a.kind)}; context ${escape(a.context)}; page ${escape(a.locator.page)}; body SHA-256 ${a.locator.contentSha256}. ${escape(a.excerpt)}</blockquote>`).join('')}${controls}</section>`;
+}
+
+export function renderPublicWebsiteAssetScope(raw: PublicWebsiteAssetScope) {
+  const v = PublicWebsiteAssetScopeSchema.parse(raw);
+  return `<section aria-label="Human-declared asset scope"><h2>Human-declared asset scope</h2><p>${escape(v.qualification)}</p><p>Estate: ${escape(v.estate.name)} (${escape(v.estate.id)}), recorded version ${v.estate.version}. System: ${escape(v.system.name)} (${escape(v.system.id)}), recorded version ${v.system.version}.</p><p>Declared public URL: ${escape(v.target.url)}. Target ${escape(v.target.id)}; association ${escape(v.association.id)}. Ownership verified: false. Connector access granted: false. Human review required: true.</p></section>`;
 }

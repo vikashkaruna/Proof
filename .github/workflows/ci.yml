@@ -127,6 +127,11 @@ jobs:
       - name: Verify the locked Temporal SDK before controller acceptance
         run: uv run --locked --no-sync python -c "import temporalio.testing; import temporal_workers"
         working-directory: services/temporal-workers
+      - name: Install the real downloaded PDF text verifier
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y poppler-utils
+      - name: Prepare locked real public-source Python agents
+        run: uv sync --locked
+        working-directory: services/agent-runtime
       # Archived upstream is pinned, synthetic and isolated; this is provider
       # protocol acceptance, not a maintained production distribution.
       - run: python3 scripts/test-evidence-storage.py --keep-running
@@ -142,11 +147,14 @@ jobs:
       - run: pnpm exec tsx scripts/seed-personas.ts
       - run: pnpm --filter @axiom/e2e exec playwright install --with-deps chromium
       - name: Real controller packet through source-bound Board and Auditor reports
+        env:
+          AXIOM_REGISTERED_WEBSITE_BROWSER: 'true'
         run: |
           set -a
           source .axiom-runtime/evidence-storage/runtime.env
           set +a
           export AXIOM_EVIDENCE_FIXTURE_DIRECTORY="$PWD/.axiom-runtime/evidence-storage"
+          export AXIOM_REGISTERED_WEBSITE_BROWSER_DIRECTORY="$PWD/.axiom-runtime/review/registered-website-browser"
           python3 scripts/test-workload-identity.py --assessment
       - name: First PDF in fresh app and BFF processes without renderer warm-up
         run: python3 scripts/test-evidence-storage.py --cold-pdf
@@ -160,6 +168,7 @@ jobs:
             .axiom-runtime/evidence-storage/browser-results.json
             .axiom-runtime/evidence-storage/cold-pdf-results.json
             .axiom-runtime/workload-assessment/results.json
+            .axiom-runtime/workload-assessment/registered-browser-diagnostics.json
             .axiom-runtime/workload-trust/results.json
             .axiom-runtime/workload-identity/results.json
           include-hidden-files: true

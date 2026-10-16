@@ -4,13 +4,14 @@ import {
   ids,
   sha,
 } from '@axiom/report-kit/test-fixtures/public-control-provenance';
+import { assetReportFixture } from '@axiom/report-kit/test-fixtures/public-control-report-v4';
 import { BoardReportService } from './board-reports.js';
 import { StatutoryReportService } from './statutory-reports.js';
 import { evidenceFixture } from '../test/evidence-fixture.js';
 import { abortableResult } from '../test/abortable-result.js';
-function fixture(kind: 'board' | 'auditor', linked = true) {
+function fixture(kind: 'board' | 'auditor', linked = true, asset = false) {
   const base = evidenceFixture();
-  const f = publicReportFixture(kind);
+  const f = asset ? assetReportFixture(kind) : publicReportFixture(kind);
   base.rows('tenant_users').push({ tenant_id: ids.tenant, user_id: ids.actor, role: 'founder' });
   base.rows('users').push({ id: ids.actor, is_axiom_internal: true });
   const source: Record<string, unknown> = { ...f.source };
@@ -77,6 +78,40 @@ describe.each(['board', 'auditor'] as const)(
         ? f.service.generateDraft(ids.tenant, ids.actor, ids.request)
         : f.service.generateAuditorDraft(ids.tenant, ids.actor, ids.request);
     }
+    it('composes document4 only from exact immutable source3 asset bindings', async () => {
+      const f = fixture(kind, true, true);
+      await generate(f);
+      expect(f.calls).toHaveLength(1);
+      const content = JSON.parse(String(f.calls[0]!.args.p_content_text));
+      expect(content.schema_version).toBe(4);
+      expect(content.asset_scope.label).toBe('human-declared asset scope');
+      expect(content.asset_scope.ownership_verified).toBe(false);
+      expect(content.asset_scope.connector_access_granted).toBe(false);
+      expect(String(f.calls[0]!.args.p_html_text)).toContain('Human-declared asset scope');
+      expect(String(f.calls[0]!.args.p_html_text)).not.toContain('has no retained system');
+      expect(f.calls.some((c) => /release|publish|artifact/.test(c.name))).toBe(false);
+    });
+    it.each(['missing', 'graft', 'downgrade', 'hash'] as const)(
+      'refuses source3 %s before any draft write',
+      async (change) => {
+        const f = fixture(kind, true, true),
+          source = JSON.parse(f.sourceRow.source_text),
+          human = source.human_control_review;
+        if (change === 'missing') {
+          const snap = JSON.parse(human.review.snapshot_text);
+          delete snap.assetProvenance;
+          human.review.snapshot_text = JSON.stringify(snap);
+          human.review.snapshot_sha256 = sha(human.review.snapshot_text);
+        }
+        if (change === 'graft') human.assetProvenance = { ownership_verified: true };
+        if (change === 'downgrade') source.schema_version = 2;
+        if (change === 'hash') human.review.snapshot_sha256 = 'f'.repeat(64);
+        f.sourceRow.source_text = JSON.stringify(source);
+        f.sourceRow.source_sha256 = sha(f.sourceRow.source_text);
+        await expect(generate(f)).rejects.toThrow();
+        expect(f.calls).toHaveLength(0);
+      },
+    );
     it.each([true, false])(
       'writes versioned deterministic drafts only for the exact frozen source (linked=%s)',
       async (linked) => {
@@ -128,19 +163,22 @@ describe.each(['board', 'auditor'] as const)(
     );
   },
 );
-it('published Auditor3 requires retained PDF and cannot fall through the legacy HTML/PDF path', async () => {
-  const f = fixture('auditor');
-  const service = f.service as StatutoryReportService;
-  f.base.rows('reports').push({
-    id: ids.report,
-    tenant_id: ids.tenant,
-    title: 'Synthetic reviewed output',
-    kind: 'auditor',
-    status: 'published',
-    created_by: ids.actor,
-    content_text: JSON.stringify({ schema_version: 3, kind: 'auditor_pack' }),
-  });
-  await expect(service.getReportHtml(ids.tenant, ids.actor, ids.report)).rejects.toThrow(
-    'retained_pdf_required',
-  );
-});
+it.each([3, 4])(
+  'published Auditor%s requires retained PDF and cannot fall through the legacy HTML/PDF path',
+  async (version) => {
+    const f = fixture('auditor');
+    const service = f.service as StatutoryReportService;
+    f.base.rows('reports').push({
+      id: ids.report,
+      tenant_id: ids.tenant,
+      title: 'Synthetic reviewed output',
+      kind: 'auditor',
+      status: 'published',
+      created_by: ids.actor,
+      content_text: JSON.stringify({ schema_version: version, kind: 'auditor_pack' }),
+    });
+    await expect(service.getReportHtml(ids.tenant, ids.actor, ids.report)).rejects.toThrow(
+      'retained_pdf_required',
+    );
+  },
+);

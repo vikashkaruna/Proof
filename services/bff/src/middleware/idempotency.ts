@@ -32,6 +32,12 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       /^\/v1\/public-control-review-sets\/operations\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
         c.req.path,
       ));
+  const durablePublicWebsiteAsset =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/public-website-assets/operations' ||
+      /^\/v1\/public-website-assets\/operations\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
+        c.req.path,
+      ));
   const durableSourceReview =
     c.req.method === 'POST' &&
     /^\/v1\/public-source-bindings\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/observations\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/reviews$/.test(
@@ -73,6 +79,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   if (
     durableIntake ||
     durablePublicControlReviewSet ||
+    durablePublicWebsiteAsset ||
     durableSourceReview ||
     durableOperatorWorkflow ||
     trustedSourceRequest ||
@@ -122,6 +129,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   if (
     durableIntake ||
     durablePublicControlReviewSet ||
+    durablePublicWebsiteAsset ||
     durableSourceReview ||
     durableOperatorWorkflow ||
     trustedSourceRequest ||

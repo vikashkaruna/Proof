@@ -264,3 +264,57 @@ it('deduplicates consent against checked pages and limits distinct consent links
   expect(multiple.calls).toHaveLength(5);
   expect(multiple.calls).not.toContain('https://public.org/consent-extra');
 });
+
+it('captures a linked cookie notice in the consent slot without changing the legacy check', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-10-16T02:00:00Z'));
+  const html = root.replace(
+    '<a href=/consent>Consent preferences</a>',
+    '<a href=/cookies>Cookie policy</a>',
+  );
+  const cookieHtml =
+    '<h1>Cookie policy</h1><p>Analytics cookies are optional. Withdraw consent in cookie preferences.</p>';
+  const legacy = dependencies({ '/': html, '/cookies': cookieHtml });
+  const candidate = dependencies({ '/': html, '/cookies': cookieHtml });
+  const old = await checkPublicWebsite(
+    'https://public.org/',
+    new AbortController().signal,
+    legacy.deps,
+  );
+  const result = await checkPublicWebsiteEvidenceV2(
+    'https://public.org/',
+    new AbortController().signal,
+    candidate.deps,
+  );
+  expect(JSON.stringify(result.check)).toBe(JSON.stringify(old));
+  expect(candidate.calls).toEqual([...legacy.calls, 'https://public.org/cookies']);
+  expect(candidate.calls).toHaveLength(5);
+  expect(result.evidence.pageSources.find((p) => p.page === 'consent')).toMatchObject({
+    requestedUrl: 'https://public.org/cookies',
+    finalUrl: 'https://public.org/cookies',
+    state: 'examined',
+    contentSha256: hash(cookieHtml),
+  });
+  const payload = publicControlPayloadV2Schema.parse(JSON.parse(result.evidence.payloadText));
+  expect(payload.candidates.some((c) => c.locator.page === 'consent')).toBe(true);
+});
+it('prefers an explicit consent page even when a cookie notice appears first', async () => {
+  const { deps, calls } = dependencies({ '/': '<a href=/cookies>Cookie policy</a>' + root });
+  await checkPublicWebsiteEvidenceV2('https://public.org/', new AbortController().signal, deps);
+  expect(calls).toHaveLength(5);
+  expect(calls).toContain('https://public.org/consent');
+  expect(calls).not.toContain('https://public.org/cookies');
+});
+it.each(['https://other.org/cookies', '/cookies?token=secret', 'https://u:p@public.org/cookies'])(
+  'does not follow an unsafe cookie-policy fallback %s',
+  async (href) => {
+    const { deps, calls } = dependencies({ '/': `<a href="${href}">Cookie policy</a>` });
+    const result = await checkPublicWebsiteEvidenceV2(
+      'https://public.org/',
+      new AbortController().signal,
+      deps,
+    );
+    expect(calls).toEqual(['https://public.org/']);
+    expect(result.evidence.pageSources.find((p) => p.page === 'consent')?.state).toBe('unexamined');
+  },
+);

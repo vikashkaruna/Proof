@@ -22,7 +22,8 @@
     "./renderer": "./src/renderer.ts",
     "./pramaan-archive": "./src/pramaan-archive.ts",
     "./assessment-interpretation": "./src/assessment-interpretation.ts",
-    "./test-fixtures/public-control-provenance": "./src/public-control-provenance.test-helper.ts"
+    "./test-fixtures/public-control-provenance": "./src/public-control-provenance.test-helper.ts",
+    "./test-fixtures/public-control-report-v4": "./src/public-control-report-v4.test-helper.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

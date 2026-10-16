@@ -8,6 +8,7 @@ descendants without touching any other test, container, or desktop process.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import select
@@ -26,6 +27,89 @@ SERVER_TIMEOUT_MS = 330_000
 
 class BarrierFailure(RuntimeError):
     """A claimed race did not actually exercise its required ordering."""
+
+
+def review141_probe_query(contract: str, holder: int, contender: int) -> str | None:
+    """Optional phase proof, never interpolating caller SQL or arbitrary names."""
+    if not contract.startswith("review141:"):
+        return None
+    parsed = re.fullmatch(
+        r"review141:(tenant|engagement|head):([a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})",
+        contract,
+    )
+    if parsed is None or any(
+        type(pid) is not int or not 0 < pid < 2**31 for pid in (holder, contender)
+    ):
+        raise BarrierFailure("Invalid review141 phase contract")
+    phase, tenant = parsed.groups()
+    head = f"hashtextextended('public-control-review:{tenant}',0)"
+    head_match = f"locktype='advisory' and classid=(({head} >> 32) & 4294967295)::oid and objid=({head} & 4294967295)::oid and objsubid=1"
+    tenant_match = f"locktype='advisory' and classid=139 and objid=(hashtext('{tenant}')::bigint & 4294967295)::oid and objsubid=2"
+    if phase == "tenant":
+        holder_phase = f"exists(select 1 from pg_locks where pid={holder} and granted and {tenant_match}) and exists(select 1 from pg_locks where pid={holder} and granted and relation='public.estates'::regclass and mode='RowShareLock') and exists(select 1 from pg_locks where pid={holder} and granted and relation='public.engagements'::regclass and mode='RowShareLock')"
+        contender_phase = f"exists(select 1 from pg_locks where pid={contender} and not granted and {tenant_match})"
+    elif phase == "engagement":
+        holder_phase = f"exists(select 1 from pg_locks where pid={holder} and granted and relation='public.engagements'::regclass and mode='RowShareLock')"
+        contender_phase = f"exists(select 1 from pg_locks waiter join pg_locks owner using(transactionid) where waiter.pid={contender} and owner.pid={holder} and waiter.locktype='transactionid' and owner.locktype='transactionid' and not waiter.granted and owner.granted) and exists(select 1 from pg_locks where pid={contender} and granted and relation='public.engagements'::regclass and mode='RowShareLock')"
+    else:
+        holder_phase = f"exists(select 1 from pg_locks where pid={holder} and granted and {head_match}) and exists(select 1 from pg_locks where pid={holder} and granted and relation='public.engagements'::regclass and mode='RowShareLock')"
+        contender_phase = f"exists(select 1 from pg_locks where pid={contender} and not granted and {head_match}) and exists(select 1 from pg_locks where pid={contender} and granted and relation='public.engagements'::regclass and mode='RowShareLock')"
+    return f"select jsonb_build_object('phase','{phase}','holder',{holder},'contender',{contender},'blocked_by_holder',{holder}=any(pg_blocking_pids({contender})),'holder_phase',({holder_phase}),'contender_phase',({contender_phase}),'contender_head',exists(select 1 from pg_locks where pid={contender} and granted and {head_match}),'locks',(select coalesce(jsonb_agg(jsonb_build_object('pid',pid,'locktype',locktype,'relation',relation::text,'classid',classid::text,'objid',objid::text,'objsubid',objsubid,'mode',mode,'granted',granted,'transactionid',transactionid::text)),'[]'::jsonb) from pg_locks where pid in ({holder},{contender})))"
+
+
+def validate_review141_phase(value: object) -> dict:
+    """Return only the fixed safe metadata projection produced by our SQL."""
+    fields = {
+        "phase",
+        "holder",
+        "contender",
+        "blocked_by_holder",
+        "holder_phase",
+        "contender_phase",
+        "contender_head",
+        "locks",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != fields
+        or value.get("phase") not in {"tenant", "engagement", "head"}
+    ):
+        raise BarrierFailure("Review141 phase metadata refused")
+    if (
+        any(
+            value.get(k) is not True
+            for k in ("blocked_by_holder", "holder_phase", "contender_phase")
+        )
+        or value.get("contender_head") is not False
+    ):
+        raise BarrierFailure("Review141 lock order was not established")
+    if any(
+        type(value.get(k)) is not int or not 0 < value[k] < 2**31
+        for k in ("holder", "contender")
+    ) or not isinstance(value["locks"], list):
+        raise BarrierFailure("Review141 phase metadata refused")
+    lock_fields = {
+        "pid",
+        "locktype",
+        "relation",
+        "classid",
+        "objid",
+        "objsubid",
+        "mode",
+        "granted",
+        "transactionid",
+    }
+    for lock in value["locks"]:
+        if (
+            not isinstance(lock, dict)
+            or set(lock) != lock_fields
+            or any(
+                isinstance(v, str) and not re.fullmatch(r"[A-Za-z0-9_]*", v)
+                for v in lock.values()
+            )
+        ):
+            raise BarrierFailure("Review141 unsafe lock metadata refused")
+    return value
 
 
 def kill_client(client: subprocess.Popen[bytes]) -> None:
@@ -66,6 +150,10 @@ def main() -> int:
         r"[a-zA-Z_][a-zA-Z0-9_]{0,62}", database
     ):
         raise BarrierFailure("Invalid disposable database")
+    if expected_value.startswith("review141:"):
+        review141_probe_query(expected_value, 1, 2)
+        if mode != "blocked":
+            raise BarrierFailure("Review141 proof requires blocked mode")
     tag = "axiom-race-" + uuid4().hex
     first_name, second_name = tag + "-first", tag + "-second"
     command = [
@@ -247,6 +335,18 @@ def main() -> int:
                     contender,
                     "Second transaction did not contend on the actual first holder",
                 )
+                phase_query = review141_probe_query(
+                    expected_value, holder_pid, contender_pid
+                )
+                if phase_query is not None:
+                    phase_proof = validate_review141_phase(
+                        json.loads(probe(phase_query))
+                    )
+                    proof_path = Path(first_path + ".lock-proof.json")
+                    proof_path.write_text(
+                        json.dumps(phase_proof, sort_keys=True) + "\n"
+                    )
+                    proof_path.chmod(0o600)
                 if mode == "expires":
                     # The contender emits its exact PostgreSQL one-second
                     # deadline before entering the tool that waits on the lock.

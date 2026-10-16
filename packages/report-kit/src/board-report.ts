@@ -5,6 +5,7 @@
 import { z } from 'zod';
 import {
   PublicControlReportAppendixSchema,
+  PublicWebsiteAssetScopeSchema,
   renderPublicControlReportAppendix,
 } from './public-control-provenance';
 import { BRANDING } from './schema';
@@ -174,11 +175,34 @@ export const BoardReportContentV3Schema = z
     if (!legacy.success)
       ctx.addIssue({ code: 'custom', message: 'Board interpretation register is incomplete' });
   });
+export const BoardReportContentV4Schema = z
+  .object({
+    ...BoardReportContentV3Schema.shape,
+    schema_version: z.literal(4),
+    asset_scope: PublicWebsiteAssetScopeSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const { asset_scope, ...base } = value;
+    if (
+      !BoardReportContentV3Schema.safeParse({ ...base, schema_version: 3 }).success ||
+      asset_scope.estate.id !== value.public_review_appendix.estateId ||
+      asset_scope.association.payload_sha256 !==
+        value.public_review_appendix.capturePayloadSha256 ||
+      asset_scope.association.capture_receipt.id !==
+        value.public_review_appendix.captureReceipt.id ||
+      asset_scope.association.capture_receipt.entryHash !==
+        value.public_review_appendix.captureReceipt.entry_hash
+    )
+      ctx.addIssue({ code: 'custom', message: 'Board asset scope differs from retained review' });
+  });
 export const BoardReportContentSchema = z.discriminatedUnion('schema_version', [
   BoardReportContentV1Schema,
   BoardReportContentV2Schema,
   BoardReportContentV3Schema,
+  BoardReportContentV4Schema,
 ]);
+export type BoardReportContentV4 = z.infer<typeof BoardReportContentV4Schema>;
 export type BoardReportContentV3 = z.infer<typeof BoardReportContentV3Schema>;
 export type BoardReportContentV2 = z.infer<typeof BoardReportContentV2Schema>;
 export type BoardReportContent = z.infer<typeof BoardReportContentSchema>;
@@ -596,6 +620,6 @@ export function renderBoardReportHtml(content: BoardReportContent): string {
     <div><strong>Library Digest:</strong> <span class="code-col">${escapeHtml(validated.library_digest)}</span></div>
     <div><strong>Platform:</strong> ${escapeHtml(validated.branding.company_url)}</div>
   </div>
-${validated.schema_version === 3 ? renderPublicControlReportAppendix(validated.public_review_appendix) : ''}</body>
+${validated.schema_version >= 3 && 'public_review_appendix' in validated ? renderPublicControlReportAppendix(validated.public_review_appendix, validated.schema_version === 4 ? validated.asset_scope : undefined) : ''}</body>
 </html>`;
 }

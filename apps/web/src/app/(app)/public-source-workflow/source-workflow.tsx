@@ -29,6 +29,7 @@ import {
 import { SourceProjectionView, SourceResultView } from './source-result';
 import { SourceReview } from './source-review';
 import { PublicWebsiteClient } from '../connectors/public-website-client';
+import type { AssetReviewHint } from './public-control-asset-selection';
 import { PublicControlReview } from './public-control-review';
 
 const checksSchema = z.object({
@@ -58,6 +59,7 @@ export function PublicSourceWorkflow(props: {
   canReview?: boolean;
   canCapture?: boolean;
   initialCheckId?: string;
+  assetHint?: AssetReviewHint;
 }) {
   return (
     <Workflow key={`${props.tenantId}/${props.actorId}/${props.initialCheckId ?? ''}`} {...props} />
@@ -70,6 +72,7 @@ function Workflow({
   canReview = false,
   canCapture = false,
   initialCheckId,
+  assetHint,
 }: {
   tenantId: string;
   actorId: string;
@@ -77,6 +80,7 @@ function Workflow({
   canReview?: boolean;
   canCapture?: boolean;
   initialCheckId?: string;
+  assetHint?: AssetReviewHint;
 }) {
   const helpId = useId();
   const [reviewLocked, setReviewLocked] = useState(true);
@@ -687,6 +691,7 @@ function Workflow({
         </p>
       )}
       <PublicControlReview
+        assetHint={assetHint}
         actorId={actorId}
         canReview={canReview}
         canRun={canReview && canInvoke}

@@ -9,6 +9,7 @@ import {
   publicControlCatalogueV2Manifest,
   publicEvidenceCatalogueRowsMatchV2,
 } from '@axiom/control-library';
+import type { AssetReviewHint } from './public-control-asset-selection';
 import { PublicControlHumanReview } from './public-control-human-review';
 import { sourceRequest, SourceWorkflowError } from './source-request';
 
@@ -32,6 +33,7 @@ type Props = {
   actorId?: string;
   canReview?: boolean;
   canRun?: boolean;
+  assetHint?: AssetReviewHint;
 };
 type Evidence = PublicControlAssessmentV2['controls'][number]['questions'][number]['evidence'];
 const stateLabels: Record<Evidence['state'], string> = {
@@ -84,6 +86,7 @@ function Review({
   engagementId,
   checkId,
   recaptureContent,
+  assetHint,
 }: Props) {
   const helpId = useId();
   const [result, setResult] = useState<Result | null>(null);
@@ -192,6 +195,7 @@ function Review({
         <>
           {actorId && z.uuid().safeParse(actorId).success && (
             <PublicControlHumanReview
+              assetHint={assetHint}
               actorId={actorId}
               canReview={canReview}
               canRun={canRun}
