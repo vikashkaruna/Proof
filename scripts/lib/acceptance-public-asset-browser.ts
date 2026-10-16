@@ -10,12 +10,14 @@ import {
   openSync,
   readSync,
   closeSync,
+  linkSync,
+  unlinkSync,
 } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { loadParityFixture } from './parity-fixture-target-core.js';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
 import { parseCatalogueJson } from '../../packages/control-library/src/index.js';
@@ -135,10 +137,25 @@ export function writeRegisteredBrowserFile(
       ? registeredBrowserConfigSchema.safeParse(value)
       : registeredBrowserSubmissionSchema.safeParse(value);
   if (!parsed.success) throw new Error('registered browser file refused');
-  writeFileSync(join(directory, `${name}.private.json`), JSON.stringify(parsed.data), {
-    flag: 'wx',
-    mode: 0o600,
-  });
+  // The final name must never expose a partially written JSON record. A hard
+  // link publishes the closed file atomically and refuses an existing target.
+  const temporary = join(directory, `.${name}-${randomUUID()}.private.json`);
+  const descriptor = openSync(temporary, 'wx', 0o600);
+  try {
+    try {
+      writeFileSync(descriptor, JSON.stringify(parsed.data));
+    } finally {
+      closeSync(descriptor);
+    }
+    secureDirectory(directory);
+    linkSync(temporary, join(directory, `${name}.private.json`));
+  } finally {
+    try {
+      unlinkSync(temporary);
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
+  }
 }
 export function readRegisteredBrowserFile(
   directory: string,

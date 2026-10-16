@@ -168,6 +168,7 @@ jobs:
             .axiom-runtime/evidence-storage/browser-results.json
             .axiom-runtime/evidence-storage/cold-pdf-results.json
             .axiom-runtime/workload-assessment/results.json
+            .axiom-runtime/workload-assessment/registered-browser-diagnostics.json
             .axiom-runtime/workload-trust/results.json
             .axiom-runtime/workload-identity/results.json
           include-hidden-files: true

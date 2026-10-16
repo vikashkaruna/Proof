@@ -1,4 +1,8 @@
 import {
+  readRegisteredBrowserDiagnostics,
+  assertRegisteredDiagnosticDestinationAbsent,
+} from './lib/registered-browser-diagnostics.js';
+import {
   registeredBrowserRequested,
   createRegisteredBrowserConfig,
   registeredBrowserDirectory,
@@ -92,6 +96,9 @@ import { AssessmentConfirmation } from '../services/bff/src/workloads/assessment
 import { AssessmentTools } from '../services/bff/src/workloads/assessment-tools.js';
 import { workloadToolsRoutes } from '../services/bff/src/routes/workload-tools.js';
 let phase = 'setup';
+let registeredDiagnosticDirectory: string | undefined;
+let registeredExitCode: number | null = null;
+let registeredExitSignal: NodeJS.Signals | null = null;
 const outcomes: Record<string, boolean> = {};
 let finalizedHttpProof: Record<string, unknown> | undefined;
 let publicReportProof: Awaited<ReturnType<typeof verifyPublicControlReports>> | undefined;
@@ -124,6 +131,13 @@ async function stopOwnedBrowserChildren() {
 async function main() {
   const withPublicReports = reportAcceptanceRequested();
   const withRegisteredBrowser = registeredBrowserRequested();
+  if (withRegisteredBrowser) {
+    phase = 'registered-browser-diagnostic-preflight';
+    assertRegisteredDiagnosticDestinationAbsent(
+      '.axiom-runtime/workload-assessment/registered-browser-diagnostics.json',
+    );
+    phase = 'setup';
+  }
   const browserNonce = randomBytes(16).toString('hex');
   let registeredBrowserProcess: ReturnType<typeof spawn> | undefined;
   let registeredBrowserCompletion: Promise<void> | undefined;
@@ -1627,6 +1641,7 @@ except Exception as error:
               writeRegisteredBrowserFile(directory, 'config', config);
               phase = 'normal-auth-public-source-browser-launcher-prepare';
               prepareRegisteredBrowserLaunchers(process.cwd(), directory, config);
+              registeredDiagnosticDirectory = directory;
               const browserLog = openSync(join(directory, 'browser.private.log'), 'wx', 0o600);
               try {
                 phase = 'normal-auth-public-source-browser-start';
@@ -1666,11 +1681,12 @@ except Exception as error:
                 registeredBrowserProcess!.once('error', () =>
                   reject(new Error('registered browser launch refused')),
                 );
-                registeredBrowserProcess!.once('exit', (code) =>
-                  code === 0
-                    ? resolve()
-                    : reject(new Error('registered browser acceptance failed')),
-                );
+                registeredBrowserProcess!.once('exit', (code, signal) => {
+                  registeredExitCode = code;
+                  registeredExitSignal = signal;
+                  if (code === 0) resolve();
+                  else reject(new Error('registered browser acceptance failed'));
+                });
               });
               // Attach a handler immediately while the source phase is still waiting.
               void registeredBrowserCompletion.catch(() => undefined);
@@ -2675,6 +2691,19 @@ main()
   .finally(async () => {
     try {
       await stopOwnedBrowserChildren();
+      if (registeredDiagnosticDirectory) {
+        const diagnostic = readRegisteredBrowserDiagnostics(
+          join(registeredDiagnosticDirectory, 'browser-results.private.json'),
+          { exitCode: registeredExitCode, signal: registeredExitSignal, phase },
+        );
+        mkdirSync('.axiom-runtime/workload-assessment', { recursive: true, mode: 0o700 });
+        writeFileSync(
+          '.axiom-runtime/workload-assessment/registered-browser-diagnostics.json',
+          JSON.stringify(diagnostic) + '\n',
+          { flag: 'wx', mode: 0o600 },
+        );
+        process.stderr.write(`Registered browser diagnostic: ${JSON.stringify(diagnostic)}\n`);
+      }
     } catch {
       process.stderr.write(
         'Workload assessment failed at owned-browser-cleanup. Private output withheld.\n',
