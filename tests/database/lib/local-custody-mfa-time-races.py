@@ -66,10 +66,10 @@ create function local150_race.consume() returns jsonb language plpgsql as $$decl
  v:=public.consume_local_custody_mfa_challenge(local150_race.id(11),local150_race.id(1),local150_race.id(101),local150_race.id(41),local150_race.id(71),binding_digest,s.c,1,local150_race.id(71));
  execute format('set local role %I',prior);return v;
  exception when others then execute format('set local role %I',prior);raise;end$$;
-create function local150_race.issue_after_release() returns uuid language plpgsql as $$declare c uuid;begin
+create function local150_race.issue_after_release() returns uuid language plpgsql as $$declare v_issued_id uuid;begin
  -- No fixture pre-lock: the actual issue RPC itself must block on47.
- c:=local150_race.issue(1,local150_race.request(81,'request'));
- update local150_race.state set issued_id=c;return c;
+ v_issued_id:=local150_race.issue(1,local150_race.request(81,'request'));
+ update local150_race.state set issued_id=v_issued_id;return v_issued_id;
 end$$;
 set constraints all immediate;commit;
 """
