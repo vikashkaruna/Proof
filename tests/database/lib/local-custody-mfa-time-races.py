@@ -56,14 +56,14 @@ insert into local150_race.state(c,q) select local150_race.issue(1,q),q from (sel
 -- Synthetic BFF proof stand-in: the native test charges one attempt; real
 -- TOTP/recovery proof remains exclusively in the production BFF/browser tests.
 update public.mfa_challenges set attempts=1 where id=(select c from local150_race.state);
-create function local150_race.satisfy() returns jsonb language plpgsql as $$declare v jsonb;s local150_race.state;prior text:=current_user;begin
- select * into s from local150_race.state;set local role service_role;
- v:=public.satisfy_local_custody_mfa_challenge(local150_race.id(11),local150_race.id(1),local150_race.id(101),local150_race.id(41),local150_race.id(71),local150_race.binding(s.q,1),s.c,1,'totp');
+create function local150_race.satisfy() returns jsonb language plpgsql as $$declare v jsonb;s local150_race.state;binding_digest text;prior text:=current_user;begin
+ select * into s from local150_race.state;binding_digest:=local150_race.binding(s.q,1);set local role service_role;
+ v:=public.satisfy_local_custody_mfa_challenge(local150_race.id(11),local150_race.id(1),local150_race.id(101),local150_race.id(41),local150_race.id(71),binding_digest,s.c,1,'totp');
  execute format('set local role %I',prior);return v;
  exception when others then execute format('set local role %I',prior);raise;end$$;
-create function local150_race.consume() returns jsonb language plpgsql as $$declare v jsonb;s local150_race.state;prior text:=current_user;begin
- select * into s from local150_race.state;set local role service_role;
- v:=public.consume_local_custody_mfa_challenge(local150_race.id(11),local150_race.id(1),local150_race.id(101),local150_race.id(41),local150_race.id(71),local150_race.binding(s.q,1),s.c,1,local150_race.id(71));
+create function local150_race.consume() returns jsonb language plpgsql as $$declare v jsonb;s local150_race.state;binding_digest text;prior text:=current_user;begin
+ select * into s from local150_race.state;binding_digest:=local150_race.binding(s.q,1);set local role service_role;
+ v:=public.consume_local_custody_mfa_challenge(local150_race.id(11),local150_race.id(1),local150_race.id(101),local150_race.id(41),local150_race.id(71),binding_digest,s.c,1,local150_race.id(71));
  execute format('set local role %I',prior);return v;
  exception when others then execute format('set local role %I',prior);raise;end$$;
 create function local150_race.issue_after_release() returns uuid language plpgsql as $$declare c uuid;begin

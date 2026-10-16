@@ -53,16 +53,16 @@ create function pg_temp.refused(request_text text,actor int,code text default '4
 -- Fixture calls model the already completed BFF proof by charging exactly one
 -- attempt; this is SQL contract coverage, NOT TOTP/browser proof.
 create function pg_temp.binding(request_text text,actor int) returns text language sql as $$select encode(sha256(convert_to(controller_security.canonical_questionnaire_json(jsonb_build_array('axiom.local-custody.transition',1,pg_temp.id(11)::text,pg_temp.id(actor)::text,pg_temp.id(100+actor)::text,encode(sha256(convert_to(request_text,'UTF8')),'hex'))),'UTF8')),'hex')$$;
-create function pg_temp.issue(actor int,request_text text,ttl integer default 300000) returns uuid language plpgsql as $$declare v jsonb;prior text:=current_user;begin
+create function pg_temp.issue(actor int,request_text text,ttl integer default 300000) returns uuid language plpgsql as $$declare v jsonb;prior text:=current_user;binding_digest text:=pg_temp.binding(request_text,actor);operation_key uuid:=(request_text::jsonb->>'operationKey')::uuid;begin
  set local role service_role;
- v:=public.issue_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(actor),pg_temp.id(100+actor),pg_temp.id(40+actor),(request_text::jsonb->>'operationKey')::uuid,pg_temp.binding(request_text,actor),ttl);
+ v:=public.issue_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(actor),pg_temp.id(100+actor),pg_temp.id(40+actor),operation_key,binding_digest,ttl);
  execute format('set local role %I',prior);return (v->>'id')::uuid;
  exception when others then execute format('set local role %I',prior);raise;end$$;
-create function pg_temp.prove(actor int,request_text text,c uuid) returns jsonb language plpgsql as $$declare v jsonb;prior text:=current_user;begin
+create function pg_temp.prove(actor int,request_text text,c uuid) returns jsonb language plpgsql as $$declare v jsonb;prior text:=current_user;binding_digest text:=pg_temp.binding(request_text,actor);operation_key uuid:=(request_text::jsonb->>'operationKey')::uuid;begin
  update public.mfa_challenges set attempts=1 where id=c;
  set local role service_role;
- v:=public.satisfy_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(actor),pg_temp.id(100+actor),pg_temp.id(40+actor),(request_text::jsonb->>'operationKey')::uuid,pg_temp.binding(request_text,actor),c,1,'totp');
- v:=public.consume_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(actor),pg_temp.id(100+actor),pg_temp.id(40+actor),(request_text::jsonb->>'operationKey')::uuid,pg_temp.binding(request_text,actor),c,1,(request_text::jsonb->>'operationKey')::uuid);
+ v:=public.satisfy_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(actor),pg_temp.id(100+actor),pg_temp.id(40+actor),operation_key,binding_digest,c,1,'totp');
+ v:=public.consume_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(actor),pg_temp.id(100+actor),pg_temp.id(40+actor),operation_key,binding_digest,c,1,operation_key);
  execute format('set local role %I',prior);return v;
  exception when others then execute format('set local role %I',prior);raise;end$$;
 -- Negative legacy clock constructions remain refused by the UNCHANGED writer.
@@ -107,7 +107,7 @@ do $$declare n bigint;ttl int;begin
 end$$;
 -- Scope, session, factor, expiry and CAS remain fail-closed. Each subtransaction
 -- rolls its synthetic fixture mutation back after the expected refusal.
-do $$declare q text:=pg_temp.request(71,'request');c uuid;mode text;begin
+do $$declare q text:=pg_temp.request(71,'request');binding_digest text:=pg_temp.binding(q,1);c uuid;mode text;begin
  c:=pg_temp.issue(1,q);update public.mfa_challenges set attempts=1 where id=c;
  foreach mode in array array['session','factor','tenant','digest','attempt','expired','retired','future-created','wrong-purpose'] loop
   begin
@@ -116,25 +116,25 @@ do $$declare q text:=pg_temp.request(71,'request');c uuid;mode text;begin
    if mode='future-created' then update public.mfa_challenges set created_at=clock_timestamp()+interval '1 second' where id=c;end if;
    if mode='wrong-purpose' then update public.mfa_challenges set purpose='login' where id=c;end if;
    set local role service_role;
-   perform public.satisfy_local_custody_mfa_challenge(case when mode='tenant' then pg_temp.id(12) else pg_temp.id(11) end,pg_temp.id(1),case when mode='session' then pg_temp.id(102) else pg_temp.id(101) end,case when mode='factor' then pg_temp.id(42) else pg_temp.id(41) end,pg_temp.id(71),case when mode='digest' then repeat('a',64) else pg_temp.binding(q,1) end,c,case when mode='attempt' then 2 else 1 end,'totp');
+   perform public.satisfy_local_custody_mfa_challenge(case when mode='tenant' then pg_temp.id(12) else pg_temp.id(11) end,pg_temp.id(1),case when mode='session' then pg_temp.id(102) else pg_temp.id(101) end,case when mode='factor' then pg_temp.id(42) else pg_temp.id(41) end,pg_temp.id(71),case when mode='digest' then repeat('a',64) else binding_digest end,c,case when mode='attempt' then 2 else 1 end,'totp');
    reset role;raise exception 'guard accepted: %',mode;
   exception when insufficient_privilege then reset role;end;
  end loop;
  set local role service_role;
- perform public.satisfy_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),pg_temp.binding(q,1),c,1,'totp');reset role;
- begin set local role service_role;perform public.satisfy_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),pg_temp.binding(q,1),c,1,'totp');raise exception 'second satisfaction accepted';exception when insufficient_privilege then reset role;end;
+ perform public.satisfy_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),binding_digest,c,1,'totp');reset role;
+ begin set local role service_role;perform public.satisfy_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),binding_digest,c,1,'totp');raise exception 'second satisfaction accepted';exception when insufficient_privilege then reset role;end;
  foreach mode in array array['future-satisfied','expired-session','consumed','attempt-moved'] loop
   begin
    if mode='future-satisfied' then update public.mfa_challenges set satisfied_at=clock_timestamp()+interval '1 second' where id=c;end if;
    if mode='expired-session' then update auth.sessions set not_after=clock_timestamp()-interval '1 second' where id=pg_temp.id(101);end if;
    if mode='consumed' then update public.mfa_challenges set consumed_at=clock_timestamp() where id=c;end if;
    if mode='attempt-moved' then update public.mfa_challenges set attempts=2 where id=c;end if;
-   set local role service_role;perform public.consume_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),pg_temp.binding(q,1),c,1,pg_temp.id(71));reset role;
+   set local role service_role;perform public.consume_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),binding_digest,c,1,pg_temp.id(71));reset role;
    raise exception 'consume guard accepted: %',mode;
   exception when insufficient_privilege then reset role;end;
  end loop;
- set local role service_role;perform public.consume_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),pg_temp.binding(q,1),c,1,pg_temp.id(71));reset role;
- begin set local role service_role;perform public.consume_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),pg_temp.binding(q,1),c,1,pg_temp.id(71));raise exception 'second consumption accepted';exception when insufficient_privilege then reset role;end;
+ set local role service_role;perform public.consume_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),binding_digest,c,1,pg_temp.id(71));reset role;
+ begin set local role service_role;perform public.consume_local_custody_mfa_challenge(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),pg_temp.id(71),binding_digest,c,1,pg_temp.id(71));raise exception 'second consumption accepted';exception when insufficient_privilege then reset role;end;
 end$$;
 -- Functions are not browser/human-writer/agent/verifier APIs; even owner direct
 -- calls without SET ROLE service_role fail the explicit current-role check.

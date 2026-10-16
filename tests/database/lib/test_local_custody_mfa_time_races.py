@@ -54,6 +54,48 @@ class MfaTimeRaces(unittest.TestCase):
         startup = inspect.getsource(RACES.Runner.race)
         self.assertNotIn("set held_until=", startup)
 
+    @staticmethod
+    def assert_no_restricted_binding_after_service_role(text):
+        import re
+
+        windows = re.findall(
+            r"set local role service_role;(.*?)(?:reset role;|execute format\('set local role)",
+            text,
+            re.DOTALL,
+        )
+        if not windows:
+            raise AssertionError("expected real service-role windows")
+        for window in windows:
+            if re.search(
+                r"(?:pg_temp|local150_race)\.binding\(|controller_security\.", window
+            ):
+                raise AssertionError("restricted fixture binding under service_role")
+
+    def test_native_and_race_bindings_precomputed_before_service_role(self):
+        root = HERE.parents[2]
+        native = (
+            root / "tests/database/local-custody-mfa-time-contract.test.sql"
+        ).read_text()
+        race = RACES.setup(root)
+        self.assert_no_restricted_binding_after_service_role(native)
+        self.assert_no_restricted_binding_after_service_role(race)
+        self.assertIn(
+            "binding_digest text:=pg_temp.binding(request_text,actor)", native
+        )
+        self.assertIn(
+            "binding_digest:=local150_race.binding(s.q,1);set local role service_role",
+            race,
+        )
+        migration = (
+            root / "infra/supabase/migrations/0150_local_custody_mfa_database_clock.sql"
+        ).read_text()
+        self.assertNotIn("grant usage on schema controller_security", migration.lower())
+
+    def test_prior_rpc_argument_evaluation_under_service_role_is_caught(self):
+        legacy = "set local role service_role;perform public.issue_local_custody_mfa_challenge(pg_temp.binding(request_text,actor));execute format('set local role %I',prior);"
+        with self.assertRaisesRegex(AssertionError, "restricted fixture binding"):
+            self.assert_no_restricted_binding_after_service_role(legacy)
+
     def test_actual47_guard_and_cleanup_reused(self):
         contract = "custody145:tenant:" + RACES.TENANT
         self.assertIn("47", RACES.BARRIER.custody145_probe_query(contract, 123, 456))
