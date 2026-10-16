@@ -1,6 +1,7 @@
 import { requireInternalContext } from '@/lib/tenant-context';
 import { BRAND, loadWebEnv } from '@axiom/config';
 import { AgentWorkbenchClient } from './workbench-client';
+import { startOfDisplayDay } from '@/lib/display-time';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +14,8 @@ export default async function WorkbenchPage() {
   // C-W0-7: counts are read or shown as unavailable — never a sample number.
   // (The previous query named ledger columns that do not exist, so it always
   // failed and the page always displayed invented fallback counts.)
-  const startOfDay = new Date(new Date().setHours(0, 0, 0, 0)).toISOString();
+  // The display-zone (IST by default) day, not the container's local one.
+  const startOfDay = startOfDisplayDay().toISOString();
   const [ledgerRes, plansRes, todayRes] = await Promise.all([
     supabase
       .from('audit_ledger')

@@ -253,6 +253,7 @@ services:
     restart: unless-stopped
     ports: ['${AXIOM_BIND_ADDRESS:?set intranet bind}:${WEB_PORT:-3001}:3001']
     environment:
+      AXIOM_DISPLAY_TIMEZONE: ${AXIOM_DISPLAY_TIMEZONE:-Asia/Kolkata}
       NODE_ENV: production
       ENVIRONMENT: onprem
       BFF_PUBLIC_URL: http://bff:4000

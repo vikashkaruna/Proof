@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDate } from '@/lib/display-time';
 import { useCallback, useEffect, useState } from 'react';
 import { z } from 'zod';
 
@@ -196,7 +197,7 @@ export function ApprovalProofArchive({ tenantId, tokenId, canManage }: Props) {
           {archive?.versionId && (
             <p className="mt-1 break-all text-xs text-slate-500">
               Provider version {archive.versionId} · Retained until{' '}
-              {new Date(archive.retainUntil).toLocaleDateString()}
+              {formatDate(archive.retainUntil)}
             </p>
           )}
         </div>

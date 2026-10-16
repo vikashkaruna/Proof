@@ -344,7 +344,7 @@ it('prepares an exact review predecessor and new future reminder without changin
   fireEvent.change(screen.getByLabelText('Reason'), {
     target: { value: 'Periodic review performed' },
   });
-  fireEvent.change(screen.getByLabelText('Next periodic review (review action only)'), {
+  fireEvent.change(screen.getByLabelText(/^Next periodic review \(review action only, Asia\/Kolkata\)/), {
     target: { value: '2030-10-16T12:00' },
   });
   fireEvent.click(
@@ -355,7 +355,8 @@ it('prepares an exact review predecessor and new future reminder without changin
   expect(readCustodyIntents(localStorage, tenant, actor)[0]?.request).toMatchObject({
     transition: 'review',
     previousEventId: event,
-    nextReviewDueAt: Date.parse('2030-10-16T12:00'),
+    // Wall-clock 12:00 in the display zone (IST), whatever the host zone is.
+    nextReviewDueAt: Date.UTC(2030, 9, 16, 6, 30),
     policyText: c.rows[0]!.policyText,
   });
 });

@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDateTime } from '@/lib/display-time';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AgentLabel } from '@axiom/ui';
 import { z } from 'zod';
@@ -61,7 +62,7 @@ type BoardRequest = z.infer<typeof requestSchema>;
 type Artifact = z.infer<typeof artifactSchema>;
 
 const pageSize = 20;
-const date = (value: string) => new Date(value).toLocaleString();
+const date = (value: string) => formatDateTime(value);
 
 type BoardWorkflowProps = {
   tenantId: string;

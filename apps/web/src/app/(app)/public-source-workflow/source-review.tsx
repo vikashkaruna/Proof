@@ -1,4 +1,5 @@
 'use client';
+import { formatDateTime } from '@/lib/display-time';
 
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -452,7 +453,7 @@ function ReviewHistory({
           <li key={row.review_id} className="space-y-1 rounded-lg border border-slate-200 p-3">
             <p>
               {row.decision} · {row.is_current ? 'current judgment' : 'superseded judgment'} ·{' '}
-              {row.created_at}
+              {formatDateTime(row.created_at)}
             </p>
             <p className="whitespace-pre-wrap break-words">{row.justification}</p>
             <p className="break-all text-xs">

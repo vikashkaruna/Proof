@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDateTime } from '@/lib/display-time';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
@@ -27,7 +28,7 @@ const operationsSchema = z.object({ data: z.array(operationSchema), meta: pageMe
 const operationResponse = z.object({ data: operationSchema });
 const providerResponse = z.object({ data: verificationSchema });
 function date(value: string) {
-  return new Date(value).toLocaleString();
+  return formatDateTime(value);
 }
 
 export function EvidenceClient({
