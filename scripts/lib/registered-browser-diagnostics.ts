@@ -37,6 +37,23 @@ const progressStages = new Set([
   'assessment-submit',
   'submission-retain',
 ]);
+/** Fixed checkpoint names plus HTTP status/equality booleans only. No request data. */
+function savedTargetSelectionEvidence(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  const status = /^saved-targets-http-status:([1-5][0-9]{2})$/.exec(value);
+  if (status) return { checkpoint: 'http-status', httpStatus: Number(status[1]) };
+  if (value === 'saved-targets-response-schema') return { checkpoint: 'response-schema' };
+  const result =
+    /^saved-targets-(request-tenant|response-kind|response-tenant|response-actor|response-estate|response-system|target-digest|target-withdrawn|target-inventory-current):(true|false)(?::(true|false))?$/.exec(
+      value,
+    );
+  if (!result || (result[1] === 'target-digest') !== (result[3] !== undefined)) return undefined;
+  return {
+    checkpoint: result[1]!,
+    matches: result[2] === 'true',
+    ...(result[3] === undefined ? {} : { targetPresent: result[3] === 'true' }),
+  };
+}
 /** Read only a bounded private regular-file tail; never return browser output. */
 export function readRegisteredBrowserProgress(path: string): string {
   let descriptor: number | undefined;
@@ -61,7 +78,8 @@ export function readRegisteredBrowserProgress(path: string): string {
       const offset = line.indexOf(marker);
       if (offset < 0) continue;
       const candidate = line.slice(offset + marker.length);
-      if (progressStages.has(candidate)) progress = candidate;
+      if (progressStages.has(candidate) || savedTargetSelectionEvidence(candidate))
+        progress = candidate;
     }
     return progress;
   } catch {
@@ -148,14 +166,17 @@ export function registeredBrowserDiagnostics(
   )
     ? String(lifecycle.signal)
     : null;
+  const targetSelection = savedTargetSelectionEvidence(lifecycle.progress);
   return {
     version: 1,
     kind: 'sanitized-registered-browser-diagnostics',
     phase,
-    progress:
-      typeof lifecycle.progress === 'string' && progressStages.has(lifecycle.progress)
+    progress: targetSelection
+      ? `saved-targets-${targetSelection.checkpoint}`
+      : typeof lifecycle.progress === 'string' && progressStages.has(lifecycle.progress)
         ? lifecycle.progress
         : 'unknown',
+    ...(targetSelection ? { targetSelection } : {}),
     report: lifecycle.report,
     exitCode,
     signal,

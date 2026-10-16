@@ -24,6 +24,30 @@ import {
 } from '../../../packages/types/src/index';
 
 const operationPath = '/api/bff/v1/public-website-assets/operations';
+/** Fixed diagnostic labels and public status/equality booleans; never identifiers or response text. */
+function targetSelectionCheckpoint(
+  checkpoint:
+    | 'http-status'
+    | 'request-tenant'
+    | 'response-schema'
+    | 'response-kind'
+    | 'response-tenant'
+    | 'response-actor'
+    | 'response-estate'
+    | 'response-system'
+    | 'target-digest'
+    | 'target-withdrawn'
+    | 'target-inventory-current',
+  value?: number | boolean,
+  present?: boolean,
+) {
+  process.stdout.write(
+    `[registered-website-stage] saved-targets-${checkpoint}${
+      value === undefined ? '' : `:${value}`
+    }${present === undefined ? '' : `:${present}`}\n`,
+  );
+}
+
 function registeredCombobox(scope: Page | Locator, name: string) {
   return scope.getByRole('combobox', { name, exact: true });
 }
@@ -111,19 +135,37 @@ export async function registeredWebsiteSourceInBrowser(
     .getByRole('button', { name: 'Load saved targets', exact: true })
     .click({ timeout: 15_000 });
   const loadedTargets = await targetsResponse;
+  targetSelectionCheckpoint('http-status', loadedTargets.status());
   expect(loadedTargets.status()).toBe(200);
+  targetSelectionCheckpoint(
+    'request-tenant',
+    loadedTargets.request().headers()['x-tenant-id'] === config.tenantId,
+  );
   expect(loadedTargets.request().headers()['x-tenant-id']).toBe(config.tenantId);
+  targetSelectionCheckpoint('response-schema');
   const targetsPage = publicWebsiteAssetSelectionPageSchema.parse(
     (await loadedTargets.json()).data,
   );
+  targetSelectionCheckpoint('response-kind', targetsPage.kind === 'targets');
   if (targetsPage.kind !== 'targets') throw new Error('Owned target selection refused');
+  targetSelectionCheckpoint('response-tenant', targetsPage.tenantId === config.tenantId);
   expect(targetsPage.tenantId).toBe(config.tenantId);
+  targetSelectionCheckpoint('response-actor', targetsPage.actorId === config.actorId);
   expect(targetsPage.actorId).toBe(config.actorId);
+  targetSelectionCheckpoint('response-estate', targetsPage.estateId === config.estateId);
   expect(targetsPage.estateId).toBe(config.estateId);
+  targetSelectionCheckpoint('response-system', targetsPage.systemId === config.systemId);
   expect(targetsPage.systemId).toBe(config.systemId);
   const selectedTarget = targetsPage.rows.find((row) => row.id === targetSnapshot.id);
+  targetSelectionCheckpoint(
+    'target-digest',
+    selectedTarget?.snapshotSha256 === target.snapshotSha256,
+    selectedTarget !== undefined,
+  );
   expect(selectedTarget?.snapshotSha256).toBe(target.snapshotSha256);
+  targetSelectionCheckpoint('target-withdrawn', selectedTarget?.withdrawn === false);
   expect(selectedTarget?.withdrawn).toBe(false);
+  targetSelectionCheckpoint('target-inventory-current', selectedTarget?.inventoryCurrent === true);
   expect(selectedTarget?.inventoryCurrent).toBe(true);
   await registeredCombobox(console, 'Registered public target').selectOption(targetSnapshot.id, {
     timeout: 15_000,
