@@ -13,3 +13,5 @@ export * from './archive';
 export * from './pramaan-archive';
 export * from './assessment-interpretation';
 export * from './public-control-provenance';
+export * from './coverage-first-source';
+export * from './coverage-first-report';

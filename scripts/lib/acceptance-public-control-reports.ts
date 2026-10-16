@@ -17,20 +17,15 @@ import { z } from 'zod';
 import { EvidenceVault } from '../../packages/evidence/src/index.js';
 import { generateTotp } from '../../packages/mfa/src/index.js';
 import {
-  BoardReportContentV3Schema,
-  BoardReportContentV4Schema,
-} from '../../packages/report-kit/src/board-report.js';
+  coverageFirstPolicy,
+  parseCoverageFirstJson,
+  verifyCoverageFirstSource,
+} from '../../packages/report-kit/src/coverage-first-source.js';
 import {
-  AuditorAssessmentPackV3Schema,
-  AuditorAssessmentPackV4Schema,
-  FrozenAuditorSourceSchema,
-} from '../../packages/report-kit/src/auditor-source.js';
-import { FrozenBoardSourceSchema } from '../../packages/report-kit/src/board-source.js';
-import {
-  verifyFrozenHumanControlReview,
-  verifyFrozenHumanControlReviewWithAsset,
-} from '../../packages/report-kit/src/public-control-provenance.js';
-import { parseCatalogueJson } from '../../packages/control-library/src/index.js';
+  CoverageFirstDocumentV5Schema,
+  buildCoverageFirstReport,
+} from '../../packages/report-kit/src/coverage-first-report.js';
+import { canonicalJson } from '../../packages/ledger/src/index.js';
 
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const uuid = z.uuid();
@@ -214,8 +209,16 @@ const artifact = z.object({
 });
 export const publicReportBrowserHandoffSchema = z
   .object({
-    version: z.literal(1),
+    version: z.literal(2),
     kind: z.literal('owned-reviewed-public-source-reports'),
+    presentation: z
+      .object({
+        sourceVersion: z.literal(4),
+        documentVersion: z.literal(5),
+        metrics: z.literal('withheld'),
+        policySha256: z.literal(sha(canonicalJson(coverageFirstPolicy()))),
+      })
+      .strict(),
     tenantId: uuid,
     tenantSlug: z.string().regex(/^worker-[a-f0-9-]{36}$/),
     source: sourceProofSchema.strict(),
@@ -228,6 +231,7 @@ export const publicReportBrowserHandoffSchema = z
             requestId: uuid,
             reportId: uuid,
             sourceSha256: digest,
+            retainedSourceSha256: digest,
             contentSha256: digest,
             pdfSha256: digest,
           })
@@ -252,6 +256,17 @@ export function reportAcceptanceCodeSha256(repositoryRoot = '.') {
       'scripts/lib/acceptance-public-control-reports.ts',
       'infra/supabase/migrations/0137_public_control_assessment_sources.sql',
       'infra/supabase/migrations/0138_public_control_report_provenance.sql',
+      'infra/supabase/migrations/0141_public_control_review_asset_sources.sql',
+      'infra/supabase/migrations/0142_public_control_asset_report_provenance.sql',
+      'infra/supabase/migrations/0144_coverage_first_public_report_presentation.sql',
+      'packages/report-kit/src/coverage-first-source.ts',
+      'packages/report-kit/src/coverage-first-report.ts',
+      'packages/report-kit/src/pramaan-archive.ts',
+      'services/bff/src/services/board-artifacts.ts',
+      'services/bff/src/services/statutory-artifacts.ts',
+      'tests/e2e/tests/board-reports-provider.spec.ts',
+      'apps/web/src/app/(app)/reports/reports-client.tsx',
+      'apps/web/src/app/(app)/reports/coverage-first-preview.tsx',
       'packages/report-kit/src/public-control-provenance.ts',
       'packages/report-kit/src/board-report.ts',
       'packages/report-kit/src/auditor-source.ts',
@@ -290,6 +305,92 @@ export function writePublicReportBrowserHandoff(value: unknown) {
   assert.equal(handoff.codeSha256, reportAcceptanceCodeSha256());
   mkdirSync('.axiom-runtime/review/all-agent-acceptance', { recursive: true, mode: 0o700 });
   writeFileSync(HANDOFF, JSON.stringify(handoff, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+}
+
+/** Strict NEW-policy acceptance only. Legacy default cases use their separate
+ * source1/doc2 path; neither old sources nor optional policy versions pass here. */
+export function verifyCoverageFirstAcceptanceReport(input: {
+  kind: 'board' | 'auditor';
+  title: string;
+  tenantId: string;
+  requestId: string;
+  source: unknown;
+  resultDigest: string;
+  sourceText: string;
+  sourceSha256: string;
+  contentText: string;
+  contentSha256: string;
+}) {
+  const { kind, resultDigest } = input;
+  const source = sourceProofSchema.parse(input.source);
+  assert.equal(sha(input.sourceText), input.sourceSha256);
+  assert.equal(sha(input.contentText), input.contentSha256);
+  const frozen = verifyCoverageFirstSource(input.sourceText, input.sourceSha256, {
+    tenantId: input.tenantId,
+    requestId: input.requestId,
+    engagementId: source.engagementId,
+    assessmentRunId: source.runId,
+  });
+  assert.equal(frozen.envelope.report_kind, kind);
+  const parsed = frozen.source;
+  assert.equal(parsed.schema_version, source.asset ? 3 : 2);
+  assert(parsed.schema_version === 2 || parsed.schema_version === 3);
+  assert.equal(parsed.result_sha256, resultDigest);
+  const h = parsed.human_control_review;
+  assert.equal(h.estate_id, source.estateId);
+  assert.equal(h.review.id, source.reviewId);
+  assert.equal(h.job_id, source.jobId);
+  assert.equal(h.worker_input.sha256, source.inputSha256);
+  assert.equal(h.capture.capture_receipt.id, source.captureReceipt);
+  assert.equal(h.review.receipt.id, source.reviewReceipt);
+  assert.equal(h.requested_receipt.id, source.requestedReceipt);
+  const appendix = frozen.public_review_appendix;
+  const content = CoverageFirstDocumentV5Schema.parse(
+    parseCoverageFirstJson(input.contentText, 4194304),
+  );
+  assert.equal(content.schema_version, 5);
+  const expected = buildCoverageFirstReport({
+    requestId: input.requestId,
+    tenantId: input.tenantId,
+    engagementId: source.engagementId,
+    assessmentRunId: source.runId,
+    title: input.title,
+    generatedAt: content.generated_at,
+    sourceText: input.sourceText,
+    sourceSha256: input.sourceSha256,
+  });
+  assert.deepEqual(content, expected);
+  assert.deepEqual(content.presentation_policy, coverageFirstPolicy());
+  for (const key of ['posture_score', 'estimated_exposure_inr', 'score_band'])
+    assert(!Object.hasOwn(content, key));
+  const verified = frozen;
+  if (source.asset) {
+    assert.equal(h.capture.check_id, source.asset.checkId);
+    assert(verified.asset_scope);
+    assert(content.asset_scope);
+    assert.deepEqual(content.asset_scope, verified.asset_scope);
+    assert.equal(verified.asset_scope.target.id, source.asset.targetId);
+    assert.equal(verified.asset_scope.association.id, source.asset.associationId);
+    assert.equal(verified.asset_scope.target.sha256, source.asset.targetSha256);
+    assert.equal(verified.asset_scope.association.sha256, source.asset.associationSha256);
+    assert.equal(verified.asset_scope.estate.id, source.estateId);
+    assert.equal(verified.asset_scope.system.id, source.systemId);
+    assert.equal(verified.asset_scope.ownership_verified, false);
+    assert.equal(verified.asset_scope.connector_access_granted, false);
+    assert.equal(verified.asset_scope.review_required, true);
+  }
+  assert.equal(content.provenance.reviewId, source.reviewId);
+  assert.equal(content.controls.length, 46);
+  assert.equal(appendix.controls.length, 46);
+  assert.equal(appendix.declarationsVerified, false);
+  assert.equal(appendix.evidenceVerified, false);
+  assert.equal(appendix.requiresHumanReview, true);
+  return {
+    parsed,
+    content,
+    appendix,
+    retainedSourceSha256: frozen.envelope.retained_source.sha256,
+  };
 }
 
 type Request = (path: string, expected: number, options?: RequestInit) => Promise<Response>;
@@ -446,58 +547,18 @@ export async function verifyPublicControlReports(deps: {
         ),
       );
       assert.equal(sha(frozen.source_text), frozen.source_sha256);
-      const parsed =
-        kind === 'board'
-          ? FrozenBoardSourceSchema.parse(parseCatalogueJson(frozen.source_text, 4194304))
-          : FrozenAuditorSourceSchema.parse(parseCatalogueJson(frozen.source_text, 4194304));
-      assert.equal(parsed.schema_version, source.asset ? 3 : 2);
-      assert(parsed.schema_version === 2 || parsed.schema_version === 3);
-      assert.equal(parsed.result_sha256, resultDigest);
-      const h = parsed.human_control_review;
-      assert.equal(h.review.id, source.reviewId);
-      assert.equal(h.job_id, source.jobId);
-      assert.equal(h.worker_input.sha256, source.inputSha256);
-      assert.equal(h.capture.capture_receipt.id, source.captureReceipt);
-      assert.equal(h.review.receipt.id, source.reviewReceipt);
-      assert.equal(h.requested_receipt.id, source.requestedReceipt);
-      const scope = {
+      const { parsed, content, appendix } = verifyCoverageFirstAcceptanceReport({
+        kind,
+        title: body.title,
         tenantId: deps.tenantId,
-        engagementId: source.engagementId,
-        assessmentRunId: source.runId,
-        libraryVersion: parsed.library_version,
-        controlsText: parsed.controls_text,
-        resultText: parsed.result_text,
-      };
-      const verified = source.asset ? verifyFrozenHumanControlReviewWithAsset(h, scope) : undefined;
-      const appendix = verified?.public_review_appendix ?? verifyFrozenHumanControlReview(h, scope);
-      const content =
-        kind === 'board'
-          ? (source.asset ? BoardReportContentV4Schema : BoardReportContentV3Schema).parse(
-              JSON.parse(row.content_text),
-            )
-          : (source.asset ? AuditorAssessmentPackV4Schema : AuditorAssessmentPackV3Schema).parse(
-              JSON.parse(row.content_text),
-            );
-      assert.equal(content.schema_version, source.asset ? 4 : 3);
-      if (source.asset) {
-        assert(verified);
-        assert('asset_scope' in content);
-        assert.deepEqual(content.asset_scope, verified.asset_scope);
-        assert.equal(verified.asset_scope.target.id, source.asset.targetId);
-        assert.equal(verified.asset_scope.association.id, source.asset.associationId);
-        assert.equal(verified.asset_scope.target.sha256, source.asset.targetSha256);
-        assert.equal(verified.asset_scope.association.sha256, source.asset.associationSha256);
-        assert.equal(verified.asset_scope.estate.id, source.estateId);
-        assert.equal(verified.asset_scope.system.id, source.systemId);
-        assert.equal(verified.asset_scope.ownership_verified, false);
-        assert.equal(verified.asset_scope.connector_access_granted, false);
-        assert.equal(verified.asset_scope.review_required, true);
-      }
-      assert.deepEqual(content.public_review_appendix, appendix);
-      assert.equal(appendix.controls.length, 46);
-      assert.equal(appendix.declarationsVerified, false);
-      assert.equal(appendix.evidenceVerified, false);
-      assert.equal(appendix.requiresHumanReview, true);
+        requestId: requested.requestId,
+        source,
+        resultDigest,
+        sourceText: frozen.source_text,
+        sourceSha256: frozen.source_sha256,
+        contentText: row.content_text,
+        contentSha256: row.content_sha256,
+      });
       assert.equal(
         appendix.controls.find((c) => c.controlId === 'DPDPA-GOV-001')?.questions[0]?.judgment,
         'explicit',
@@ -628,6 +689,7 @@ export async function verifyPublicControlReports(deps: {
         requestId: requested.requestId,
         reportId,
         sourceSha256: frozen.source_sha256,
+        retainedSourceSha256: content.retained_source_sha256,
         contentSha256: row.content_sha256,
         pdfSha256: pdf.content_hash,
       });
@@ -642,8 +704,14 @@ export async function verifyPublicControlReports(deps: {
   assert.equal(verified.error, null);
   assert.deepEqual(verified.data, []);
   return publicReportBrowserHandoffSchema.parse({
-    version: 1,
+    version: 2,
     kind: 'owned-reviewed-public-source-reports',
+    presentation: {
+      sourceVersion: 4,
+      documentVersion: 5,
+      metrics: 'withheld',
+      policySha256: sha(canonicalJson(coverageFirstPolicy())),
+    },
     tenantId: deps.tenantId,
     tenantSlug: `worker-${deps.tenantId}`,
     source,

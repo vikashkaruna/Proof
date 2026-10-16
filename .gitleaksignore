@@ -105,3 +105,8 @@ d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json
 # Named synthetic MFA unit-fixture key in historical commit; current fixture uses repeated test material.
 # Exact finding only: no credential, path or rule-wide exclusion.
 7a71590cc2462708ee62a84ca4c25213f9e2ad1c:services/bff/src/routes/retained-sanket.test.ts:generic-api-key:173
+
+# Public SHA-256 custody-policy fixture vectors, independently rederived from
+# non-secret synthetic UUIDs/mode/key references. Exact historical findings only.
+fdbc2bcb1a7e674efe83b457f2805f34acfb7172:tests/database/local-custody-admission.test.sql:generic-api-key:139
+fdbc2bcb1a7e674efe83b457f2805f34acfb7172:tests/database/local-custody-admission.test.sql:generic-api-key:15

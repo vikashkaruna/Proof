@@ -1,3 +1,4 @@
+import { renderReviewedCoverageFirstReport } from '@axiom/report-kit/coverage-first-report';
 /** Exact-version, reviewed auditor publication. Provider uncertainty stays pending. */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -378,7 +379,13 @@ export class StatutoryArtifactService {
     const { report, request, source, review } = context;
     let html: string;
     try {
-      html = renderReviewedAuditorHtml({
+      const header = JSON.parse(source.source_text);
+      if (header.schema_version === 4 && header.report_kind !== 'auditor') throw Error();
+      html = (
+        JSON.parse(source.source_text).schema_version === 4
+          ? renderReviewedCoverageFirstReport
+          : renderReviewedAuditorHtml
+      )({
         sourceText: source.source_text,
         sourceSha256: source.source_sha256,
         documentText: report.content_text,
@@ -610,7 +617,10 @@ export class StatutoryArtifactService {
           source_sha256: source.source_sha256,
           content_sha256: report.content_sha256,
           review_sha256: review.review_sha256,
-          renderer_version: 'chromium-auditor-v1',
+          renderer_version:
+            JSON.parse(source.source_text).schema_version === 4
+              ? 'chromium-auditor-evidence-v5'
+              : 'chromium-auditor-v1',
           artifacts,
         },
         p_correlation_id: randomUUID(),
