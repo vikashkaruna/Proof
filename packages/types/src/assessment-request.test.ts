@@ -27,3 +27,29 @@ it.each([
 ])('refuses malformed or widened reviewed preconditions', (expectedQuestionnaire) => {
   expect(AssessmentRequestSchema.safeParse({ ...base, expectedQuestionnaire }).success).toBe(false);
 });
+it('accepts a retained review reference without browser declaration overrides', () => {
+  const ref = {
+    reviewId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    requestSha256: 'a'.repeat(64),
+    snapshotSha256: 'b'.repeat(64),
+  };
+  const request = {
+    operationKey: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    engagementId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    reviewRef: ref,
+  };
+  expect(AssessmentRequestSchema.parse(request).reviewRef).toEqual(ref);
+  expect(
+    AssessmentRequestSchema.safeParse({ ...request, answers: { C: { Q: true } } }).success,
+  ).toBe(false);
+  expect(
+    AssessmentRequestSchema.safeParse({ ...request, applicability: { processesHealth: true } })
+      .success,
+  ).toBe(false);
+  expect(
+    AssessmentRequestSchema.safeParse({
+      ...request,
+      expectedQuestionnaire: { libraryVersion: '0.1.1', questionnaireDigest: 'c'.repeat(64) },
+    }).success,
+  ).toBe(false);
+});

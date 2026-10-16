@@ -1,3 +1,4 @@
+import type { publicWebsiteCheckRoutes } from './routes/public-website-checks.js';
 import { createConfiguredOwnedSynthetic } from './services/owned-synthetic-composition.js';
 import type { OwnedSyntheticRouteDeps } from './routes/owned-synthetic-plans.js';
 import { stagedEvidencePrivateRoutes } from './routes/staged-evidence-private.js';
@@ -54,6 +55,7 @@ export function createApp(
     ownedSynthetic?: OwnedSyntheticRouteDeps | null;
     assessmentTools?: AssessmentTools;
     assessmentRequests?: AssessmentRequestProducer;
+    publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
     discovery?: Pick<DiscoveryService, 'run'>;
     licensePublicKeyPem?: string;
   } = {},
@@ -172,6 +174,11 @@ export function createApp(
       return boundedJsonBody(PUBLIC_CONTROL_REVIEW_MAX_BYTES + 8192)(c, next);
     return next();
   });
+  app.use('/v1/assessment/jobs/*', async (c, next) => {
+    if (/^\/v1\/assessment\/jobs\/[0-9a-fA-F-]{36}\/cancel-source-intent$/.test(c.req.path))
+      return boundedJsonBody(16384)(c, next);
+    return next();
+  });
   app.use('/v1/*', reportBodyLimit);
   app.use('/v1/*', reportAuthority());
   app.use('/v1/*', idempotency);
@@ -186,6 +193,7 @@ export function createApp(
       mfa,
       realtime,
       assessmentRequests: options.assessmentRequests,
+      publicWebsiteCapture: options.publicWebsiteCapture,
       ownedSynthetic,
       stagedEvidence: {
         rpc: evidenceControllerRpc,

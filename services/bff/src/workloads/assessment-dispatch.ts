@@ -72,16 +72,26 @@ export class AssessmentDispatch {
   async recover(
     context: DispatchContext,
     expectedQuestionnaire?: AssessmentRequest['expectedQuestionnaire'],
+    reviewRef?: AssessmentRequest['reviewRef'],
   ) {
     try {
       const c = dispatchContextSchema.parse(context);
       const { data, error } = await this.enqueueWriter()
         .rpc(
-          expectedQuestionnaire
-            ? 'recover_reviewed_assessment_dispatch'
-            : 'recover_assessment_dispatch',
+          reviewRef
+            ? 'recover_public_control_assessment_dispatch'
+            : expectedQuestionnaire
+              ? 'recover_reviewed_assessment_dispatch'
+              : 'recover_assessment_dispatch',
           {
-            ...(expectedQuestionnaire
+            ...(reviewRef
+              ? {
+                  p_review_id: reviewRef.reviewId,
+                  p_review_request_sha256: reviewRef.requestSha256,
+                  p_review_snapshot_sha256: reviewRef.snapshotSha256,
+                }
+              : {}),
+            ...(!reviewRef && expectedQuestionnaire
               ? {
                   p_expected_library_version: expectedQuestionnaire.libraryVersion,
                   p_expected_questionnaire_digest: expectedQuestionnaire.questionnaireDigest,
@@ -111,12 +121,13 @@ export class AssessmentDispatch {
     context: DispatchContext,
     inputJson: string,
     expectedQuestionnaire?: AssessmentRequest['expectedQuestionnaire'],
+    reviewRef?: AssessmentRequest['reviewRef'],
   ) {
     try {
       const c = dispatchContextSchema.parse(context);
       if (createHash('sha256').update(inputJson, 'utf8').digest('hex') !== c.inputHash)
         throw new DispatchRefused();
-      const recovered = await this.recover(c, expectedQuestionnaire);
+      const recovered = await this.recover(c, expectedQuestionnaire, reviewRef);
       if (recovered) return recovered;
       const binding = this.policyBinding(c.tenantId);
       if (!binding.p_policy_revision || !binding.p_policy_fingerprint) throw new DispatchRefused();
@@ -125,11 +136,20 @@ export class AssessmentDispatch {
       const sealed = await sealDispatch(c, inputJson, proof, this.wrapper);
       const { data, error } = await writer
         .rpc(
-          expectedQuestionnaire
-            ? 'enqueue_reviewed_assessment_dispatch'
-            : 'enqueue_assessment_dispatch',
+          reviewRef
+            ? 'enqueue_public_control_assessment_dispatch'
+            : expectedQuestionnaire
+              ? 'enqueue_reviewed_assessment_dispatch'
+              : 'enqueue_assessment_dispatch',
           {
-            ...(expectedQuestionnaire
+            ...(reviewRef
+              ? {
+                  p_review_id: reviewRef.reviewId,
+                  p_review_request_sha256: reviewRef.requestSha256,
+                  p_review_snapshot_sha256: reviewRef.snapshotSha256,
+                }
+              : {}),
+            ...(!reviewRef && expectedQuestionnaire
               ? {
                   p_expected_library_version: expectedQuestionnaire.libraryVersion,
                   p_expected_questionnaire_digest: expectedQuestionnaire.questionnaireDigest,

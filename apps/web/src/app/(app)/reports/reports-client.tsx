@@ -37,6 +37,7 @@ export function canOfferRelease(report: ReportDetail): boolean {
 
 type Access = {
   tenantId: string;
+  actorId?: string;
   canPrepare: boolean;
   canReview: boolean;
   canRelease: boolean;
@@ -51,7 +52,9 @@ export function ReportsClient(access: Access) {
   // All list, pagination and detail state belongs to one tenant. A server
   // navigation may reuse this component instance with a different tenant prop;
   // remount before painting so no previous tenant's report survives that hop.
-  return <TenantReportsClient key={access.tenantId} {...access} />;
+  return (
+    <TenantReportsClient key={`${access.tenantId}/${access.actorId ?? 'unknown'}`} {...access} />
+  );
 }
 
 function TenantReportsClient(access: Access) {
@@ -236,6 +239,7 @@ function TenantReportsClient(access: Access) {
 
           <BoardWorkflow
             tenantId={tenantId}
+            actorId={access.actorId}
             canRequest={access.canRequestBoard}
             canManage={access.canManageBoard}
             onOpenReport={setSelectedId}
@@ -244,6 +248,7 @@ function TenantReportsClient(access: Access) {
 
           <AuditorWorkflow
             tenantId={tenantId}
+            actorId={access.actorId}
             canRequest={access.canRequestBoard}
             canManage={access.canManageBoard}
             onOpenReport={setSelectedId}

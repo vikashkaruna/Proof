@@ -220,6 +220,7 @@ interface Deps {
   ownedSynthetic?: OwnedSyntheticRouteDeps | null;
   stagedEvidence?: StagedEvidenceRoutesDeps;
   assessmentRequests?: AssessmentRequestProducer;
+  publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
   ledger: LedgerService;
@@ -257,7 +258,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', catalogueReferenceRoutes());
-  app.route('/', publicWebsiteCheckRoutes());
+  app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', publicWebsiteControlReviewRoutes());
   app.route('/', publicControlReviewSetRoutes());
   app.route('/', publicSourceBindingRoutes());

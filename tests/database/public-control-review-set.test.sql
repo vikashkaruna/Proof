@@ -116,6 +116,15 @@ do $$declare i integer;r jsonb;begin for i in 1..9 loop
  end loop;end$$;
 create temporary table saved_review as select pg_temp.save(pg_temp.request(51,(select id from public.public_control_review_sets order by created_at desc limit 1))||jsonb_build_object('answers','{"DPDPA-GOV-001":{"Q1":{"answer":null,"rationale":"Human cannot establish this from public evidence.","candidateOrdinals":[]}}}'::jsonb)) as record;
 set constraints all immediate;
+-- Isolate the parent append-only trigger from a later incoming provenance FK.
+-- This test transaction rolls back the temporary constraint removal.
+do $$declare incoming record;begin
+ if to_regclass('public.public_control_assessment_sources') is not null then
+  for incoming in select conname from pg_constraint where conrelid=to_regclass('public.public_control_assessment_sources') and confrelid='public.public_control_review_sets'::regclass loop
+   execute format('alter table public.public_control_assessment_sources drop constraint %I',incoming.conname);
+  end loop;
+ end if;
+end$$;
 do $$declare r jsonb;rid uuid;body jsonb;snap jsonb;begin
  r:=(select record from saved_review);perform pg_temp.ok(r?'data','review saved '||r::text);rid:=(r->'data'->>'id')::uuid;
  body:=(r->'data'->>'request_text')::jsonb;snap:=(r->'data'->>'snapshot_text')::jsonb;

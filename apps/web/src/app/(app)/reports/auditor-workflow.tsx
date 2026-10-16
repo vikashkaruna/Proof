@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
+import { ReportRequestRecovery, useReportRequestRecovery } from './report-request-journal';
 import { prepareReportOperationKey, reportRequest } from './report-request';
 import { button, field, panel, failure } from './report-ui';
 import { detailSchema } from './report-contract';
@@ -53,19 +54,27 @@ type Artifact = z.infer<typeof artifactSchema>;
 const pageSize = 20;
 const date = (value: string) => new Date(value).toLocaleString();
 
-export function AuditorWorkflow({
-  tenantId,
-  canRequest,
-  canManage,
-  onOpenReport,
-  onChanged,
-}: {
+type AuditorWorkflowProps = {
   tenantId: string;
+  actorId?: string;
   canRequest: boolean;
   canManage: boolean;
   onOpenReport: (reportId: string) => void;
   onChanged: () => void;
-}) {
+};
+export function AuditorWorkflow(props: AuditorWorkflowProps) {
+  return (
+    <TenantAuditorWorkflow key={`${props.tenantId}/${props.actorId ?? 'unknown'}`} {...props} />
+  );
+}
+function TenantAuditorWorkflow({
+  tenantId,
+  actorId,
+  canRequest,
+  canManage,
+  onOpenReport,
+  onChanged,
+}: AuditorWorkflowProps) {
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [assessmentTotal, setAssessmentTotal] = useState(0);
   const [assessmentOffset, setAssessmentOffset] = useState(0);
@@ -84,7 +93,6 @@ export function AuditorWorkflow({
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [revision, setRevision] = useState(0);
-  const requestKey = useRef<string | null>(null);
   const buildKey = useRef<string | null>(null);
   const chosen = assessments.find((item) => item.assessmentRunId === selectedRun) ?? null;
   const selected = requests.find((item) => item.id === selectedRequest) ?? null;
@@ -94,6 +102,20 @@ export function AuditorWorkflow({
     setReport(null);
     setRevision((value) => value + 1);
   }, []);
+
+  const recovery = useReportRequestRecovery({
+    tenantId,
+    actorId,
+    kind: 'auditor',
+    canRequest,
+    onConfirmed: () => {
+      setTitle('');
+      setSelectedRun('');
+      setConfirmed(false);
+      refresh();
+      onChanged();
+    },
+  });
 
   useEffect(() => {
     if (!canRequest) return;
@@ -210,27 +232,17 @@ export function AuditorWorkflow({
           {message}
         </p>
       )}
+      <ReportRequestRecovery recovery={recovery} />
       <form
         aria-label="Request auditor review pack"
         className="grid gap-3 rounded-lg border border-slate-200 p-4"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!chosen || !confirmed || !title.trim()) return;
-          void act('/reports/statutory/auditor/requests', () => {
-            requestKey.current ??= prepareReportOperationKey();
-            return {
-              engagementId: chosen.engagementId,
-              assessmentRunId: chosen.assessmentRunId,
-              title: title.trim(),
-              operationKey: requestKey.current,
-            };
-          }).then((result) => {
-            if (result) {
-              requestKey.current = null;
-              setTitle('');
-              setSelectedRun('');
-              setConfirmed(false);
-            }
+          if (!chosen || !confirmed || !title.trim() || recovery.blocked) return;
+          void recovery.send({
+            engagementId: chosen.engagementId,
+            assessmentRunId: chosen.assessmentRunId,
+            title: title.trim(),
           });
         }}
       >
@@ -240,7 +252,7 @@ export function AuditorWorkflow({
           <select
             className={`${field} mt-1 w-full`}
             value={selectedRun}
-            disabled={busy || loading}
+            disabled={busy || loading || recovery.blocked}
             onChange={(event) => {
               setSelectedRun(event.target.value);
               setConfirmed(false);
@@ -284,7 +296,7 @@ export function AuditorWorkflow({
             value={title}
             maxLength={300}
             required
-            disabled={busy}
+            disabled={busy || recovery.blocked}
             onChange={(event) => {
               setTitle(event.target.value);
               setConfirmed(false);
@@ -295,7 +307,7 @@ export function AuditorWorkflow({
           <input
             type="checkbox"
             checked={confirmed}
-            disabled={busy || !chosen}
+            disabled={busy || !chosen || recovery.blocked}
             onChange={(event) => setConfirmed(event.target.checked)}
           />
           I understand this pack contains recorded assessment findings, not an independent auditor
@@ -304,7 +316,7 @@ export function AuditorWorkflow({
         <button
           type="submit"
           className={button}
-          disabled={busy || !chosen || !confirmed || !title.trim()}
+          disabled={busy || !chosen || !confirmed || !title.trim() || recovery.blocked}
         >
           Request review pack
         </button>

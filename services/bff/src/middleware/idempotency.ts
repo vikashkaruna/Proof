@@ -64,7 +64,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     c.req.method === 'POST' &&
     (c.req.path === '/v1/assessment/jobs' ||
       c.req.path === '/v1/plans/proposals' ||
-      /^\/v1\/assessment\/jobs\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
+      /^\/v1\/assessment\/jobs\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/(?:cancel|cancel-source-intent)$/.test(
         c.req.path,
       ) ||
       /^\/v1\/plans\/proposals\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/adopt$/.test(

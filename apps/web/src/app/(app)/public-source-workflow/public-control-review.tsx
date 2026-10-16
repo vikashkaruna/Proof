@@ -31,6 +31,7 @@ type Props = {
   recaptureContent?: React.ReactNode;
   actorId?: string;
   canReview?: boolean;
+  canRun?: boolean;
 };
 type Evidence = PublicControlAssessmentV2['controls'][number]['questions'][number]['evidence'];
 const stateLabels: Record<Evidence['state'], string> = {
@@ -79,6 +80,7 @@ function Review({
   tenantId,
   actorId,
   canReview = false,
+  canRun = false,
   engagementId,
   checkId,
   recaptureContent,
@@ -192,6 +194,7 @@ function Review({
             <PublicControlHumanReview
               actorId={actorId}
               canReview={canReview}
+              canRun={canRun}
               assessment={result.assessment}
             />
           )}

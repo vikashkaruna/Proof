@@ -223,3 +223,25 @@ it('cannot restore an initial stale head after positive reconciliation invalidat
   ).toHaveProperty('disabled', true);
   expect(screen.queryByText(/Latest recorded review/)).toBeNull();
 });
+it('offers only an explicit identifier-bound assessment-page handoff after a saved review, without dispatch', async () => {
+  const f = reviewFixture();
+  const row = f.row;
+  load.mockResolvedValue({ ...f.head, review: row });
+  render(
+    <PublicControlHumanReview actorId={ids.actor} canReview canRun assessment={f.assessment} />,
+  );
+  const link = await screen.findByRole('link', {
+    name: 'Request assessment from this recorded human review',
+  });
+  const url = new URL(link.getAttribute('href')!, 'https://app.example.invalid');
+  expect(url.pathname).toBe('/assessment');
+  expect(url.searchParams.get('engagement')).toBe(f.assessment.source.engagementId);
+  expect(url.searchParams.get('reviewId')).toBe(row.id);
+  expect(url.searchParams.get('requestSha256')).toBe(row.request_sha256);
+  expect(url.searchParams.get('snapshotSha256')).toBe(row.snapshot_sha256);
+  expect(url.searchParams.size).toBe(4);
+  expect(send).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole('button', { name: 'Request assessment from recorded review' }),
+  ).toBeNull();
+});

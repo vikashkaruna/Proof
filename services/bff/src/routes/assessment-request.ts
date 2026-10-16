@@ -2,11 +2,13 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import {
   AssessmentRequestSchema,
+  AssessmentConfigurationSchema,
   AssessmentRequestReceiptSchema,
   ASSESSMENT_REQUEST_MAX_BYTES,
   Capability,
 } from '@axiom/types';
 import type { Variables } from '../types.js';
+import { assessmentSourceOperationRoutes } from './assessment-source-operation.js';
 import { assessmentCancellationRoutes } from './assessment-cancellation.js';
 import { requireCapability } from '../middleware/authorize.js';
 import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
@@ -20,6 +22,34 @@ import {
 export function assessmentRequestRoutes(producer?: AssessmentRequestProducer) {
   const app = new Hono<{ Variables: Variables }>();
   app.route('/', assessmentCancellationRoutes());
+  app.route('/', assessmentSourceOperationRoutes());
+  app.get('/assessment/configuration', (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.POSTURE_READ);
+    if (denied) return denied;
+    if (new URL(c.req.url).search) return c.json({ error: { code: 'invalid_request' } }, 400);
+    const tenantId = c.get('tenantId').toLowerCase();
+    let configuration: 'configured' | 'unconfigured' | 'unknown' = 'unknown';
+    try {
+      configuration = !producer
+        ? 'unconfigured'
+        : !producer.configurationForTenant
+          ? 'unknown'
+          : producer.configurationForTenant(tenantId)
+            ? 'configured'
+            : 'unconfigured';
+    } catch {
+      configuration = 'unknown';
+    }
+    return c.json(
+      AssessmentConfigurationSchema.parse({
+        tenantId,
+        configuration,
+        executionReadiness: 'not_verified',
+      }),
+    );
+  });
+
   app.use('/assessment/jobs', boundedJsonBody(ASSESSMENT_REQUEST_MAX_BYTES));
   app.post('/assessment/jobs', async (c) => {
     c.header('Cache-Control', 'private, no-store');

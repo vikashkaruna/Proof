@@ -48,7 +48,10 @@ const page = (data: unknown[]) =>
 beforeEach(() => {
   request.mockReset();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 it('removes a prior tenant report and selected detail before the next tenant list resolves', async () => {
   let resolveB!: (value: Response) => void;
@@ -169,7 +172,9 @@ it('retries an uncertain board request with the same operation key and no premat
         ? Promise.reject(
             new Error('The outcome is uncertain. Refresh the recorded state before trying again.'),
           )
-        : Promise.resolve(Response.json({ requestId: id, replayed: true }));
+        : Promise.resolve(
+            Response.json({ requestId: id, reportId: null, status: 'requested', replayed: true }),
+          );
     }
     throw new Error(`Unexpected report path: ${path}`);
   });
@@ -177,6 +182,7 @@ it('retries an uncertain board request with the same operation key and no premat
   render(
     <BoardWorkflow
       tenantId={tenantA}
+      actorId={id}
       canRequest
       canManage={false}
       onOpenReport={vi.fn()}
@@ -218,7 +224,12 @@ it('retries an uncertain board request with the same operation key and no premat
     'value',
     'Recorded board source',
   );
-  fireEvent.click(within(form).getByRole('button', { name: 'Request board draft' }));
+  fireEvent.click(
+    screen.getByRole('checkbox', {
+      name: 'I authorize checking or retrying this exact retained request.',
+    }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Check or retry exact retained request' }));
   await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
   expect(submitted).toHaveLength(2);
   expect(submitted[0]).toMatchObject({

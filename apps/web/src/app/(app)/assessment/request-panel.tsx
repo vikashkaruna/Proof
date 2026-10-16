@@ -9,7 +9,12 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import Link from 'next/link';
-import { AssessmentRequestSchema, ASSESSMENT_REQUEST_MAX_BYTES } from '@axiom/types';
+import { canonicalJson } from '@axiom/ledger';
+import {
+  AssessmentRequestSchema,
+  ASSESSMENT_REQUEST_MAX_BYTES,
+  type AssessmentReviewReference,
+} from '@axiom/types';
 import { AssessmentQuestionnaireEditor, type ReviewedQuestionnaire } from './questionnaire';
 import {
   ASSESSMENT_JOURNAL_CHANGED,
@@ -19,6 +24,8 @@ import {
   retainAssessmentJournal,
   clearFinalizedAssessmentJournal,
   submitAssessmentRequest,
+  resolveAssessmentSourceIntent,
+  clearCancelledAssessmentSourceJournal,
   cancelUnclaimedAssessmentRequest,
   readAssessmentRequest,
   type RetainedAssessment,
@@ -31,13 +38,15 @@ interface Props {
   engagementId: string;
   libraryVersion: string;
   canRequest: boolean;
+  reviewRef?: AssessmentReviewReference;
+  configuration?: 'configured' | 'unconfigured' | 'unknown';
   hasSavedResults: boolean;
   onFinalized: () => void;
 }
 export function AssessmentRequestPanel(props: Props) {
   return (
     <RequestPanel
-      key={`${props.tenantId}:${props.actorId}:${props.engagementId}:${props.libraryVersion}:${props.canRequest}`}
+      key={`${props.tenantId}:${props.actorId}:${props.engagementId}:${props.libraryVersion}:${props.canRequest}:${JSON.stringify(props.reviewRef ?? null)}`}
       {...props}
     />
   );
@@ -48,6 +57,8 @@ function RequestPanel({
   engagementId,
   libraryVersion,
   canRequest,
+  reviewRef,
+  configuration = 'unknown',
   hasSavedResults,
   onFinalized,
 }: Props) {
@@ -98,6 +109,18 @@ function RequestPanel({
   );
   const [status, setStatus] = useState<AssessmentJobReadout | null>(null);
   const [completedHere, setCompletedHere] = useState(false);
+  const [sourceCancellation, setSourceCancellation] = useState<{
+    operationKey: string;
+    requestText: string;
+    reason: string;
+    confirmed: boolean;
+  } | null>(null);
+  const sourceCancellationMatches =
+    retained !== null &&
+    sourceCancellation?.operationKey === retained.request.operationKey &&
+    sourceCancellation.requestText === canonicalJson(retained.request);
+  const sourceCancelReason = sourceCancellationMatches ? sourceCancellation!.reason : '';
+  const sourceCancelConfirmed = sourceCancellationMatches && sourceCancellation!.confirmed;
   const [cancelAcknowledgement, setCancelAcknowledgement] = useState<string | null>(null);
   const displayedStatus =
     retained &&
@@ -122,6 +145,7 @@ function RequestPanel({
       active.current ||
       !ready ||
       !canRequest ||
+      configuration === 'unconfigured' ||
       retained ||
       hasSavedResults ||
       completedHere ||
@@ -161,16 +185,18 @@ function RequestPanel({
               }
             })(),
             engagementId,
-            ...(intake && reviewed
-              ? {
-                  answers: reviewed.answers,
-                  applicability: reviewed.applicability,
-                  expectedQuestionnaire: {
-                    libraryVersion,
-                    questionnaireDigest: reviewed.questionnaireDigest,
-                  },
-                }
-              : {}),
+            ...(reviewRef
+              ? { reviewRef }
+              : intake && reviewed
+                ? {
+                    answers: reviewed.answers,
+                    applicability: reviewed.applicability,
+                    expectedQuestionnaire: {
+                      libraryVersion,
+                      questionnaireDigest: reviewed.questionnaireDigest,
+                    },
+                  }
+                : {}),
           }),
           ...(intake && reviewed ? { questionnaireDigest: reviewed.questionnaireDigest } : {}),
         };
@@ -349,6 +375,61 @@ function RequestPanel({
       if (mounted.current) setBusy(false);
     }
   }
+  async function sourceOperation(cancelIntent = false) {
+    if (
+      active.current ||
+      !retained?.request.reviewRef ||
+      (cancelIntent && (!canRequest || !sourceCancelConfirmed || !sourceCancelReason.trim()))
+    )
+      return;
+    const expected = retained;
+    active.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      if (!navigator.locks)
+        throw new Error(
+          'This browser cannot safely coordinate assessment requests across tabs. Use a supported browser.',
+        );
+      await navigator.locks.request(assessmentJournalKey(tenantId, actorId), async () => {
+        if (!mounted.current) return;
+        const live = readAssessmentJournal(localStorage, tenantId, actorId);
+        if (JSON.stringify(live) !== JSON.stringify(expected))
+          throw new Error('Retained request changed. Reload before continuing.');
+        const result = await resolveAssessmentSourceIntent(
+          expected,
+          cancelIntent ? sourceCancelReason : undefined,
+        );
+        if (!mounted.current) return;
+        if (result.state === 'cancelled') {
+          clearCancelledAssessmentSourceJournal(localStorage, expected, result);
+          setStatus(null);
+          setSourceCancellation(null);
+          setMessage({
+            text: `Unrecorded source intent cancellation is recorded with receipt ${result.data.receipt_id}. Its original key cannot dispatch later. No assessment or worker cleanup is claimed.`,
+            operationKey: null,
+          });
+        } else
+          setMessage({
+            operationKey: expected.request.operationKey,
+            text:
+              result.state === 'recorded'
+                ? 'This original source request already has a recorded assessment job. Check its retained request status; cancelling this intent did not undo it.'
+                : 'No positive outcome is recorded yet. Preserve this exact request; check again, retry it exactly, or explicitly cancel its unrecorded source intent.',
+          });
+      });
+    } catch (cause) {
+      if (mounted.current)
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : 'The source operation remains unconfirmed. Preserve the original reference.',
+        );
+    } finally {
+      active.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
   const sameEngagement = !retained || retained.request.engagementId === engagementId;
   return (
     <section
@@ -357,11 +438,32 @@ function RequestPanel({
     >
       <h2 className="font-semibold text-slate-900">Parikshan assessment request</h2>
       <p className="mt-2">
-        Enter reviewed questionnaire declarations or request an unknown-answer draft. Answers and
-        applicability flags stay unknown until you explicitly choose otherwise. Estimates are
-        provisional and declarations remain unverified; neither establishes compliance. Discovery,
-        evidence and reports run separately.
+        {reviewRef
+          ? 'Request an assessment from the exact recorded human review shown here.'
+          : 'Enter reviewed questionnaire declarations or request an unknown-answer draft.'}{' '}
+        Answers and applicability flags stay unknown until you explicitly choose otherwise.
+        Estimates are provisional and declarations remain unverified; neither establishes
+        compliance. Discovery, evidence and reports run separately.
       </p>
+      <p className="mt-2">
+        {configuration === 'unconfigured'
+          ? 'Assessment requests are not configured for this organisation. Ask your operator to enable the trusted assessment producer, controller and workload configuration before starting a new request. Existing retained requests can still be checked, reconciled or cancelled.'
+          : configuration === 'configured'
+            ? 'Assessment producer configuration is present. Controller health and execution readiness have not been verified.'
+            : 'Assessment configuration could not be verified. Availability is unknown; this does not establish execution readiness.'}
+      </p>
+      {reviewRef && (
+        <p className="mt-2 break-all">
+          Frozen human review: {reviewRef.reviewId}. The server loads its saved answers; no browser
+          edits override them.
+        </p>
+      )}
+      {retained?.request.reviewRef && (
+        <p className="mt-2 break-all">
+          Retained source review: {retained.request.reviewRef.reviewId}. Exact retries keep this
+          original review.
+        </p>
+      )}
       {retained ? (
         <div className="mt-3 space-y-3">
           <p className="break-all">
@@ -389,6 +491,68 @@ function RequestPanel({
             {busy ? 'Checking request…' : 'Check retained request'}
           </button>
           {recoveryGuidance && <p role="note">{recoveryGuidance}</p>}
+          {retained.request.reviewRef && (
+            <div className="space-y-2 rounded border border-slate-200 p-2">
+              <button
+                type="button"
+                className="underline"
+                disabled={busy}
+                onClick={() => void sourceOperation()}
+              >
+                Reconcile source request outcome
+              </button>
+              <p>
+                A missing job or refused retry does not prove the original request cannot commit.
+                Keep its key until a matching positive outcome is verified.
+              </p>
+              {canRequest && sameEngagement && (
+                <>
+                  <label className="block">
+                    Source intent cancellation reason
+                    <input
+                      className="block w-full rounded border p-2"
+                      value={sourceCancelReason}
+                      disabled={busy}
+                      onChange={(e) => {
+                        setSourceCancellation({
+                          operationKey: retained.request.operationKey,
+                          requestText: canonicalJson(retained.request),
+                          reason: e.target.value,
+                          confirmed: false,
+                        });
+                      }}
+                    />
+                  </label>
+                  <label className="flex gap-2">
+                    <input
+                      type="checkbox"
+                      checked={sourceCancelConfirmed}
+                      disabled={busy}
+                      onChange={(e) =>
+                        setSourceCancellation({
+                          operationKey: retained.request.operationKey,
+                          requestText: canonicalJson(retained.request),
+                          reason: sourceCancelReason,
+                          confirmed: e.target.checked,
+                        })
+                      }
+                    />
+                    I explicitly abandon this exact source request only if it has not been
+                    dispatched. An existing job will be preserved.
+                  </label>
+                  <button
+                    type="button"
+                    className="rounded border p-2 disabled:opacity-50"
+                    disabled={busy || !sourceCancelConfirmed || !sourceCancelReason.trim()}
+                    onClick={() => void sourceOperation(true)}
+                  >
+                    Cancel unrecorded source intent
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+
           {canRequest &&
             sameEngagement &&
             displayedStatus?.status === 'unconfirmed' &&
@@ -447,6 +611,9 @@ function RequestPanel({
                 </Link>
                 .
               </p>
+              <Link href="/reports" className="inline-block text-teal-700 underline">
+                Continue to Reports
+              </Link>
               <button
                 type="button"
                 onClick={archive}
@@ -489,7 +656,7 @@ function RequestPanel({
             </p>
           ) : (
             <>
-              {!intake ? (
+              {reviewRef ? null : !intake ? (
                 <button
                   type="button"
                   disabled={busy || !ready}
@@ -534,22 +701,32 @@ function RequestPanel({
                   disabled={busy || !ready || (intake && !reviewed)}
                 />
                 <span>
-                  {intake
-                    ? 'I reviewed these exact declarations and understand they remain unverified; unknown answers and unsupported inputs require further review.'
-                    : 'I understand that every answer and applicability flag will remain unknown and require review.'}
+                  {reviewRef
+                    ? 'I request Parikshan using this exact recorded human review. Its declarations remain unverified and unknown questions stay unknown.'
+                    : intake
+                      ? 'I reviewed these exact declarations and understand they remain unverified; unknown answers and unsupported inputs require further review.'
+                      : 'I understand that every answer and applicability flag will remain unknown and require review.'}
                 </span>
               </label>
               <button
                 type="button"
                 onClick={start}
-                disabled={busy || !ready || !confirmedUnknown || (intake && !reviewed)}
+                disabled={
+                  busy ||
+                  !ready ||
+                  configuration === 'unconfigured' ||
+                  !confirmedUnknown ||
+                  (intake && !reviewed)
+                }
                 className="rounded-lg bg-teal-700 px-3 py-2 font-semibold text-white disabled:opacity-50"
               >
                 {busy
                   ? 'Submitting request…'
-                  : intake
-                    ? 'Submit reviewed questionnaire'
-                    : 'Request unknown-answer assessment'}
+                  : reviewRef
+                    ? 'Request assessment from recorded review'
+                    : intake
+                      ? 'Submit reviewed questionnaire'
+                      : 'Request unknown-answer assessment'}
               </button>
             </>
           )}

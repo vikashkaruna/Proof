@@ -252,6 +252,65 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it('loads a linked earlier check without crawling or dispatching and retains it when choices refresh', async () => {
+  const f = await fixture();
+  const original = f.fetcher.getMockImplementation()!;
+  const earlier = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  f.fetcher.mockImplementation(async (url, init) =>
+    String(url).includes(`/public-website-checks?id=${earlier}`)
+      ? Response.json({
+          data: [
+            {
+              id: earlier,
+              finalUrl: 'https://earlier.example/',
+              checkedAt: timestamp,
+              status: 'checked',
+              contentSha256: rootSha,
+            },
+          ],
+        })
+      : original(url, init),
+  );
+  render(
+    <PublicSourceWorkflow tenantId={TENANT} actorId={ACTOR} canInvoke initialCheckId={earlier} />,
+  );
+  await ready();
+  expect((screen.getByLabelText('Saved public website check') as HTMLSelectElement).value).toBe(
+    earlier,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh choices' }));
+  await ready();
+  expect((screen.getByLabelText('Saved public website check') as HTMLSelectElement).value).toBe(
+    earlier,
+  );
+  expect(screen.getByRole('option', { name: /earlier.example/ })).toBeTruthy();
+  expect(f.fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+});
+
+it('does not substitute an earlier-check link for an unresolved retained operation', async () => {
+  const f = await fixture();
+  f.setBound();
+  f.setDisconnected(true);
+  const first = view();
+  await selectSource();
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'Run Drishti on saved source' }));
+  await screen.findByRole('alert');
+  const retained = loadSourceOperation(localStorage, TENANT, ACTOR);
+  first.unmount();
+  render(
+    <PublicSourceWorkflow tenantId={TENANT} actorId={ACTOR} canInvoke initialCheckId={DRISHTI} />,
+  );
+  await screen.findByText('A retained request needs reconciliation before another action.');
+  await screen.findByRole('option', { name: /Axiom website audit/ });
+  expect((screen.getByLabelText('Saved public website check') as HTMLSelectElement).value).toBe(
+    CHECK,
+  );
+  expect(loadSourceOperation(localStorage, TENANT, ACTOR)).toEqual(retained);
+  expect(f.fetcher.mock.calls.some(([url]) => String(url).includes(`?id=${DRISHTI}`))).toBe(false);
+  expect(f.fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+});
+
 it('completes source binding, discovery and classification using retained receipts and exact scoped bodies', async () => {
   const f = await fixture();
   view();

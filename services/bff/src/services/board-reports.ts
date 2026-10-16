@@ -5,6 +5,9 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import { parseCatalogueJson } from '@axiom/control-library';
+import { FrozenBoardSourceSchema } from '@axiom/report-kit/board-source';
+import { verifyFrozenHumanControlReview } from '@axiom/report-kit';
 import { BoardReportContentV2, renderBoardReportHtml } from '@axiom/report-kit/board-report';
 import {
   interpretAssessmentReport,
@@ -184,7 +187,8 @@ export class BoardReportService {
         result_sha256: z.string().regex(/^[0-9a-f]{64}$/),
       })
       .safeParse(pktRes.data);
-    if (!snapshot.success) throw new EvidenceError('assessment_source_incomplete', 409);
+    if (!snapshot.success || Buffer.byteLength(snapshot.data.source_text, 'utf8') > 4 * 1024 * 1024)
+      throw new EvidenceError('assessment_source_incomplete', 409);
     const digest = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
     if (digest(snapshot.data.source_text) !== snapshot.data.source_sha256) {
       throw new EvidenceError('assessment_source_conflict', 409);
@@ -197,7 +201,7 @@ export class BoardReportService {
     }
     const frozen = z
       .object({
-        schema_version: z.literal(1),
+        schema_version: z.union([z.literal(1), z.literal(2)]),
         serialization: z.literal('postgres-jsonb-text-v1'),
         kind: z.literal('board_source'),
         request_id: z.uuid(),
@@ -341,7 +345,7 @@ export class BoardReportService {
         ),
       };
     });
-    const contentPayload: BoardReportContentV2 = {
+    const legacyPayload: BoardReportContentV2 = {
       schema_version: 2,
       kind: 'board_report',
       title: requestRow.title,
@@ -371,6 +375,30 @@ export class BoardReportService {
         approved_by: null,
       },
     };
+
+    let contentPayload =
+      legacyPayload as import('@axiom/report-kit/board-report').BoardReportContent;
+    if (frozen.data.schema_version === 2) {
+      const publicSource = FrozenBoardSourceSchema.parse(
+        parseCatalogueJson(snapshot.data.source_text, 4 * 1024 * 1024),
+      );
+      if (publicSource.schema_version !== 2)
+        throw new EvidenceError('assessment_source_conflict', 409);
+      contentPayload = {
+        ...legacyPayload,
+        schema_version: 3,
+        public_review_appendix: verifyFrozenHumanControlReview(publicSource.human_control_review, {
+          tenantId,
+          engagementId: requestRow.engagement_id,
+          assessmentRunId: requestRow.assessment_run_id,
+          libraryVersion: publicSource.library_version,
+          controlsText: publicSource.controls_text,
+          resultText: publicSource.result_text,
+        }),
+      };
+    } else if (Object.hasOwn(frozenJson as object, 'human_control_review')) {
+      throw new EvidenceError('assessment_source_conflict', 409);
+    }
 
     // Render HTML
     const htmlText = renderBoardReportHtml(contentPayload);

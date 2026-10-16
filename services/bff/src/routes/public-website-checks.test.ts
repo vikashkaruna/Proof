@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
+import { z } from 'zod';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
 import type { Variables } from '../types.js';
 import { PublicWebsiteRefused, type WebsiteCheck } from '../connectors/public-website.js';
@@ -144,6 +145,52 @@ describe('public website check API', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ data: [{ id: '2', ...check }] });
   });
+
+  it('retrieves an earlier saved check by identity without widening tenant or status scope', async () => {
+    const id = '44444444-4444-4444-8444-444444444444';
+    for (let index = 1; index <= 21; index++)
+      fake.seed('public_website_checks', {
+        id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        tenant_id: TENANT,
+        status: 'checked',
+        checked_at: '2026-10-06',
+        result: check,
+      });
+    fake.seed('public_website_checks', {
+      id,
+      tenant_id: TENANT,
+      status: 'checked',
+      checked_at: '2026-10-01',
+      result: check,
+    });
+    const recent = await app(UserRole.VIEWER).request('/v1/public-website-checks');
+    const recentRows = z
+      .object({ data: z.array(z.object({ id: z.string() })) })
+      .parse(await recent.json());
+    expect(recentRows.data.some((row) => row.id === id)).toBe(false);
+    const exact = await app(UserRole.VIEWER).request(`/v1/public-website-checks?id=${id}`);
+    expect(await exact.json()).toEqual({ data: [{ id, ...check }] });
+    fake.seed('public_website_checks', {
+      id: FOREIGN,
+      tenant_id: FOREIGN,
+      status: 'checked',
+      checked_at: '2026-10-07',
+      result: check,
+    });
+    const foreign = await app(UserRole.VIEWER).request(`/v1/public-website-checks?id=${FOREIGN}`);
+    expect(await foreign.json()).toEqual({ data: [] });
+    expect(recorded).toEqual([]);
+  });
+
+  it.each(['?id=invalid', '?tenant_id=other', `?id=${TENANT}&id=${FOREIGN}`])(
+    'rejects malformed or ambiguous saved-check selectors %s',
+    async (query) => {
+      expect((await app(UserRole.VIEWER).request(`/v1/public-website-checks${query}`)).status).toBe(
+        400,
+      );
+      expect(recorded).toEqual([]);
+    },
+  );
 
   it('fails closed on a malformed stored observation instead of showing partial evidence', async () => {
     fake.seed('public_website_checks', {
