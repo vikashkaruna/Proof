@@ -30,7 +30,8 @@ class PolicyPhases(unittest.TestCase):
         self.assertEqual(len(plan["all"]), len(set(plan["all"])))
         self.assertEqual(sorted(plan["historical143"] + plan["current"]), plan["all"])
         self.assertIn(PHASES.CURRENT, plan["current"])
-        self.assertEqual(plan["currentVersion"], 145)
+        self.assertEqual(plan["currentVersion"], 146)
+        self.assertIn("local-custody-credential-identity.test.sql", plan["current"])
         self.assertIn("local-custody-credential-issuance.test.sql", plan["current"])
         self.assertIn(
             "local-custody-credential-issuance-demo.test.sql", plan["current"]
@@ -50,7 +51,12 @@ class PolicyPhases(unittest.TestCase):
             (root / "infra/supabase/migrations" / source.name).write_text(
                 "-- offline inventory only"
             )
-        self.assertEqual(PHASES.plan(root)["currentVersion"], 145)
+        self.assertEqual(PHASES.plan(root)["currentVersion"], 146)
+        identity = root / "tests/database/local-custody-credential-identity.test.sql"
+        identity.unlink()
+        with self.assertRaisesRegex(ValueError, "identity146_suite_required"):
+            PHASES.plan(root)
+        identity.write_text("-- restored inventory only")
         missing = (
             root / "tests/database/local-custody-credential-issuance-demo.test.sql"
         )
@@ -85,7 +91,7 @@ class PolicyPhases(unittest.TestCase):
         ]
         for wrong in [
             rows[:-1],
-            [r.replace("145|", "144|") for r in rows],
+            [r.replace("146|", "145|") for r in rows],
             rows + rows[:1],
             [r.replace("143|", "144|") for r in rows],
         ]:

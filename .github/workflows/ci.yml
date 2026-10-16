@@ -285,6 +285,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: ./scripts/test-database.sh
+      - run: python3 -I infra/local-custody-issuer/test_issuer.py
       - run: bash tests/scripts/test-backup-restore.sh
       - run: bash tests/scripts/test-dev-docker-lifecycle.sh
       - run: python3 scripts/check-compose-writer-scoping.py

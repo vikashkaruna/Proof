@@ -70,6 +70,10 @@ def plan(root: Path = ROOT) -> dict:
         ),
         "issuer145_suites_required",
     )
+    need(
+        versions[-1] < 146 or "local-custody-credential-identity.test.sql" in files,
+        "identity146_suite_required",
+    )
     return {
         "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),
