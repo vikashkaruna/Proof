@@ -1,3 +1,12 @@
+import {
+  constants,
+  openSync,
+  closeSync,
+  writeFileSync,
+  fsyncSync,
+  lstatSync,
+  realpathSync,
+} from 'node:fs';
 /** Owned W8 fixture only. Password login + real MFA + mounted UI/RPCs.
  * Fixture accounts begin with enrolled test factors; this is not enrolment
  * acceptance, key provisioning, workload execution or legal-compliance proof. */
@@ -20,6 +29,111 @@ import { localRoleBearer } from '../local-writer';
 import { acceptanceTarget, personaStatePath, tenantCookie, webOrigin } from '../target';
 
 import { custodyBrowserFixtureGuard } from '../../../scripts/lib/acceptance-local-custody-browser';
+
+const custodyRecordErrorCodes = [
+  'custody_mfa_refused',
+  'custody_forbidden',
+  'tenant_forbidden',
+  'tenant_selection_required',
+  'mfa_enrolment_required',
+  'mfa_verification_required',
+  'staff_authority_required',
+  'offline_license_invalid',
+  'custody_outcome_unconfirmed',
+  'unknown',
+] as const;
+const custodyRecordFailureSchema = z
+  .object({
+    version: z.literal(1),
+    kind: z.literal('custody-cancellation-record-failure'),
+    status: z.number().int().min(100).max(599).nullable(),
+    code: z.enum(custodyRecordErrorCodes),
+    recordRequests: z.number().int().min(0).max(1000000),
+    completedFetches: z.number().int().min(0).max(1000000),
+    body: z
+      .object({
+        withinBound: z.boolean(),
+        jsonDecoded: z.boolean(),
+        topObject: z.boolean(),
+        errorObject: z.boolean(),
+        hasData: z.boolean(),
+      })
+      .strict(),
+    matches: z
+      .object({
+        tenant: z.boolean(),
+        actor: z.boolean(),
+        operationKey: z.boolean(),
+        resolution: z.boolean(),
+        challenge: z.boolean(),
+        requestOrigin: z.boolean(),
+        responseOrigin: z.boolean(),
+        responsePath: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+function custodyRecordResponse(bytes: Uint8Array | null) {
+  const result = {
+    code: 'unknown' as (typeof custodyRecordErrorCodes)[number],
+    body: {
+      withinBound: bytes !== null && bytes.byteLength <= 4096,
+      jsonDecoded: false,
+      topObject: false,
+      errorObject: false,
+      hasData: false,
+    },
+  };
+  if (!result.body.withinBound || bytes === null) return result;
+  try {
+    const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    result.body.jsonDecoded = true;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return result;
+    result.body.topObject = true;
+    result.body.hasData = Object.hasOwn(value, 'data');
+    const error: unknown = (value as Record<string, unknown>).error;
+    result.body.errorObject = !!error && typeof error === 'object' && !Array.isArray(error);
+    const code: unknown = result.body.errorObject ? (error as Record<string, unknown>).code : error;
+    if (typeof code === 'string' && custodyRecordErrorCodes.some((allowed) => allowed === code))
+      result.code = code as typeof result.code;
+  } catch {
+    /* No body, error message, IDs, URLs or arbitrary keys are retained. */
+  }
+  return result;
+}
+function retainCustodyRecordFailure(directory: string, value: unknown) {
+  const text = JSON.stringify(custodyRecordFailureSchema.parse(value)) + '\n';
+  if (Buffer.byteLength(text) > 4096 || realpathSync(directory) !== resolve(directory))
+    throw Error('Private failure destination refused');
+  const parent = lstatSync(directory);
+  if (
+    !parent.isDirectory() ||
+    parent.isSymbolicLink() ||
+    parent.uid !== process.getuid?.() ||
+    (parent.mode & 0o077) !== 0
+  )
+    throw Error('Private failure directory refused');
+  const fd = openSync(
+    join(directory, 'private-custody-cancellation-record-failure.json'),
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    writeFileSync(fd, text);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  const dirfd = openSync(
+    directory,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    fsyncSync(dirfd);
+  } finally {
+    closeSync(dirfd);
+  }
+}
 
 const assertOwnedFixture = custodyBrowserFixtureGuard(resolve(__dirname, '../../..'), state);
 const sha = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -502,24 +616,98 @@ test.describe.serial('normal Auth local custody policy workflow', () => {
       owner.page.getByRole('button', { name: 'Check retained cancellation', exact: true }),
     ).toBeEnabled();
     expect(custodyPosts).toBe(0);
-    await checkThenMfa(owner, true);
+    let verifiedChallenge: string | undefined;
+    const observeVerifiedChallenge = (response: import('@playwright/test').Response) => {
+      if (
+        new URL(response.url()).pathname !== '/api/bff/v1/local-custody-policy/verify' ||
+        response.request().method() !== 'POST' ||
+        response.status() !== 200
+      )
+        return;
+      try {
+        verifiedChallenge = z.uuid().parse(response.request().postDataJSON().challengeId);
+      } catch {
+        /* fixed match bit only */
+      }
+    };
+    owner.page.on('response', observeVerifiedChallenge);
+    try {
+      await checkThenMfa(owner, true);
+    } finally {
+      owner.page.off('response', observeVerifiedChallenge);
+    }
     let committed: z.infer<typeof localCustodyCancellationReceiptSchema> | null = null;
+    let recordRequests = 0,
+      completedFetches = 0;
+    let resolveRecord!: () => void, rejectRecord!: (error: unknown) => void;
+    const recordCompleted = new Promise<void>((resolve, reject) => {
+      resolveRecord = resolve;
+      rejectRecord = reject;
+    });
+    // Attach immediately: the explicit await below still throws the SAME primary
+    // handler error, without an unhandled rejection or a secondary null race.
+    void recordCompleted.catch(() => undefined);
     const route = '**/api/bff/v1/local-custody-policy/record';
     await owner.page.route(route, async (intercepted) => {
-      const body = z
-        .object({ resolution: z.unknown(), challengeId: z.uuid() })
-        .strict()
-        .parse(intercepted.request().postDataJSON());
-      const actual = await intercepted.fetch();
-      expect(actual.status()).toBe(201);
-      committed = localCustodyCancellationReceiptSchema.parse((await actual.json()).data);
-      expect(committed.cancellationText).toBe(encodeLocalCustodyCancellation(body.resolution));
-      await intercepted.abort('failed');
+      recordRequests++;
+      let actual: import('@playwright/test').APIResponse | undefined;
+      let body: { resolution: unknown; challengeId: string } | undefined;
+      try {
+        body = z
+          .object({ resolution: z.unknown(), challengeId: z.uuid() })
+          .strict()
+          .parse(intercepted.request().postDataJSON());
+        actual = await intercepted.fetch();
+        completedFetches++;
+        expect(actual.status()).toBe(201);
+        committed = localCustodyCancellationReceiptSchema.parse((await actual.json()).data);
+        expect(committed.cancellationText).toBe(encodeLocalCustodyCancellation(body.resolution));
+        await intercepted.abort('failed');
+        resolveRecord();
+      } catch (error) {
+        try {
+          const request = intercepted.request(),
+            headers = request.headers();
+          let sameResolution = false;
+          try {
+            sameResolution =
+              encodeLocalCustodyCancellation(body?.resolution) ===
+              encodeLocalCustodyCancellation(resolution);
+          } catch {
+            /* only equality */
+          }
+          retainCustodyRecordFailure(process.env.AXIOM_EVIDENCE_FIXTURE_DIRECTORY!, {
+            version: 1,
+            kind: 'custody-cancellation-record-failure',
+            status: actual?.status() ?? null,
+            ...custodyRecordResponse(actual ? await actual.body().catch(() => null) : null),
+            recordRequests,
+            completedFetches,
+            matches: {
+              tenant: headers['x-tenant-id'] === tenant.id,
+              actor: headers['x-expected-actor-id'] === owner.who.id,
+              operationKey: headers['idempotency-key'] === resolution.operationKey,
+              resolution: sameResolution,
+              challenge: verifiedChallenge !== undefined && body?.challengeId === verifiedChallenge,
+              requestOrigin: new URL(request.url()).origin === webOrigin,
+              responseOrigin: actual !== undefined && new URL(actual.url()).origin === webOrigin,
+              responsePath:
+                actual !== undefined &&
+                new URL(actual.url()).pathname === '/api/bff/v1/local-custody-policy/record',
+            },
+          });
+        } catch {
+          /* Private diagnostic IO must not replace the primary failure. */
+        }
+        await intercepted.abort('failed').catch(() => undefined);
+        rejectRecord(error);
+      }
     });
     try {
       await owner.page
         .getByRole('button', { name: 'Record exact cancellation', exact: true })
         .click();
+      await recordCompleted;
       await expect(owner.page.getByRole('alert')).toBeVisible();
     } finally {
       await owner.page.unroute(route);
