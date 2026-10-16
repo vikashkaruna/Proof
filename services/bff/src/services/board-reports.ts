@@ -7,7 +7,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { parseCatalogueJson } from '@axiom/control-library';
 import { FrozenBoardSourceSchema } from '@axiom/report-kit/board-source';
-import { verifyFrozenHumanControlReview } from '@axiom/report-kit';
+import {
+  verifyFrozenHumanControlReview,
+  verifyFrozenHumanControlReviewWithAsset,
+} from '@axiom/report-kit';
 import { BoardReportContentV2, renderBoardReportHtml } from '@axiom/report-kit/board-report';
 import {
   interpretAssessmentReport,
@@ -201,7 +204,7 @@ export class BoardReportService {
     }
     const frozen = z
       .object({
-        schema_version: z.union([z.literal(1), z.literal(2)]),
+        schema_version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
         serialization: z.literal('postgres-jsonb-text-v1'),
         kind: z.literal('board_source'),
         request_id: z.uuid(),
@@ -378,24 +381,35 @@ export class BoardReportService {
 
     let contentPayload =
       legacyPayload as import('@axiom/report-kit/board-report').BoardReportContent;
-    if (frozen.data.schema_version === 2) {
+    if (frozen.data.schema_version !== 1) {
       const publicSource = FrozenBoardSourceSchema.parse(
         parseCatalogueJson(snapshot.data.source_text, 4 * 1024 * 1024),
       );
-      if (publicSource.schema_version !== 2)
+      if (publicSource.schema_version === 1)
         throw new EvidenceError('assessment_source_conflict', 409);
-      contentPayload = {
-        ...legacyPayload,
-        schema_version: 3,
-        public_review_appendix: verifyFrozenHumanControlReview(publicSource.human_control_review, {
-          tenantId,
-          engagementId: requestRow.engagement_id,
-          assessmentRunId: requestRow.assessment_run_id,
-          libraryVersion: publicSource.library_version,
-          controlsText: publicSource.controls_text,
-          resultText: publicSource.result_text,
-        }),
+      const scope = {
+        tenantId,
+        engagementId: requestRow.engagement_id,
+        assessmentRunId: requestRow.assessment_run_id,
+        libraryVersion: publicSource.library_version,
+        controlsText: publicSource.controls_text,
+        resultText: publicSource.result_text,
       };
+      contentPayload =
+        publicSource.schema_version === 3
+          ? {
+              ...legacyPayload,
+              schema_version: 4,
+              ...verifyFrozenHumanControlReviewWithAsset(publicSource.human_control_review, scope),
+            }
+          : {
+              ...legacyPayload,
+              schema_version: 3,
+              public_review_appendix: verifyFrozenHumanControlReview(
+                publicSource.human_control_review,
+                scope,
+              ),
+            };
     } else if (Object.hasOwn(frozenJson as object, 'human_control_review')) {
       throw new EvidenceError('assessment_source_conflict', 409);
     }

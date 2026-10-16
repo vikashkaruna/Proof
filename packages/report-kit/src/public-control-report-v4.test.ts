@@ -196,3 +196,40 @@ describe.each(['board', 'auditor'] as const)('source3/doc4 %s asset provenance',
     ).toBe(true);
   });
 });
+
+describe('asset capture timestamp parity without losing microseconds', () => {
+  function associationTime(value: string) {
+    const f = assetReportFixture(),
+      snapshot = JSON.parse(f.human.review.snapshot_text),
+      asset = snapshot.assetProvenance;
+    const association = JSON.parse(asset.association.snapshot_text);
+    association.checkedAt = value;
+    asset.association.snapshot_text = canonicalJson(association);
+    asset.association.snapshot_sha256 = sha(asset.association.snapshot_text);
+    snapshot.request.associationRef.associationSha256 = asset.association.snapshot_sha256;
+    f.human.review.request_text = canonicalJson(snapshot.request);
+    f.human.review.request_sha256 = sha(f.human.review.request_text);
+    f.human.review.snapshot_text = canonicalJson(snapshot);
+    f.human.review.snapshot_sha256 = sha(f.human.review.snapshot_text);
+    return f;
+  }
+  it.each(['2026-10-16T00:00:00.000000Z', '2026-10-16T05:30:00.000000+05:30'])(
+    'accepts equivalent retained instant %s without rewriting strings/hashes',
+    (value) => {
+      const f = associationTime(value),
+        before = JSON.stringify(f.human);
+      expect(
+        verifyFrozenHumanControlReviewWithAsset(f.human, f.scope).asset_scope.association
+          .checked_at,
+      ).toBe(value);
+      expect(JSON.stringify(f.human)).toBe(before);
+    },
+  );
+  it.each(['2026-10-16T00:00:00.000001Z', '2026-10-16T05:30:00.000001+05:30'])(
+    'refuses a one-microsecond changed instant %s',
+    (value) => {
+      const f = associationTime(value);
+      expect(() => verifyFrozenHumanControlReviewWithAsset(f.human, f.scope)).toThrow();
+    },
+  );
+});

@@ -242,7 +242,16 @@ function verifyReview(
     const root = v.capture.page_sources.find((p) => p.page === 'root');
     same(root?.requestedUrl, asset.target.url);
     same(root?.finalUrl, asset.association.final_url);
-    same(asset.association.checked_at, v.capture.checked_at);
+    // Retain both exact strings in their hashed packets; compare the instant
+    // without discarding PostgreSQL microseconds as Date.parse alone would.
+    const instant = (value: string) => {
+      const fractional = /\.(\d+)(?=Z|[+-]\d{2}:\d{2}$)/.exec(value);
+      return [
+        Date.parse(value.replace(/\.\d+(?=Z|[+-]\d{2}:\d{2}$)/, '')),
+        (fractional?.[1] ?? '').replace(/0+$/, ''),
+      ];
+    };
+    same(instant(asset.association.checked_at), instant(v.capture.checked_at));
   }
 
   same(canonicalJson(snapshot.request), v.review.request_text);
