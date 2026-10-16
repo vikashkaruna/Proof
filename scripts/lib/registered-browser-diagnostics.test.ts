@@ -276,8 +276,8 @@ test('earlier target submission retains status and fixed equality flags without 
       'snapshot-estate',
       'snapshot-system',
     ].flatMap((checkpoint) => [
-      [`target-submit-${checkpoint}:true`, { checkpoint, matches: true }],
-      [`target-submit-${checkpoint}:false`, { checkpoint, matches: false }],
+      [`target-submit-${checkpoint}:true`, { checkpoint, matches: true }] as const,
+      [`target-submit-${checkpoint}:false`, { checkpoint, matches: false }] as const,
     ]),
   ] as const) {
     const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
