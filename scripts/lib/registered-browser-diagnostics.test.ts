@@ -256,3 +256,66 @@ test('actual bounded log reader transports the latest failing target checkpoint 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('earlier target submission retains status and fixed equality flags without response data', () => {
+  for (const [progress, expected] of [
+    ['target-submit-http-status:201', { checkpoint: 'http-status', httpStatus: 201 }],
+    ['target-submit-http-status:409', { checkpoint: 'http-status', httpStatus: 409 }],
+    [
+      'target-submit-foreign-http-status:403',
+      { checkpoint: 'foreign-http-status', httpStatus: 403 },
+    ],
+    ['target-submit-response-schema', { checkpoint: 'response-schema' }],
+    ['target-submit-snapshot-schema', { checkpoint: 'snapshot-schema' }],
+    ['target-submit-foreign-body-check', { checkpoint: 'foreign-body-check' }],
+    ...[
+      'snapshot-kind',
+      'response-tenant',
+      'response-actor',
+      'snapshot-url',
+      'snapshot-estate',
+      'snapshot-system',
+    ].flatMap((checkpoint) => [
+      [`target-submit-${checkpoint}:true`, { checkpoint, matches: true }],
+      [`target-submit-${checkpoint}:false`, { checkpoint, matches: false }],
+    ]),
+  ] as const) {
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.deepEqual(result.targetSubmission, expected);
+    assert.equal(result.progress, `target-submit-${expected.checkpoint}`);
+    assert(!JSON.stringify(result).includes(secret));
+  }
+  for (const progress of [
+    'target-submit-http-status:99',
+    'target-submit-http-status:600',
+    'target-submit-http-status:0201',
+    'target-submit-http-status:201:' + secret,
+    'target-submit-response-schema:' + secret,
+    'target-submit-response-actor:1',
+    'target-submit-response-actor:true:false',
+    'target-submit-secret:true',
+  ]) {
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.equal(result.targetSubmission, undefined);
+    assert.equal(result.progress, 'unknown');
+    assert(!JSON.stringify(result).includes(secret));
+  }
+});
+
+test('owned log tail carries the failing submission checkpoint without private values', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'axiom-submit-progress-'));
+  const path = join(directory, 'browser.private.log');
+  try {
+    writeFileSync(
+      path,
+      `${secret}\n[registered-website-stage] target-submit\n[registered-website-stage] target-submit-http-status:201\n[registered-website-stage] target-submit-response-actor:false\n[registered-website-stage] target-submit-secret:${secret}\n`,
+      { mode: 0o600 },
+    );
+    const progress = readRegisteredBrowserProgress(path);
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.deepEqual(result.targetSubmission, { checkpoint: 'response-actor', matches: false });
+    assert(!JSON.stringify(result).includes(secret));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

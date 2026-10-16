@@ -54,6 +54,25 @@ function savedTargetSelectionEvidence(value: unknown) {
     ...(result[3] === undefined ? {} : { targetPresent: result[3] === 'true' }),
   };
 }
+/** Earlier registration stage; only fixed labels, status and equality bits. */
+function targetSubmissionEvidence(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  const status = /^target-submit-(http-status|foreign-http-status):([1-5][0-9]{2})$/.exec(value);
+  if (status) return { checkpoint: status[1]!, httpStatus: Number(status[2]) };
+  if (
+    [
+      'target-submit-response-schema',
+      'target-submit-snapshot-schema',
+      'target-submit-foreign-body-check',
+    ].includes(value)
+  )
+    return { checkpoint: value.slice('target-submit-'.length) };
+  const match =
+    /^target-submit-(snapshot-kind|response-tenant|response-actor|snapshot-url|snapshot-estate|snapshot-system):(true|false)$/.exec(
+      value,
+    );
+  return match ? { checkpoint: match[1]!, matches: match[2] === 'true' } : undefined;
+}
 /** Read only a bounded private regular-file tail; never return browser output. */
 export function readRegisteredBrowserProgress(path: string): string {
   let descriptor: number | undefined;
@@ -78,7 +97,11 @@ export function readRegisteredBrowserProgress(path: string): string {
       const offset = line.indexOf(marker);
       if (offset < 0) continue;
       const candidate = line.slice(offset + marker.length);
-      if (progressStages.has(candidate) || savedTargetSelectionEvidence(candidate))
+      if (
+        progressStages.has(candidate) ||
+        savedTargetSelectionEvidence(candidate) ||
+        targetSubmissionEvidence(candidate)
+      )
         progress = candidate;
     }
     return progress;
@@ -167,16 +190,20 @@ export function registeredBrowserDiagnostics(
     ? String(lifecycle.signal)
     : null;
   const targetSelection = savedTargetSelectionEvidence(lifecycle.progress);
+  const targetSubmission = targetSubmissionEvidence(lifecycle.progress);
   return {
     version: 1,
     kind: 'sanitized-registered-browser-diagnostics',
     phase,
     progress: targetSelection
       ? `saved-targets-${targetSelection.checkpoint}`
-      : typeof lifecycle.progress === 'string' && progressStages.has(lifecycle.progress)
-        ? lifecycle.progress
-        : 'unknown',
+      : targetSubmission
+        ? `target-submit-${targetSubmission.checkpoint}`
+        : typeof lifecycle.progress === 'string' && progressStages.has(lifecycle.progress)
+          ? lifecycle.progress
+          : 'unknown',
     ...(targetSelection ? { targetSelection } : {}),
+    ...(targetSubmission ? { targetSubmission } : {}),
     report: lifecycle.report,
     exitCode,
     signal,

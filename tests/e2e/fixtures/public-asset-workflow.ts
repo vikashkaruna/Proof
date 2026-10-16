@@ -48,6 +48,27 @@ function targetSelectionCheckpoint(
   );
 }
 
+/** Fixed submission checkpoints; no response values or identifiers are emitted. */
+function targetSubmissionCheckpoint(
+  checkpoint:
+    | 'http-status'
+    | 'response-schema'
+    | 'snapshot-schema'
+    | 'snapshot-kind'
+    | 'response-tenant'
+    | 'response-actor'
+    | 'snapshot-url'
+    | 'snapshot-estate'
+    | 'snapshot-system'
+    | 'foreign-http-status'
+    | 'foreign-body-check',
+  value?: number | boolean,
+) {
+  process.stdout.write(
+    `[registered-website-stage] target-submit-${checkpoint}${value === undefined ? '' : `:${value}`}\n`,
+  );
+}
+
 function registeredCombobox(scope: Page | Locator, name: string) {
   return scope.getByRole('combobox', { name, exact: true });
 }
@@ -99,20 +120,31 @@ export async function registeredWebsiteSourceInBrowser(
     .getByRole('button', { name: 'Record selected website operation', exact: true })
     .click({ timeout: 15_000 });
   const registration = await registered;
+  targetSubmissionCheckpoint('http-status', registration.status());
   expect(registration.status()).toBe(201);
+  targetSubmissionCheckpoint('response-schema');
   const target = publicWebsiteAssetOperationSchema.parse((await registration.json()).data);
+  targetSubmissionCheckpoint('snapshot-schema');
   const targetSnapshot = parsePublicWebsiteAssetSnapshotText(target.snapshotText);
+  targetSubmissionCheckpoint('snapshot-kind', targetSnapshot.kind === 'target');
   expect(targetSnapshot.kind).toBe('target');
+  targetSubmissionCheckpoint('response-tenant', target.tenantId === config.tenantId);
   expect(target.tenantId).toBe(config.tenantId);
+  targetSubmissionCheckpoint('response-actor', target.actorId === config.actorId);
   expect(target.actorId).toBe(config.actorId);
   if (targetSnapshot.kind !== 'target') throw new Error('Owned target receipt refused');
+  targetSubmissionCheckpoint('snapshot-url', targetSnapshot.url === config.publicUrl);
   expect(targetSnapshot.url).toBe(config.publicUrl);
+  targetSubmissionCheckpoint('snapshot-estate', targetSnapshot.estateId === config.estateId);
   expect(targetSnapshot.estateId).toBe(config.estateId);
+  targetSubmissionCheckpoint('snapshot-system', targetSnapshot.systemId === config.systemId);
   expect(targetSnapshot.systemId).toBe(config.systemId);
   const foreign = await page.request.get(operationPath + '/' + target.operationKey, {
     headers: { 'X-Tenant-Id': state.tenantB.id },
   });
+  targetSubmissionCheckpoint('foreign-http-status', foreign.status());
   expect([403, 404]).toContain(foreign.status());
+  targetSubmissionCheckpoint('foreign-body-check');
   expect((await foreign.text()).includes(target.snapshotText)).toBe(false);
 
   process.stdout.write('[registered-website-stage] capture-prepare\n');
