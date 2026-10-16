@@ -18,6 +18,7 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess  # nosec B404 - test harness runs docker and pnpm with argv lists, no shell
 import sys
 import tarfile
@@ -65,6 +66,191 @@ def command(args, *, log=None, timeout=1800):
         check=True,
     )
     return (result.stdout or "").strip()
+
+
+CREATION_INTENT = "private-creation-intent.json"
+
+
+def sync_directory(directory: Path):
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def creation_labels(intent):
+    return {
+        "axiom.fixture.run": intent["runId"],
+        "axiom.fixture.image": intent["sourceImageId"],
+        "axiom.fixture.worktree": intent["sourceWorktree"],
+        "axiom.fixture.source": intent["sourceCommit"],
+        "axiom.fixture.archive": intent["sourceArchiveSha256"],
+    }
+
+
+def inspect_optional(kind: str, name: str):
+    try:
+        rows = json.loads(command(["docker", kind, "inspect", name]))
+    except subprocess.CalledProcessError as error:
+        diagnostic = (error.output or "").strip().removeprefix("[]\n").strip()
+        # Daemon failures, permissions and malformed output are not absence.
+        patterns = [
+            f"Error: No such {kind}: {name}",
+            f"Error response from daemon: No such {kind}: {name}",
+            f"Error response from daemon: get {name}: no such volume",
+        ]
+        if error.returncode == 1 and diagnostic in patterns:
+            return None
+        raise RuntimeError("Fixture inspection failed") from None
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict):
+        raise RuntimeError("Fixture inspection shape refused")
+    return rows[0]
+
+
+def read_creation_intent(directory: Path):
+    path = directory / CREATION_INTENT
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        info = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+            or info.st_size > 8192
+        ):
+            raise RuntimeError("Private creation intent permissions refused")
+        with os.fdopen(descriptor, "r", closefd=False) as handle:
+            intent = json.loads(handle.read(8193))
+    finally:
+        os.close(descriptor)
+    fields = {
+        "schemaVersion",
+        "runId",
+        "name",
+        "volume",
+        "sourceImageId",
+        "sourceWorktree",
+        "sourceCommit",
+        "sourceArchiveSha256",
+    }
+    if (
+        not isinstance(intent, dict)
+        or set(intent) != fields
+        or type(intent["schemaVersion"]) is not int
+        or intent["schemaVersion"] != 1
+        or not isinstance(intent["runId"], str)
+        or not re.fullmatch(r"[a-f0-9]{12}", intent["runId"])
+        or intent["name"] != f"axiom-evidence-{intent['runId']}"
+        or intent["volume"] != intent["name"] + "-data"
+        or not isinstance(intent["sourceImageId"], str)
+        or not re.fullmatch(r"sha256:[a-f0-9]{64}", intent["sourceImageId"])
+        or intent["sourceWorktree"] != str(ROOT.resolve())
+        or intent["sourceCommit"] != COMMIT
+        or intent["sourceArchiveSha256"] != ARCHIVE_SHA
+    ):
+        raise RuntimeError("Private creation intent binding refused")
+    return intent
+
+
+def prepare_creation_intent(directory: Path, run_id: str, image: str):
+    info = directory.stat()
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise RuntimeError("Private fixture directory refused")
+    intent = {
+        "schemaVersion": 1,
+        "runId": run_id,
+        "name": f"axiom-evidence-{run_id}",
+        "volume": f"axiom-evidence-{run_id}-data",
+        "sourceImageId": image,
+        "sourceWorktree": str(ROOT.resolve()),
+        "sourceCommit": COMMIT,
+        "sourceArchiveSha256": ARCHIVE_SHA,
+    }
+    if not re.fullmatch(r"[a-f0-9]{12}", run_id) or not re.fullmatch(
+        r"sha256:[a-f0-9]{64}", image
+    ):
+        raise RuntimeError("Creation identity refused")
+    for kind, name in [("container", intent["name"]), ("volume", intent["volume"])]:
+        if inspect_optional(kind, name) is not None:
+            raise RuntimeError("Preexisting fixture resource refused")
+    descriptor = os.open(
+        directory / CREATION_INTENT,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600,
+    )
+    with os.fdopen(descriptor, "w") as handle:
+        handle.write(json.dumps(intent, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    # Persist both the exclusive intent and its private parent before creation.
+    sync_directory(directory)
+    sync_directory(directory.parent)
+    return intent
+
+
+def validate_creation_resource(kind: str, info, intent):
+    if info is None:
+        return
+    labels = (
+        info.get("Config", {}).get("Labels", {})
+        if kind == "container"
+        else info.get("Labels", {})
+    )
+    if not isinstance(labels, dict) or any(
+        labels.get(key) != value for key, value in creation_labels(intent).items()
+    ):
+        raise RuntimeError("Fixture ownership mismatch")
+    if kind == "container":
+        if (
+            not re.fullmatch(r"[a-f0-9]{64}", info.get("Id", ""))
+            or info.get("Name") != "/" + intent["name"]
+            or info.get("Image") != intent["sourceImageId"]
+            or not any(
+                mount.get("Type") == "volume"
+                and mount.get("Name") == intent["volume"]
+                and mount.get("Destination") == "/data"
+                for mount in info.get("Mounts", [])
+            )
+        ):
+            raise RuntimeError("Fixture container ownership mismatch")
+    elif info.get("Name") != intent["volume"]:
+        raise RuntimeError("Fixture volume ownership mismatch")
+
+
+def cleanup_creation_intent(directory: Path):
+    intent_path = directory / CREATION_INTENT
+    intent = read_creation_intent(directory)
+    original = intent_path.stat(follow_symlinks=False)
+    container = inspect_optional("container", intent["name"])
+    volume = inspect_optional("volume", intent["volume"])
+    # Validate every present resource before removing any, including volume-only
+    # interruption before the normal private-fixture.json could be published.
+    validate_creation_resource("container", container, intent)
+    validate_creation_resource("volume", volume, intent)
+    if container is not None:
+        cid = container["Id"]
+        current = inspect_optional("container", cid)
+        validate_creation_resource("container", current, intent)
+        if current is not None:
+            if current.get("State", {}).get("Paused"):
+                command(["docker", "unpause", cid])
+            command(["docker", "rm", "-f", cid])
+    if volume is not None:
+        current = inspect_optional("volume", intent["volume"])
+        validate_creation_resource("volume", current, intent)
+        if current is not None:
+            command(["docker", "volume", "rm", intent["volume"]])
+    current = intent_path.stat(follow_symlinks=False)
+    if (current.st_dev, current.st_ino, current.st_mtime_ns) != (
+        original.st_dev,
+        original.st_ino,
+        original.st_mtime_ns,
+    ) or read_creation_intent(directory) != intent:
+        raise RuntimeError("Private creation intent changed during cleanup")
+    intent_path.unlink()
+    sync_directory(directory)
 
 
 def build(directory: Path, run_id: str) -> str:
@@ -291,7 +477,7 @@ def main():
     parser.add_argument(
         "--stop",
         action="store_true",
-        help="Remove only the owned fixture identified by private-fixture.json",
+        help="Remove only the owned fixture identified by its private state or creation intent",
     )
     args = parser.parse_args()
     if args.cold_pdf and (
@@ -509,6 +695,19 @@ def main():
                     measurement.unlink(missing_ok=True)
         return
     if args.stop:
+        if (directory / CREATION_INTENT).exists() or (
+            directory / CREATION_INTENT
+        ).is_symlink():
+            cleanup_creation_intent(directory)
+            for private in [
+                "private.env",
+                "private-config.json",
+                "private-fixture.json",
+                "runtime.env",
+            ]:
+                (directory / private).unlink(missing_ok=True)
+            print("Owned evidence fixture removed")
+            return
         if not state_file.exists():
             print("No retained fixture to remove")
             return
@@ -534,7 +733,11 @@ def main():
             (directory / private).unlink(missing_ok=True)
         print("Owned evidence fixture removed")
         return
-    if state_file.exists():
+    if (
+        state_file.exists()
+        or (directory / CREATION_INTENT).exists()
+        or (directory / CREATION_INTENT).is_symlink()
+    ):
         raise RuntimeError(
             "An owned fixture already exists; stop it before starting another"
         )
@@ -544,7 +747,8 @@ def main():
     inspected = json.loads(command(["docker", "image", "inspect", image]))[0]
     labels = inspected["Config"].get("Labels", {})
     if (
-        not image.startswith("sha256:")
+        not re.fullmatch(r"sha256:[a-f0-9]{64}", image)
+        or inspected.get("Id") != image
         or labels.get("axiom.fixture.source") != COMMIT
         or labels.get("axiom.fixture.archive") != ARCHIVE_SHA
     ):
@@ -554,6 +758,12 @@ def main():
         return
     name = f"axiom-evidence-{run_id}"
     volume = f"{name}-data"
+    intent = prepare_creation_intent(directory, run_id, image)
+    resource_labels = [
+        item
+        for key, value in creation_labels(intent).items()
+        for item in ("--label", f"{key}={value}")
+    ]
     user = f"fixture{secrets.token_hex(8)}"
     password = secrets.token_urlsafe(32)
     env_file = directory / "private.env"
@@ -568,11 +778,14 @@ def main():
                 "docker",
                 "volume",
                 "create",
-                "--label",
-                f"axiom.fixture.run={run_id}",
+                *resource_labels,
                 volume,
             ]
         )
+        created_volume = inspect_optional("volume", volume)
+        if created_volume is None:
+            raise RuntimeError("Created fixture volume unavailable")
+        validate_creation_resource("volume", created_volume, intent)
         command(
             [
                 "docker",
@@ -582,8 +795,7 @@ def main():
                 name,
                 "--cpus=2",
                 "--memory=1g",
-                "--label",
-                f"axiom.fixture.run={run_id}",
+                *resource_labels,
                 "--env-file",
                 str(env_file),
                 "-p",
@@ -672,18 +884,9 @@ def main():
         )
         raise
     finally:
-        # Names include a random run ID and are owned exclusively by this harness.
+        # The durable intent and matching immutable provenance labels authorize cleanup.
         if not keep:
-            subprocess.run(  # nosec B603 B607 - fixed docker argv, no shell
-                ["docker", "rm", "-f", name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            subprocess.run(  # nosec B603 B607 - fixed docker argv, no shell
-                ["docker", "volume", "rm", volume],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            cleanup_creation_intent(directory)
             for private in [
                 "private.env",
                 "private-config.json",

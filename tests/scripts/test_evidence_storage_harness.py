@@ -3,7 +3,9 @@
 import copy
 import importlib.util
 import json
+import os
 import re
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -36,6 +38,310 @@ def measurement():
 
 
 class EvidenceStorageHarnessTests(unittest.TestCase):
+    def creation_intent(self, directory):
+        run_id = "0123456789ab"
+        return {
+            "schemaVersion": 1,
+            "runId": run_id,
+            "name": "axiom-evidence-" + run_id,
+            "volume": "axiom-evidence-" + run_id + "-data",
+            "sourceImageId": "sha256:" + "a" * 64,
+            "sourceWorktree": str(harness.ROOT.resolve()),
+            "sourceCommit": harness.COMMIT,
+            "sourceArchiveSha256": harness.ARCHIVE_SHA,
+        }
+
+    def write_intent(self, directory):
+        intent = self.creation_intent(directory)
+        path = directory / "private-creation-intent.json"
+        path.write_text(json.dumps(intent))
+        path.chmod(0o600)
+        return intent
+
+    def absent(self, argv):
+        raise subprocess.CalledProcessError(
+            1, argv, output=f"Error: No such {argv[1]}: {argv[-1]}"
+        )
+
+    def test_interrupted_volume_only_stop_uses_durable_intent_without_state(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            intent = self.write_intent(directory)
+            removed = []
+
+            def docker(argv, **_):
+                if argv[1:3] == ["container", "inspect"]:
+                    return self.absent(argv)
+                if argv[1:3] == ["volume", "inspect"]:
+                    return json.dumps(
+                        [
+                            {
+                                "Name": intent["volume"],
+                                "Labels": harness.creation_labels(intent),
+                            }
+                        ]
+                    )
+                removed.append(argv)
+                return ""
+
+            with (
+                patch.object(
+                    harness.sys, "argv", ["harness", "--stop", "--directory", raw]
+                ),
+                patch.object(harness, "command", side_effect=docker),
+            ):
+                harness.main()
+            self.assertEqual(removed, [["docker", "volume", "rm", intent["volume"]]])
+            self.assertFalse((directory / "private-creation-intent.json").exists())
+
+    def test_intent_is_exclusive_private_and_fsynced_before_creation(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            with (
+                patch.object(harness, "command", side_effect=self.absent),
+                patch.object(harness.os, "fsync", wraps=os.fsync) as sync,
+            ):
+                intent = harness.prepare_creation_intent(
+                    directory, "0123456789ab", "sha256:" + "a" * 64
+                )
+            path = directory / "private-creation-intent.json"
+            self.assertEqual(json.loads(path.read_text()), intent)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertGreaterEqual(sync.call_count, 3)
+            original = path.read_bytes()
+            with (
+                patch.object(harness, "command", side_effect=self.absent),
+                self.assertRaises(FileExistsError),
+            ):
+                harness.prepare_creation_intent(
+                    directory, "0123456789ab", "sha256:" + "a" * 64
+                )
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_preexisting_container_or_volume_refused_without_creation(self):
+        for kind in ["container", "volume"]:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as raw:
+                directory = Path(raw)
+                calls = []
+
+                def docker(argv, *, kind=kind, calls=calls, **_):
+                    calls.append(argv)
+                    if argv[1] == kind:
+                        return json.dumps([{"Name": "preexisting"}])
+                    return self.absent(argv)
+
+                with (
+                    patch.object(harness, "command", side_effect=docker),
+                    self.assertRaisesRegex(RuntimeError, "Preexisting"),
+                ):
+                    harness.prepare_creation_intent(
+                        directory, "0123456789ab", "sha256:" + "a" * 64
+                    )
+                self.assertFalse((directory / "private-creation-intent.json").exists())
+                self.assertTrue(all(call[2] == "inspect" for call in calls))
+
+    def test_foreign_volume_or_container_refused_before_any_removal(self):
+        for kind in ["container", "volume"]:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as raw:
+                directory = Path(raw)
+                intent = self.write_intent(directory)
+                calls = []
+
+                def docker(argv, *, kind=kind, calls=calls, intent=intent, **_):
+                    calls.append(argv)
+                    if argv[1:3] == ["container", "inspect"]:
+                        return json.dumps(
+                            [
+                                {
+                                    "Id": "c" * 64,
+                                    "Name": "/" + intent["name"],
+                                    "Image": intent["sourceImageId"],
+                                    "Config": {
+                                        "Labels": {}
+                                        if kind == "container"
+                                        else harness.creation_labels(intent)
+                                    },
+                                    "State": {"Paused": False},
+                                    "Mounts": [
+                                        {
+                                            "Type": "volume",
+                                            "Name": intent["volume"],
+                                            "Destination": "/data",
+                                        }
+                                    ],
+                                }
+                            ]
+                        )
+                    return json.dumps(
+                        [
+                            {
+                                "Name": intent["volume"],
+                                "Labels": {}
+                                if kind == "volume"
+                                else harness.creation_labels(intent),
+                            }
+                        ]
+                    )
+
+                with (
+                    patch.object(harness, "command", side_effect=docker),
+                    self.assertRaisesRegex(RuntimeError, "ownership"),
+                ):
+                    harness.cleanup_creation_intent(directory)
+                self.assertTrue(all(call[2] == "inspect" for call in calls))
+                self.assertTrue((directory / "private-creation-intent.json").exists())
+
+    def test_invalid_intent_permissions_symlink_hardlink_or_source_refused(self):
+        for kind in ["permissions", "symlink", "hardlink", "source", "image"]:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as raw:
+                directory = Path(raw)
+                intent = self.write_intent(directory)
+                path = directory / "private-creation-intent.json"
+                if kind == "permissions":
+                    path.chmod(0o644)
+                elif kind == "symlink":
+                    other = directory / "other"
+                    path.rename(other)
+                    path.symlink_to(other)
+                elif kind == "hardlink":
+                    os.link(path, directory / "other")
+                else:
+                    intent[
+                        "sourceWorktree" if kind == "source" else "sourceImageId"
+                    ] = "foreign"
+                    path.write_text(json.dumps(intent))
+                with (
+                    patch.object(harness, "command") as docker,
+                    self.assertRaises((RuntimeError, OSError)),
+                ):
+                    harness.cleanup_creation_intent(directory)
+                docker.assert_not_called()
+
+    def test_owned_interrupted_container_is_removed_by_full_id_not_name(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            intent = self.write_intent(directory)
+            mutations = []
+            container = {
+                "Id": "c" * 64,
+                "Name": "/" + intent["name"],
+                "Image": intent["sourceImageId"],
+                "Config": {"Labels": harness.creation_labels(intent)},
+                "State": {"Paused": True},
+                "Mounts": [
+                    {"Type": "volume", "Name": intent["volume"], "Destination": "/data"}
+                ],
+            }
+            volume = {
+                "Name": intent["volume"],
+                "Labels": harness.creation_labels(intent),
+            }
+
+            def docker(argv, **_):
+                if argv[1:3] == ["container", "inspect"]:
+                    return json.dumps([container])
+                if argv[1:3] == ["volume", "inspect"]:
+                    return json.dumps([volume])
+                mutations.append(argv)
+                return ""
+
+            with patch.object(harness, "command", side_effect=docker):
+                harness.cleanup_creation_intent(directory)
+            self.assertEqual(
+                mutations,
+                [
+                    ["docker", "unpause", "c" * 64],
+                    ["docker", "rm", "-f", "c" * 64],
+                    ["docker", "volume", "rm", intent["volume"]],
+                ],
+            )
+
+    def test_inspection_failure_is_not_absence_and_empty_array_absence_is_recognized(
+        self,
+    ):
+        name = "axiom-evidence-0123456789ab"
+        for output in [
+            "permission denied",
+            "Cannot connect to Docker",
+            "[]\nError: No such container: foreign",
+        ]:
+            with (
+                self.subTest(output=output),
+                patch.object(
+                    harness,
+                    "command",
+                    side_effect=subprocess.CalledProcessError(
+                        1, ["docker"], output=output
+                    ),
+                ),
+                self.assertRaisesRegex(RuntimeError, "inspection failed"),
+            ):
+                harness.inspect_optional("container", name)
+        with patch.object(
+            harness,
+            "command",
+            side_effect=subprocess.CalledProcessError(
+                1, ["docker"], output=f"[]\nError: No such container: {name}"
+            ),
+        ):
+            self.assertIsNone(harness.inspect_optional("container", name))
+
+    def test_provider_volume_creation_observes_fsynced_intent_and_exact_labels(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            volume = None
+            calls = []
+            image = "sha256:" + "a" * 64
+
+            def docker(argv, **_):
+                nonlocal volume
+                calls.append(argv)
+                if argv[1:3] == ["image", "inspect"]:
+                    return json.dumps(
+                        [
+                            {
+                                "Id": image,
+                                "Config": {
+                                    "Labels": {
+                                        "axiom.fixture.source": harness.COMMIT,
+                                        "axiom.fixture.archive": harness.ARCHIVE_SHA,
+                                    }
+                                },
+                            }
+                        ]
+                    )
+                if argv[1:3] == ["volume", "create"]:
+                    intent = harness.read_creation_intent(directory)
+                    self.assertEqual(intent["sourceImageId"], image)
+                    self.assertFalse((directory / "private-fixture.json").exists())
+                    self.assertGreaterEqual(sync.call_count, 3)
+                    for key, value in harness.creation_labels(intent).items():
+                        self.assertIn(f"{key}={value}", argv)
+                    volume = {
+                        "Name": intent["volume"],
+                        "Labels": harness.creation_labels(intent),
+                    }
+                    raise RuntimeError("Synthetic interrupted provider creation")
+                if argv[1:3] == ["volume", "inspect"] and volume:
+                    return json.dumps([volume])
+                if argv[1:3] == ["volume", "rm"]:
+                    return ""
+                return self.absent(argv)
+
+            with (
+                patch.object(
+                    harness.sys,
+                    "argv",
+                    ["harness", "--directory", raw, "--image-id", image],
+                ),
+                patch.object(harness, "command", side_effect=docker),
+                patch.object(harness.os, "fsync", wraps=os.fsync) as sync,
+                self.assertRaisesRegex(RuntimeError, "Synthetic interrupted"),
+            ):
+                harness.main()
+            self.assertTrue(any(call[1:3] == ["volume", "rm"] for call in calls))
+            self.assertFalse((directory / "private-creation-intent.json").exists())
+
     def run_cold(
         self,
         stats=None,
