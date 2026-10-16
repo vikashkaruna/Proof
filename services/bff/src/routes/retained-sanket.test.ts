@@ -199,6 +199,7 @@ function app(mounted = true) {
         fetchImpl: runtime,
         authHeaders: async () => ({}),
         mfa: {
+          sessionAccess: async () => ({ sessionCurrent: true, recovery: null }),
           requiresLoginMfa: async (context) => {
             if (authorityError) throw new Error('private-authority-sentinel');
             return loginMfa.requiresLoginMfa(context);

@@ -41,7 +41,10 @@ vi.mock('../services/kill-switch.js', () => ({
 vi.mock('../services/approval.js', () => ({ createApprovalEngine: () => ({}) }));
 vi.mock('../services/ledger.js', () => ({ createLedgerService: () => ({}) }));
 vi.mock('../services/mfa.js', () => ({
-  createMfaService: () => ({ requiresLoginMfa: async () => false }),
+  createMfaService: () => ({
+    sessionAccess: async () => ({ sessionCurrent: true, recovery: null }),
+    requiresLoginMfa: async () => false,
+  }),
 }));
 vi.mock('../services/realtime.js', () => ({ startRealtimeChannel: () => ({}) }));
 vi.mock('../services/saakshi-staging-composition.js', () => ({
