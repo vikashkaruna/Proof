@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -137,6 +138,75 @@ class ParityIdentity(unittest.TestCase):
             )
         self.assertNotIn("Env", command.call_args.args[1][3])
         return result
+
+    def test_umask022_runtime_from_prior_tests_is_protected_before_privileged_guard(
+        self,
+    ):
+        # Reproduce the W0 predecessor's default-mode mkdir, not a mocked mode.
+        previous = os.umask(0o022)
+        try:
+            self.state.parent.chmod(0o755)
+            with self.assertRaisesRegex(GUARD.Refused, "ancestry refused"):
+                self.inspect(self.identity())
+            before = self.config.read_bytes()
+            with patch.object(
+                GUARD, "command", side_effect=AssertionError("no Docker")
+            ):
+                GUARD.prepare_parity_paths(self.owner, self.state, self.project, "563")
+            self.assertEqual(self.state.parent.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(self.config.read_bytes(), before)
+            self.inspect(self.identity())
+        finally:
+            os.umask(previous)
+
+    def test_preparation_creates_only_known_private_paths_and_never_installs_roles(
+        self,
+    ):
+        state = self.owner / ".axiom-runtime/registered-report-0123456789ab/parity"
+        with patch.object(GUARD, "command", side_effect=AssertionError("no Docker")):
+            GUARD.prepare_parity_paths(
+                self.owner, state, "axiom-report-0123456789ab", "563"
+            )
+        for path in [state.parent, state, state / "supabase"]:
+            self.assertEqual(path.stat().st_mode & 0o777, 0o700)
+        self.assertFalse((state / "supabase/config.toml").exists())
+        source = (BASE.ROOT / "scripts/start-parity-supabase.sh").read_text()
+        self.assertLess(
+            source.index("--prepare-parity-paths"),
+            source.index('supabase "${start_args[@]}"'),
+        )
+
+    def test_preparation_refuses_foreign_scope_symlinks_hardlinks_and_ownership(self):
+        outside = self.owner / "unrelated"
+        outside.mkdir(mode=0o755)
+        for state, project in [
+            (outside, self.project),
+            (self.state, "axiom-owner-test"),
+        ]:
+            with self.assertRaises(GUARD.Refused):
+                GUARD.prepare_parity_paths(self.owner, state, project, "563")
+        self.assertEqual(outside.stat().st_mode & 0o777, 0o755)
+        alias = self.owner / "config-hardlink"
+        os.link(self.config, alias)
+        with self.assertRaises(GUARD.Refused):
+            GUARD.prepare_parity_paths(self.owner, self.state, self.project, "563")
+        alias.unlink()
+        original = self.config.read_bytes()
+        self.config.unlink()
+        self.config.symlink_to(outside / "config")
+        with self.assertRaises(GUARD.Refused):
+            GUARD.prepare_parity_paths(self.owner, self.state, self.project, "563")
+        self.assertFalse((outside / "config").exists())
+        self.config.unlink()
+        self.config.write_bytes(original)
+        with (
+            patch.object(GUARD.os, "getuid", return_value=os.getuid() + 1),
+            self.assertRaises(GUARD.Refused),
+        ):
+            GUARD.prepare_parity_paths(self.owner, self.state, self.project, "563")
+        self.owner.chmod(0o770)
+        with self.assertRaises(GUARD.Refused):
+            GUARD.prepare_parity_paths(self.owner, self.state, self.project, "563")
 
     def test_known_families_exact_nonce_and_both_component_identity(self):
         for registered in (False, True):

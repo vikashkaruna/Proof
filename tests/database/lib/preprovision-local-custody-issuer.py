@@ -14,10 +14,10 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 _shared_spec = importlib.util.spec_from_file_location(
     "custody143_disposable_guard",
@@ -50,19 +50,9 @@ PARITY_FORMAT = (
 )
 
 
-def parity_inspect(
-    docker: str,
-    target: str,
-    image: str,
-    owner: Path,
-    state: Path,
-    project: str,
-    prefix: str,
-    *,
-    api: bool = False,
-) -> dict:
-    # Only already-used engineering fixture families are accepted. A retained
-    # project cannot become eligible merely by providing a matching image/name.
+def parity_location(owner: Path, state: Path, project: str, prefix: str) -> None:
+    if not re.fullmatch(r"[0-9]{3}", prefix):
+        raise Refused("parity fixture port prefix refused")
     expected = owner / ".axiom-runtime" / "parity"
     match = re.fullmatch(r"axiom-report-([a-f0-9]{12})", project)
     if match:
@@ -78,7 +68,91 @@ def parity_inspect(
         or state.is_symlink()
     ):
         raise Refused("owned parity fixture path refused")
-    for path in [state, state.parent, owner / ".axiom-runtime"]:
+
+
+def prepare_parity_paths(owner: Path, state: Path, project: str, prefix: str) -> None:
+    """Protect only owned, canonical disposable paths before any CLI startup.
+
+    Earlier offline tests may create .axiom-runtime under umask022. Restrict
+    that directory rather than weakening the later privileged identity guard.
+    No Docker, role installation or retained deployment path is accepted here.
+    """
+    parity_location(owner, state, project, prefix)
+    owner_stat = owner.lstat()
+    if (
+        owner.resolve() != owner
+        or not stat.S_ISDIR(owner_stat.st_mode)
+        or owner_stat.st_uid != os.getuid()
+        or owner_stat.st_mode & 0o022
+    ):
+        raise Refused("owned parity workspace refused")
+    paths = list(
+        dict.fromkeys(
+            [owner / ".axiom-runtime", state.parent, state, state / "supabase"]
+        )
+    )
+    config = state / "supabase/config.toml"
+    # Refuse all existing unsafe identities before changing any permissions.
+    for path in [*paths, config]:
+        try:
+            value = path.lstat()
+        except FileNotFoundError:
+            continue
+        valid_kind = (
+            stat.S_ISREG(value.st_mode)
+            if path == config
+            else stat.S_ISDIR(value.st_mode)
+        )
+        if (
+            not valid_kind
+            or value.st_uid != os.getuid()
+            or path.resolve() != path
+            or (path == config and (value.st_nlink != 1 or value.st_size > 65536))
+        ):
+            raise Refused("owned parity preparation identity refused")
+    for path in paths:
+        path.mkdir(mode=0o700, exist_ok=True)
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            if os.fstat(fd).st_uid != os.getuid():
+                raise Refused("owned parity preparation identity refused")
+            os.fchmod(fd, 0o700)
+        finally:
+            os.close(fd)
+    if config.exists():
+        fd = os.open(config, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            value = os.fstat(fd)
+            if (
+                not stat.S_ISREG(value.st_mode)
+                or value.st_uid != os.getuid()
+                or value.st_nlink != 1
+            ):
+                raise Refused("owned parity preparation identity refused")
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+
+
+def parity_inspect(
+    docker: str,
+    target: str,
+    image: str,
+    owner: Path,
+    state: Path,
+    project: str,
+    prefix: str,
+    *,
+    api: bool = False,
+) -> dict:
+    # Only already-used engineering fixture families are accepted. A retained
+    # project cannot become eligible merely by providing a matching image/name.
+    parity_location(owner, state, project, prefix)
+    for label, path in [
+        ("state", state),
+        ("state_parent", state.parent),
+        ("runtime_root", owner / ".axiom-runtime"),
+    ]:
         stat = path.stat()
         if (
             not path.is_dir()
@@ -87,7 +161,7 @@ def parity_inspect(
             or stat.st_uid != os.getuid()
             or stat.st_mode & 0o077
         ):
-            raise Refused("protected parity fixture ancestry refused")
+            raise Refused("protected parity fixture ancestry refused: " + label)
     config = state / "supabase/config.toml"
     stat = config.lstat()
     if (
@@ -275,14 +349,35 @@ end $$;
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--container", required=True)
-    parser.add_argument("--image", required=True)
+    parser.add_argument("--container")
+    parser.add_argument("--image")
+    parser.add_argument("--prepare-parity-paths", action="store_true")
     parser.add_argument("--parity-state", type=Path)
     parser.add_argument("--project")
     parser.add_argument("--port-prefix")
     parser.add_argument("--api-image")
     args = parser.parse_args()
     try:
+        if args.prepare_parity_paths:
+            if (
+                not args.parity_state
+                or not args.project
+                or not args.port_prefix
+                or args.container
+                or args.image
+                or args.api_image
+            ):
+                raise Refused("explicit path preparation arguments required")
+            owner = Path(__file__).resolve().parents[3]
+            if Path.cwd().resolve() != owner:
+                raise Refused("original owned workspace required")
+            prepare_parity_paths(
+                owner, args.parity_state, args.project, args.port_prefix
+            )
+            print("Owned parity fixture paths protected")
+            return 0
+        if not args.container or not args.image:
+            raise Refused("owned container and explicit image required")
         preprovision(
             args.container,
             args.image,

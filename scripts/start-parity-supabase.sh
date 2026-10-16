@@ -21,6 +21,9 @@ if [ "${AXIOM_PARITY_STARTUP_DEBUG+x}" = x ]; then
   start_args+=(--debug)
 fi
 db_container="supabase_db_${project_id}"
+python3 tests/database/lib/preprovision-local-custody-issuer.py \
+  --prepare-parity-paths --parity-state "$state_dir" \
+  --project "$project_id" --port-prefix "$port_prefix"
 mkdir -p "$state_dir/supabase"
 chmod 700 "$state_dir"
 python3 - "$state_dir" "$project_id" "$port_prefix" <<'PY'
