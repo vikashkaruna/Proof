@@ -195,12 +195,23 @@ it('fails before RPC on invalid scope and bounds ignored cancellation without ac
   await expect(reader({ ...input(), context: new Uint8Array(4097) })).rejects.toThrow();
   await expect(reader({ ...input(), deadline: 1 })).rejects.toThrow();
   expect(read).not.toHaveBeenCalled();
-  await Promise.all(
-    Array.from({ length: 8 }, () =>
-      reader({ ...input(), deadline: Date.now() + 10 }).catch(() => undefined),
-    ),
-  );
-  expect(read).toHaveBeenCalledTimes(8);
-  await expect(reader(input())).rejects.toThrow();
-  expect(read).toHaveBeenCalledTimes(8);
+  // Admit all eight calls before advancing their original 10ms deadline. Real
+  // scheduler delay during validation must not decide how many RPCs this tests.
+  vi.useFakeTimers();
+  try {
+    const results = Array.from({ length: 8 }, () =>
+      expect(reader({ ...input(), deadline: Date.now() + 10 })).rejects.toThrow(),
+    );
+    await Promise.resolve();
+    expect(read).toHaveBeenCalledTimes(8);
+    await vi.advanceTimersByTimeAsync(10);
+    await Promise.all(results);
+    // The ignored RPC promises remain outstanding after caller cancellation.
+    const ninth = expect(reader(input())).rejects.toThrow();
+    await Promise.resolve();
+    expect(read).toHaveBeenCalledTimes(8);
+    await ninth;
+  } finally {
+    vi.useRealTimers();
+  }
 });
