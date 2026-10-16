@@ -222,6 +222,11 @@ def custody147_probe_query(contract: str, holder: int, contender: int) -> str | 
     if not contract.startswith("custody147:"):
         return None
     uuid = r"[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}"
+    engagement = re.fullmatch(r"custody147:engagement:(" + uuid + r")", contract)
+    if engagement is not None:
+        return review141_probe_query(
+            "review141:engagement:" + engagement[1], holder, contender
+        )
     match = re.fullmatch(
         r"custody147:row:(membership|user):(" + uuid + r"):(" + uuid + r")", contract
     )
@@ -246,6 +251,8 @@ def custody147_probe_query(contract: str, holder: int, contender: int) -> str | 
 
 
 def validate_custody147_phase(value: object) -> dict:
+    if isinstance(value, dict) and value.get("phase") == "engagement":
+        return validate_review141_phase(value)
     fields = {
         "phase",
         "kind",
@@ -331,6 +338,17 @@ def validate_custody147_phase(value: object) -> dict:
     return value
 
 
+def validate_custody147_mode(contract: str, mode: str) -> None:
+    """147 expiry waits retain the exact engagement witness; no legacy widening."""
+    custody147_probe_query(contract, 1, 2)
+    if not contract.startswith("custody147:") or mode not in (
+        {"blocked", "expires"}
+        if contract.startswith("custody147:engagement:")
+        else {"blocked"}
+    ):
+        raise BarrierFailure("Custody147 proof requires actual blocked mode")
+
+
 def kill_client(client: subprocess.Popen[bytes]) -> None:
     if client.poll() is None:
         # start_new_session=True below makes this exactly our client's group.
@@ -378,9 +396,7 @@ def main() -> int:
         if mode not in {"blocked", "expires"}:
             raise BarrierFailure("Custody145 proof requires actual blocked mode")
     if expected_value.startswith("custody147:"):
-        custody147_probe_query(expected_value, 1, 2)
-        if mode != "blocked":
-            raise BarrierFailure("Custody147 row proof requires blocked mode")
+        validate_custody147_mode(expected_value, mode)
     tag = "axiom-race-" + uuid4().hex
     first_name, second_name = tag + "-first", tag + "-second"
     command = [

@@ -2,9 +2,11 @@
 
 import copy
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 HERE = Path(__file__).resolve().parent
 
@@ -116,6 +118,102 @@ class Local147(unittest.TestCase):
                 BARRIER.custody147_probe_query(
                     f"custody147:row:user:{TENANT}:{ACTOR}", a, b
                 )
+
+    def test_all15_mode_contracts_retain_actual_witness_and_legacy_modes(self):
+        cases = RACES.scenarios()
+        self.assertEqual(len(cases), 15)
+        for case in cases:
+            contract, mode = case["contract"], case["mode"]
+            if contract.startswith("custody147:"):
+                BARRIER.validate_custody147_mode(contract, mode)
+                query = BARRIER.custody147_probe_query(contract, 12, 13)
+            else:
+                self.assertTrue(contract.startswith("custody145:tenant:"))
+                self.assertIn(mode, {"blocked", "expires"})
+                query = BARRIER.custody145_probe_query(contract, 12, 13)
+            self.assertIn("pg_blocking_pids(13)", query)
+        contract = "custody147:engagement:" + TENANT
+        self.assertEqual(
+            BARRIER.custody147_probe_query(contract, 12, 13),
+            BARRIER.review141_probe_query("review141:engagement:" + TENANT, 12, 13),
+        )
+        for mode in ("blocked", "expires"):
+            BARRIER.validate_custody147_mode(contract, mode)
+        for rejected_contract, mode in (
+            (contract, "nonblocking"),
+            (contract + ";select 1", "expires"),
+            ("custody147:engagement:..", "blocked"),
+            (f"custody147:row:user:{TENANT}:{ACTOR}", "expires"),
+            (f"custody147:row:user:{TENANT}:{ACTOR}", "nonblocking"),
+            ("review141:engagement:" + TENANT, "expires"),
+        ):
+            with self.assertRaises(BARRIER.BarrierFailure):
+                BARRIER.validate_custody147_mode(rejected_contract, mode)
+
+    def test_expiry_engagement_witness_requires_actual_pre_head_block(self):
+        value = {
+            "phase": "engagement",
+            "holder": 12,
+            "contender": 13,
+            "blocked_by_holder": True,
+            "holder_phase": True,
+            "contender_phase": True,
+            "contender_head": False,
+            "locks": [],
+        }
+        self.assertEqual(BARRIER.validate_custody147_phase(value), value)
+        for field in ("blocked_by_holder", "holder_phase", "contender_phase"):
+            for missing in (False, True):
+                bad = {**value}
+                if missing:
+                    del bad[field]
+                else:
+                    bad[field] = False
+                with self.assertRaises(BARRIER.BarrierFailure):
+                    BARRIER.validate_custody147_phase(bad)
+        for missing in (False, True):
+            bad = {**value}
+            if missing:
+                del bad["contender_head"]
+            else:
+                bad["contender_head"] = True
+            with self.assertRaises(BARRIER.BarrierFailure):
+                BARRIER.validate_custody147_phase(bad)
+        query = BARRIER.custody147_probe_query(
+            "custody147:engagement:" + TENANT, 12, 13
+        )
+        self.assertIn("using(transactionid)", query)
+        self.assertIn("not waiter.granted", query)
+        self.assertIn("owner.pid=12", query)
+        self.assertIn("public.engagements", query)
+
+    def test_original141_expiry_still_refuses_before_any_process(self):
+        argv = [
+            "barrier",
+            "owned-disposable",
+            "supabase_admin",
+            "select 1",
+            "select 2",
+            "holder",
+            "contender",
+            "status",
+            "expires",
+            "error",
+            "review141:engagement:" + TENANT,
+        ]
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(
+                BARRIER.subprocess,
+                "Popen",
+                side_effect=AssertionError("must refuse before process creation"),
+            ) as spawn,
+            self.assertRaisesRegex(
+                BARRIER.BarrierFailure, "Review141 proof requires blocked mode"
+            ),
+        ):
+            BARRIER.main()
+        spawn.assert_not_called()
 
     def witness(self):
         return {
