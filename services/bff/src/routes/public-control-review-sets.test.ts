@@ -3,7 +3,13 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '@axiom/ledger';
-import { PUBLIC_CONTROL_REVIEW_MAX_BYTES, UserRole } from '@axiom/types';
+import {
+  PUBLIC_CONTROL_REVIEW_MAX_BYTES,
+  PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2,
+  PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2,
+  encodePublicWebsiteAssetRequest,
+  UserRole,
+} from '@axiom/types';
 import type { Variables } from '../types.js';
 import {
   publicControlReviewSetFixture,
@@ -398,4 +404,170 @@ it('preserves the historical head when estate context changes without disguising
   expect(r.status).toBe(200);
   expect(body.data.estateId).toBe(ids.review);
   expect(body.data.review.estate_id).toBeNull();
+});
+
+function linkedRow() {
+  const legacy = publicControlReviewSetFixture();
+  const estate = '11111111-1111-4111-8111-111111111111',
+    system = '22222222-2222-4222-8222-222222222222';
+  const targetId = '33333333-3333-4333-8333-333333333333',
+    associationId = '44444444-4444-4444-8444-444444444444';
+  const hash = (s: string) => createHash('sha256').update(s).digest('hex');
+  const bundle = (request: unknown, snapshot: unknown, n: number) => {
+    const request_text = encodePublicWebsiteAssetRequest(request),
+      snapshot_text = canonicalJson(snapshot);
+    return {
+      actor_id: ids.actor,
+      operation_key: n === 1 ? estate : system,
+      request_codec: 'axiom-public-website-asset-request-canonical-json-1',
+      request_text,
+      request_sha256: hash(request_text),
+      snapshot_codec: 'axiom-public-website-asset-snapshot-canonical-json-1',
+      snapshot_text,
+      snapshot_sha256: hash(snapshot_text),
+      receipt: { id: String(n), entry_hash: String(n).repeat(64) },
+    };
+  };
+  const base = {
+    version: 1,
+    tenantId: ids.tenant,
+    actorId: ids.actor,
+    ownershipVerified: false,
+    connectorAccessGranted: false,
+  };
+  const target = bundle(
+    {
+      version: 1,
+      kind: 'register_target',
+      confirmed: true,
+      operationKey: estate,
+      estateId: estate,
+      systemId: system,
+      expectedEstateVersion: 1,
+      expectedSystemVersion: 1,
+      url: 'https://public.org/',
+    },
+    {
+      ...base,
+      id: targetId,
+      kind: 'target',
+      estateId: estate,
+      systemId: system,
+      estateVersion: 1,
+      systemVersion: 1,
+      targetVersion: 1,
+      estateName: 'Estate',
+      systemName: 'Website',
+      url: 'https://public.org/',
+    },
+    1,
+  );
+  const association = bundle(
+    {
+      version: 1,
+      kind: 'associate_capture',
+      confirmed: true,
+      operationKey: system,
+      targetId,
+      expectedTargetSha256: target.snapshot_sha256,
+      checkId: ids.check,
+      expectedPayloadSha256: legacy.request.expectedSource.payloadSha256,
+      expectedCaptureReceipt: '500',
+    },
+    {
+      ...base,
+      id: associationId,
+      kind: 'association',
+      targetId,
+      targetSha256: target.snapshot_sha256,
+      checkId: ids.check,
+      payloadSha256: legacy.request.expectedSource.payloadSha256,
+      captureReceipt: { id: '500', entryHash: 'c'.repeat(64) },
+      requestedUrl: 'https://public.org/',
+      finalUrl: 'https://public.org/',
+      checkedAt: legacy.snapshot.checkedAt,
+    },
+    2,
+  );
+  const request = {
+    ...legacy.request,
+    version: 2,
+    expectedEstateId: estate,
+    associationRef: {
+      associationId,
+      associationSha256: association.snapshot_sha256,
+      targetId,
+      targetSha256: target.snapshot_sha256,
+      associationReceipt: { id: '2', entryHash: '2'.repeat(64) },
+    },
+  };
+  const snapshot = {
+    ...legacy.snapshot,
+    version: 2,
+    estateId: estate,
+    request,
+    assetProvenance: {
+      schema_version: 1,
+      kind: 'public_website_asset_binding',
+      tenant_id: ids.tenant,
+      estate_id: estate,
+      system_id: system,
+      target,
+      association,
+      ownership_verified: false,
+      connector_access_granted: false,
+      review_required: true,
+    },
+  };
+  const row = {
+    ...legacy.row,
+    estate_id: estate,
+    request_codec: PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2,
+    request_text: canonicalJson(request),
+    request_sha256: hash(canonicalJson(request)),
+    snapshot_codec: PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2,
+    snapshot_text: canonicalJson(snapshot),
+    snapshot_sha256: hash(canonicalJson(snapshot)),
+  };
+  return { row, snapshot, request, hash };
+}
+it('decodes an explicit v2 review and retains its exact asset snapshot without changing normalized worker answers', () => {
+  const f = linkedRow();
+  const result = verifyPublicControlReviewRow(f.row, { tenantId: ids.tenant });
+  expect(result.snapshot.version).toBe(2);
+  expect(result.snapshot.normalizedAnswers).toEqual(f.snapshot.normalizedAnswers);
+});
+it.each(['associationSha256', 'targetSha256', 'associationId', 'targetId'] as const)(
+  'refuses self-hashed review with swapped %s',
+  (field) => {
+    const f = linkedRow();
+    f.snapshot.request.associationRef[field] = field.endsWith('Sha256')
+      ? 'f'.repeat(64)
+      : ids.actor;
+    f.row.request_text = canonicalJson(f.snapshot.request);
+    f.row.request_sha256 = f.hash(f.row.request_text);
+    f.row.snapshot_text = canonicalJson(f.snapshot);
+    f.row.snapshot_sha256 = f.hash(f.row.snapshot_text);
+    expect(() => verifyPublicControlReviewRow(f.row, { tenantId: ids.tenant })).toThrow();
+  },
+);
+it('refuses valid-looking v2 receipts with a v1 codec or an altered embedded operation hash', () => {
+  const f = linkedRow();
+  expect(() =>
+    verifyPublicControlReviewRow(
+      { ...f.row, request_codec: 'axiom-public-control-review-request-canonical-json-1' },
+      { tenantId: ids.tenant },
+    ),
+  ).toThrow();
+  f.snapshot.assetProvenance.target.request_sha256 = 'f'.repeat(64);
+  f.row.snapshot_text = canonicalJson(f.snapshot);
+  f.row.snapshot_sha256 = f.hash(f.row.snapshot_text);
+  expect(() => verifyPublicControlReviewRow(f.row, { tenantId: ids.tenant })).toThrow();
+});
+it('refuses a self-hashed review timestamp that disagrees with its captured asset snapshot', () => {
+  const f = linkedRow();
+  f.snapshot.checkedAt = '2026-10-17T00:00:00.000Z';
+  f.row.snapshot_text = canonicalJson(f.snapshot);
+  f.row.snapshot_sha256 = f.hash(f.row.snapshot_text);
+  expect(() => verifyPublicControlReviewRow(f.row, { tenantId: ids.tenant })).toThrow();
 });

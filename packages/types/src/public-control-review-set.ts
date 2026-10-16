@@ -285,3 +285,156 @@ export const publicControlReviewCancellationSnapshotSchema = z
     reason: rationale,
   })
   .strict();
+
+// Additive asset-linked review contract. Existing v1 builders/parsers intentionally
+// remain separate: absence of an association never upgrades a historical review.
+export const PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2 =
+  'axiom-public-control-review-request-canonical-json-2' as const;
+export const PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2 =
+  'axiom-public-control-review-snapshot-pg-canonical-json-2' as const;
+export const publicControlReviewAssociationRefSchema = z
+  .object({
+    associationId: uuid,
+    associationSha256: digest,
+    targetId: uuid,
+    targetSha256: digest,
+    associationReceipt: z.object({ id: receipt, entryHash: digest }).strict(),
+  })
+  .strict();
+export const publicControlReviewSetRequestV2Schema = z
+  .object({
+    ...publicControlReviewSetRequestSchema.shape,
+    version: z.literal(2),
+    expectedEstateId: uuid,
+    associationRef: publicControlReviewAssociationRefSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      Object.keys(value.answers).length > 46 ||
+      Object.values(value.answers).reduce((n, q) => n + Object.keys(q).length, 0) > 5000 ||
+      new TextEncoder().encode(JSON.stringify(value)).byteLength > PUBLIC_CONTROL_REVIEW_MAX_BYTES
+    )
+      ctx.addIssue({ code: 'custom', message: 'Review set exceeds supported bounds' });
+  });
+export const publicControlReviewSetAnyRequestSchema = z.discriminatedUnion('version', [
+  publicControlReviewSetRequestSchema,
+  publicControlReviewSetRequestV2Schema,
+]);
+export type PublicControlReviewSetRequestV2 = z.infer<typeof publicControlReviewSetRequestV2Schema>;
+export function parsePublicControlReviewSetAnyRequestText(text: string) {
+  try {
+    if (new TextEncoder().encode(text).byteLength > PUBLIC_CONTROL_REVIEW_MAX_BYTES) throw Error();
+    const parsed = publicControlReviewSetAnyRequestSchema.parse(JSON.parse(text));
+    if (canonicalReviewJson(parsed) !== text) throw Error();
+    return parsed;
+  } catch {
+    throw Error('public_control_review_request_refused');
+  }
+}
+const assetReceipt = z.object({ id: receipt, entry_hash: digest }).strict();
+const assetText = z
+  .string()
+  .min(2)
+  .refine((s) => new TextEncoder().encode(s).byteLength <= 16384);
+const assetBundle = z
+  .object({
+    actor_id: uuid,
+    operation_key: uuid,
+    request_codec: z.literal('axiom-public-website-asset-request-canonical-json-1'),
+    request_text: assetText,
+    request_sha256: digest,
+    snapshot_codec: z.literal('axiom-public-website-asset-snapshot-canonical-json-1'),
+    snapshot_text: assetText,
+    snapshot_sha256: digest,
+    receipt: assetReceipt,
+  })
+  .strict();
+export const publicControlReviewAssetProvenanceSchema = z
+  .object({
+    schema_version: z.literal(1),
+    kind: z.literal('public_website_asset_binding'),
+    tenant_id: uuid,
+    estate_id: uuid,
+    system_id: uuid,
+    target: assetBundle,
+    association: assetBundle,
+    ownership_verified: z.literal(false),
+    connector_access_granted: z.literal(false),
+    review_required: z.literal(true),
+  })
+  .strict();
+export const publicControlReviewSetSnapshotV2Schema = z
+  .object({
+    ...publicControlReviewSetSnapshotSchema.shape,
+    version: z.literal(2),
+    estateId: uuid,
+    request: publicControlReviewSetRequestV2Schema,
+    assetProvenance: publicControlReviewAssetProvenanceSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const legacy = { ...value, version: 1, request: { ...value.request, version: 1 } };
+    const { assetProvenance: _asset, ...snapshot } = legacy;
+    const { associationRef: _ref, ...request } = snapshot.request;
+    if (!publicControlReviewSetSnapshotSchema.safeParse({ ...snapshot, request }).success)
+      ctx.addIssue({ code: 'custom', message: 'Review declaration projection refused' });
+    if (
+      value.tenantId !== value.assetProvenance.tenant_id ||
+      value.estateId !== value.assetProvenance.estate_id
+    )
+      ctx.addIssue({ code: 'custom', message: 'Review asset scope refused' });
+  });
+export const publicControlReviewSetAnySnapshotSchema = z.discriminatedUnion('version', [
+  publicControlReviewSetSnapshotSchema,
+  publicControlReviewSetSnapshotV2Schema,
+]);
+export const publicControlReviewSetAnyRowSchema = publicControlReviewSetRowSchema
+  .extend({
+    request_codec: z.enum([
+      PUBLIC_CONTROL_REVIEW_REQUEST_CODEC,
+      PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2,
+    ]),
+    snapshot_codec: z.enum([
+      PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC,
+      PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2,
+    ]),
+  })
+  .superRefine((row, ctx) => {
+    if (
+      (row.request_codec === PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2) !==
+      (row.snapshot_codec === PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2)
+    )
+      ctx.addIssue({ code: 'custom', message: 'Review codec pairing refused' });
+  });
+export const publicControlReviewAnyCancellationRowSchema =
+  publicControlReviewCancellationRowSchema.extend({
+    request_codec: z.enum([
+      PUBLIC_CONTROL_REVIEW_REQUEST_CODEC,
+      PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2,
+    ]),
+  });
+export const cancelPublicControlReviewAnyOperationRequestSchema =
+  cancelPublicControlReviewOperationRequestSchema.extend({
+    request: publicControlReviewSetAnyRequestSchema,
+  });
+export const recordedPublicControlReviewAnySetSchema = recordedPublicControlReviewSetSchema.extend({
+  data: publicControlReviewSetAnyRowSchema,
+});
+export const readPublicControlReviewAnySetSchema = readPublicControlReviewSetSchema.extend({
+  data: publicControlReviewSetAnyRowSchema,
+});
+export const readPublicControlReviewAnyOperationSchema = z.discriminatedUnion('state', [
+  z
+    .object({
+      state: z.literal('recorded'),
+      data: publicControlReviewSetAnyRowSchema,
+      isCurrent: z.boolean(),
+      contextCurrent: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({ state: z.literal('cancelled'), data: publicControlReviewAnyCancellationRowSchema })
+    .strict(),
+  z.object({ state: z.literal('not_found') }).strict(),
+]);

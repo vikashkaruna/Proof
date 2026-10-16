@@ -10,17 +10,24 @@ import {
 import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import {
   Capability,
-  parsePublicControlReviewSetRequestText,
-  publicControlReviewSetRowSchema,
-  publicControlReviewSetSnapshotSchema,
-  recordedPublicControlReviewSetSchema,
-  readPublicControlReviewSetSchema,
-  readPublicControlReviewOperationSchema,
-  publicControlReviewCancellationRowSchema,
+  PUBLIC_CONTROL_REVIEW_REQUEST_CODEC,
+  PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC,
+  PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2,
+  PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2,
+  parsePublicWebsiteAssetRequestText,
+  parsePublicWebsiteAssetSnapshotText,
+  parsePublicControlReviewSetAnyRequestText as parsePublicControlReviewSetRequestText,
+  publicControlReviewSetAnyRowSchema as publicControlReviewSetRowSchema,
+  publicControlReviewSetAnySnapshotSchema as publicControlReviewSetSnapshotSchema,
+  recordedPublicControlReviewAnySetSchema as recordedPublicControlReviewSetSchema,
+  readPublicControlReviewAnySetSchema as readPublicControlReviewSetSchema,
+  readPublicControlReviewAnyOperationSchema as readPublicControlReviewOperationSchema,
+  publicControlReviewAnyCancellationRowSchema as publicControlReviewCancellationRowSchema,
   publicControlReviewCancellationSnapshotSchema,
-  cancelPublicControlReviewOperationRequestSchema,
+  cancelPublicControlReviewAnyOperationRequestSchema as cancelPublicControlReviewOperationRequestSchema,
   PUBLIC_CONTROL_REVIEW_MAX_BYTES,
 } from '@axiom/types';
+import { verifyWebsiteAssetOperation } from '../services/public-website-assets.js';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import {
@@ -62,6 +69,7 @@ const refusals = {
   idempotency_conflict: 409,
   catalogue_refused: 503,
   operation_cancelled: 409,
+  association_context_required: 409,
 } as const;
 const sqlError = z
   .object({
@@ -103,6 +111,75 @@ export function verifyPublicControlReviewRow(value: unknown, scope: Scope) {
     request.expectedPreviousReviewId !== row.previous_review_id
   )
     throw new Error('review_readback_refused');
+  if (
+    row.request_codec !==
+      (request.version === 2
+        ? PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2
+        : PUBLIC_CONTROL_REVIEW_REQUEST_CODEC) ||
+    row.snapshot_codec !==
+      (snapshot.version === 2
+        ? PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2
+        : PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC) ||
+    request.version !== snapshot.version
+  )
+    throw new Error('review_codec_refused');
+  if (snapshot.version === 2) {
+    const asset = snapshot.assetProvenance;
+    const targetRequest = parsePublicWebsiteAssetRequestText(asset.target.request_text);
+    const associationRequest = parsePublicWebsiteAssetRequestText(asset.association.request_text);
+    for (const bundle of [asset.target, asset.association]) {
+      const parsed = parsePublicWebsiteAssetRequestText(bundle.request_text);
+      verifyWebsiteAssetOperation(
+        {
+          state: 'recorded',
+          tenantId: asset.tenant_id,
+          actorId: bundle.actor_id,
+          operationKey: bundle.operation_key,
+          kind: parsed.kind,
+          requestCodec: bundle.request_codec,
+          requestText: bundle.request_text,
+          requestSha256: bundle.request_sha256,
+          snapshotCodec: bundle.snapshot_codec,
+          snapshotText: bundle.snapshot_text,
+          snapshotSha256: bundle.snapshot_sha256,
+          receipt: { id: bundle.receipt.id, entryHash: bundle.receipt.entry_hash },
+          replayed: true,
+        },
+        { tenantId: row.tenant_id, actorId: bundle.actor_id, operationKey: bundle.operation_key },
+      );
+    }
+    const target = parsePublicWebsiteAssetSnapshotText(asset.target.snapshot_text);
+    const association = parsePublicWebsiteAssetSnapshotText(asset.association.snapshot_text);
+    const ref = snapshot.request.associationRef;
+    if (
+      targetRequest.kind !== 'register_target' ||
+      target.kind !== 'target' ||
+      association.kind !== 'association' ||
+      (associationRequest.kind !== 'capture' && associationRequest.kind !== 'associate_capture')
+    )
+      throw new Error('review_asset_refused');
+    if (
+      asset.tenant_id !== row.tenant_id ||
+      asset.estate_id !== row.estate_id ||
+      target.estateId !== row.estate_id ||
+      target.systemId !== asset.system_id ||
+      target.id !== ref.targetId ||
+      asset.target.snapshot_sha256 !== ref.targetSha256 ||
+      association.id !== ref.associationId ||
+      asset.association.snapshot_sha256 !== ref.associationSha256 ||
+      asset.association.receipt.id !== ref.associationReceipt.id ||
+      asset.association.receipt.entry_hash !== ref.associationReceipt.entryHash ||
+      asset.target.receipt.id === asset.association.receipt.id ||
+      association.targetId !== target.id ||
+      association.targetSha256 !== asset.target.snapshot_sha256 ||
+      association.requestedUrl !== target.url ||
+      association.checkedAt !== snapshot.checkedAt ||
+      association.checkId !== row.check_id ||
+      association.payloadSha256 !== snapshot.request.expectedSource.payloadSha256 ||
+      association.captureReceipt.id !== snapshot.captureReceipt
+    )
+      throw new Error('review_asset_refused');
+  }
   const seed = buildLibrarySeed();
   const controls = seed.controls;
   if (
@@ -141,6 +218,10 @@ export function verifyPublicControlReviewCancellation(value: unknown, scope: Sco
     row.tenant_id !== scope.tenantId ||
     (scope.engagementId && row.engagement_id !== scope.engagementId) ||
     (scope.checkId && row.check_id !== scope.checkId) ||
+    row.request_codec !==
+      (request.version === 2
+        ? PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2
+        : PUBLIC_CONTROL_REVIEW_REQUEST_CODEC) ||
     row.engagement_id !== request.engagementId ||
     row.check_id !== request.checkId ||
     row.operation_key !== request.operationKey ||
