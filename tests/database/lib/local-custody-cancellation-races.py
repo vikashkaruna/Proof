@@ -48,9 +48,15 @@ def setup(root):
     return (
         prefix
         + """
-create table local149_race.intents(name text primary key,original text not null,cancellation text not null,challenge uuid not null);
-insert into local149_race.intents select 'new',local149_race.request(61,'request'),local149_race.cancellation(161,local149_race.request(61,'request')),local149_race.cancel_challenge(1,local149_race.cancellation(161,local149_race.request(61,'request')));
-create function local149_race.original() returns jsonb language sql as $$select local149_race.write(original,1) from local149_race.intents where name='new'$$;
+-- All MFA rows are prepared before either race transaction can hold factor locks.
+-- Creating a challenge inside a contender would wait at its factor FK before47.
+create table local149_race.intents(name text primary key,original text not null,original_challenge uuid not null,changed_original text not null,changed_challenge uuid not null,cancellation text not null,challenge uuid not null);
+insert into local149_race.intents
+ with originals as (select local149_race.request(61,'request') original),
+ changed as (select original,controller_security.canonical_questionnaire_json(original::jsonb||jsonb_build_object('reason','changed')) changed_original from originals)
+ select 'new',original,local149_race.challenge(1,original),changed_original,local149_race.challenge(1,changed_original),local149_race.cancellation(161,original),local149_race.cancel_challenge(1,local149_race.cancellation(161,original)) from changed;
+create function local149_race.original() returns jsonb language sql as $$select local149_race.write(original,1,original_challenge) from local149_race.intents where name='new'$$;
+create function local149_race.changed_original() returns jsonb language sql as $$select local149_race.write(changed_original,1,changed_challenge) from local149_race.intents where name='new'$$;
 create function local149_race.cancel() returns jsonb language sql as $$select local149_race.cancel(cancellation,1,challenge) from local149_race.intents where name='new'$$;
 set constraints all immediate;commit;
 """
@@ -86,7 +92,7 @@ def scenarios():
         {
             "name": "changed-original-key-body",
             "holder": cancel,
-            "contender": "select local149_race.write(controller_security.canonical_questionnaire_json(original::jsonb||jsonb_build_object('reason','changed')),1) from local149_race.intents",
+            "contender": "select local149_race.changed_original()",
             "error": "23505",
             "counts": [0, 0, 0, 1, 1],
         },

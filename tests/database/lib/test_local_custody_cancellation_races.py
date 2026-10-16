@@ -52,6 +52,32 @@ class CancellationRaces(unittest.TestCase):
         self.assertNotIn("alter table auth.sessions", text.lower())
         self.assertNotIn("grant select on auth.sessions", text.lower())
 
+    def test_original_and_changed_mfa_are_precomputed_before_any_contender(self):
+        text = RACES.setup(HERE.parents[2])
+        self.assertIn("original_challenge uuid not null", text)
+        self.assertIn("changed_challenge uuid not null", text)
+        self.assertIn("local149_race.challenge(1,original)", text)
+        self.assertIn("local149_race.challenge(1,changed_original)", text)
+        original = text.split("create function local149_race.original()", 1)[1].split(
+            ";", 1
+        )[0]
+        changed = text.split("create function local149_race.changed_original()", 1)[
+            1
+        ].split(";", 1)[0]
+        self.assertIn("local149_race.write(original,1,original_challenge)", original)
+        self.assertIn(
+            "local149_race.write(changed_original,1,changed_challenge)", changed
+        )
+        self.assertNotIn("local149_race.challenge(", original)
+        self.assertNotIn("local149_race.challenge(", changed)
+        changed_case = next(
+            c for c in RACES.scenarios() if c["name"] == "changed-original-key-body"
+        )
+        self.assertEqual(
+            changed_case["contender"], "select local149_race.changed_original()"
+        )
+        self.assertEqual(changed_case["error"], "23505")
+
     def test_fixture_namespace_before_writer_and_committed_once(self):
         text = RACES.setup(HERE.parents[2])
         self.assertIn(
