@@ -1,5 +1,19 @@
+import { join } from 'node:path';
+import {
+  registeredResponseProbeSchema,
+  type RegisteredResponseProbe,
+} from './registered-response-probe.js';
 /** Safe CI evidence only. Raw browser reports remain private. */
-import { constants, openSync, fstatSync, readSync, closeSync, lstatSync } from 'node:fs';
+import {
+  constants,
+  openSync,
+  fstatSync,
+  readSync,
+  closeSync,
+  lstatSync,
+  writeFileSync,
+  fsyncSync,
+} from 'node:fs';
 import { acceptanceErrorLocation } from './acceptance-error-location.js';
 const title =
   'finalized source, released board PDF, and source-bound Pramaan dossier use exact retained versions';
@@ -37,6 +51,42 @@ const progressStages = new Set([
   'assessment-submit',
   'submission-retain',
 ]);
+/** Fixed checkpoint names plus HTTP status/equality booleans only. No request data. */
+function savedTargetSelectionEvidence(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  const status = /^saved-targets-http-status:([1-5][0-9]{2})$/.exec(value);
+  if (status) return { checkpoint: 'http-status', httpStatus: Number(status[1]) };
+  if (value === 'saved-targets-response-schema') return { checkpoint: 'response-schema' };
+  const result =
+    /^saved-targets-(request-tenant|response-kind|response-tenant|response-actor|response-estate|response-system|target-digest|target-withdrawn|target-inventory-current):(true|false)(?::(true|false))?$/.exec(
+      value,
+    );
+  if (!result || (result[1] === 'target-digest') !== (result[3] !== undefined)) return undefined;
+  return {
+    checkpoint: result[1]!,
+    matches: result[2] === 'true',
+    ...(result[3] === undefined ? {} : { targetPresent: result[3] === 'true' }),
+  };
+}
+/** Earlier registration stage; only fixed labels, status and equality bits. */
+function targetSubmissionEvidence(value: unknown) {
+  if (typeof value !== 'string') return undefined;
+  const status = /^target-submit-(http-status|foreign-http-status):([1-5][0-9]{2})$/.exec(value);
+  if (status) return { checkpoint: status[1]!, httpStatus: Number(status[2]) };
+  if (
+    [
+      'target-submit-response-schema',
+      'target-submit-snapshot-schema',
+      'target-submit-foreign-body-check',
+    ].includes(value)
+  )
+    return { checkpoint: value.slice('target-submit-'.length) };
+  const match =
+    /^target-submit-(snapshot-kind|response-tenant|response-actor|snapshot-url|snapshot-estate|snapshot-system):(true|false)$/.exec(
+      value,
+    );
+  return match ? { checkpoint: match[1]!, matches: match[2] === 'true' } : undefined;
+}
 /** Read only a bounded private regular-file tail; never return browser output. */
 export function readRegisteredBrowserProgress(path: string): string {
   let descriptor: number | undefined;
@@ -61,7 +111,12 @@ export function readRegisteredBrowserProgress(path: string): string {
       const offset = line.indexOf(marker);
       if (offset < 0) continue;
       const candidate = line.slice(offset + marker.length);
-      if (progressStages.has(candidate)) progress = candidate;
+      if (
+        progressStages.has(candidate) ||
+        savedTargetSelectionEvidence(candidate) ||
+        targetSubmissionEvidence(candidate)
+      )
+        progress = candidate;
     }
     return progress;
   } catch {
@@ -104,15 +159,28 @@ export function registeredBrowserDiagnostics(
           const location = errors
             .map((error) => acceptanceErrorLocation(record(error).location))
             .find(Boolean);
-          // Match only an exact known assertion token; never return message text.
+          // A matcher token in a Zod/codeframe message is not an assertion.
           const matcher =
-            matchers.find((name) =>
-              errors.some(
-                (error) =>
-                  typeof record(error).message === 'string' &&
-                  new RegExp(`\\b${name}\\(`).test(record(error).message as string),
-              ),
-            ) ?? 'unknown';
+            errors
+              .map((error) => {
+                const details = record(error);
+                const proven = record(details.matcherResult).name;
+                if (typeof proven === 'string' && matchers.some((name) => name === proven))
+                  return proven;
+                const header =
+                  typeof details.message === 'string'
+                    ? details.message
+                        .slice(0, 2048)
+                        .split(/\r?\n/, 1)[0]!
+                        .replace(/\u001b\[[0-9;]*m/g, '')
+                    : '';
+                return matchers.find((name) =>
+                  new RegExp(`^(?:Error: )?expect\\([^\\r\\n]*\\)\\.(?:not\\.)?${name}\\(`).test(
+                    header,
+                  ),
+                );
+              })
+              .find(Boolean) ?? 'unknown';
           results.push({
             caseId: 'registered-source-board-auditor-recovery',
             status:
@@ -148,14 +216,21 @@ export function registeredBrowserDiagnostics(
   )
     ? String(lifecycle.signal)
     : null;
+  const targetSelection = savedTargetSelectionEvidence(lifecycle.progress);
+  const targetSubmission = targetSubmissionEvidence(lifecycle.progress);
   return {
     version: 1,
     kind: 'sanitized-registered-browser-diagnostics',
     phase,
-    progress:
-      typeof lifecycle.progress === 'string' && progressStages.has(lifecycle.progress)
-        ? lifecycle.progress
-        : 'unknown',
+    progress: targetSelection
+      ? `saved-targets-${targetSelection.checkpoint}`
+      : targetSubmission
+        ? `target-submit-${targetSubmission.checkpoint}`
+        : typeof lifecycle.progress === 'string' && progressStages.has(lifecycle.progress)
+          ? lifecycle.progress
+          : 'unknown',
+    ...(targetSelection ? { targetSelection } : {}),
+    ...(targetSubmission ? { targetSubmission } : {}),
     report: lifecycle.report,
     exitCode,
     signal,
@@ -214,4 +289,90 @@ export function assertRegisteredDiagnosticDestinationAbsent(path: string) {
   throw new Error(
     'registered browser diagnostic target exists; archive prior owned evidence before a fresh attempt',
   );
+}
+
+const probePhases = ['target-submit', 'saved-targets'] as const;
+export function registeredResponseProbePath(
+  directory: string,
+  phase: RegisteredResponseProbe['phase'],
+) {
+  return join(directory, `registered-response-probe-${phase}.private.json`);
+}
+/** Exclusive bounded private evidence; a diagnostic failure never changes the original test error. */
+export function writeRegisteredResponseProbe(directory: string, value: RegisteredResponseProbe) {
+  const probe = registeredResponseProbeSchema.parse(value);
+  const parent = lstatSync(directory);
+  if (
+    !parent.isDirectory() ||
+    parent.isSymbolicLink() ||
+    parent.uid !== process.getuid?.() ||
+    (parent.mode & 0o077) !== 0
+  )
+    throw Error('private probe directory refused');
+  const text = JSON.stringify(probe) + '\n';
+  if (Buffer.byteLength(text) > 8192) throw Error('private probe bound refused');
+  const fd = openSync(
+    registeredResponseProbePath(directory, probe.phase),
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    writeFileSync(fd, text);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  const dirfd = openSync(
+    directory,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    fsyncSync(dirfd);
+  } finally {
+    closeSync(dirfd);
+  }
+}
+/** Only strict known fields can enter the public artifact, never a raw error/report. */
+export function readRegisteredResponseProbes(directory: string) {
+  return probePhases.map((phase) => {
+    let fd: number | undefined;
+    try {
+      fd = openSync(
+        registeredResponseProbePath(directory, phase),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      const info = fstatSync(fd);
+      if (
+        !info.isFile() ||
+        info.nlink !== 1 ||
+        info.uid !== process.getuid?.() ||
+        (info.mode & 0o777) !== 0o600 ||
+        info.size > 8192
+      )
+        throw Error('private probe refused');
+      const bytes = Buffer.alloc(8193);
+      let count = 0,
+        size: number;
+      do {
+        size = readSync(fd, bytes, count, bytes.length - count, null);
+        count += size;
+      } while (size && count < bytes.length);
+      if (count > 8192) throw Error('private probe refused');
+      const probe = registeredResponseProbeSchema.parse(
+        JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, count))),
+      );
+      if (probe.phase !== phase) throw Error('private probe phase refused');
+      return { phase, state: 'available' as const, probe };
+    } catch (error) {
+      return {
+        phase,
+        state:
+          error instanceof Error && 'code' in error && error.code === 'ENOENT'
+            ? ('missing' as const)
+            : ('refused' as const),
+      };
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  });
 }

@@ -1,3 +1,8 @@
+import {
+  probeRegisteredResponse,
+  registeredResponseScope,
+} from '../../../scripts/lib/registered-response-probe';
+import { writeRegisteredResponseProbe } from '../../../scripts/lib/registered-browser-diagnostics';
 /** Opt-in owned demo fixture. Every mutation below uses the actual product UI
  * and normal Auth/MFA; only public network bytes and KMS/storage are fixtures. */
 import { expect, type Page, type Locator } from '@playwright/test';
@@ -24,6 +29,51 @@ import {
 } from '../../../packages/types/src/index';
 
 const operationPath = '/api/bff/v1/public-website-assets/operations';
+/** Fixed diagnostic labels and public status/equality booleans; never identifiers or response text. */
+function targetSelectionCheckpoint(
+  checkpoint:
+    | 'http-status'
+    | 'request-tenant'
+    | 'response-schema'
+    | 'response-kind'
+    | 'response-tenant'
+    | 'response-actor'
+    | 'response-estate'
+    | 'response-system'
+    | 'target-digest'
+    | 'target-withdrawn'
+    | 'target-inventory-current',
+  value?: number | boolean,
+  present?: boolean,
+) {
+  process.stdout.write(
+    `[registered-website-stage] saved-targets-${checkpoint}${
+      value === undefined ? '' : `:${value}`
+    }${present === undefined ? '' : `:${present}`}\n`,
+  );
+}
+
+/** Fixed submission checkpoints; no response values or identifiers are emitted. */
+function targetSubmissionCheckpoint(
+  checkpoint:
+    | 'http-status'
+    | 'response-schema'
+    | 'snapshot-schema'
+    | 'snapshot-kind'
+    | 'response-tenant'
+    | 'response-actor'
+    | 'snapshot-url'
+    | 'snapshot-estate'
+    | 'snapshot-system'
+    | 'foreign-http-status'
+    | 'foreign-body-check',
+  value?: number | boolean,
+) {
+  process.stdout.write(
+    `[registered-website-stage] target-submit-${checkpoint}${value === undefined ? '' : `:${value}`}\n`,
+  );
+}
+
 function registeredCombobox(scope: Page | Locator, name: string) {
   return scope.getByRole('combobox', { name, exact: true });
 }
@@ -75,20 +125,41 @@ export async function registeredWebsiteSourceInBrowser(
     .getByRole('button', { name: 'Record selected website operation', exact: true })
     .click({ timeout: 15_000 });
   const registration = await registered;
+  targetSubmissionCheckpoint('http-status', registration.status());
   expect(registration.status()).toBe(201);
-  const target = publicWebsiteAssetOperationSchema.parse((await registration.json()).data);
+  targetSubmissionCheckpoint('response-schema');
+  const target = await probeRegisteredResponse(
+    registration,
+    'target-submit',
+    registeredResponseScope(
+      registration.request().headers(),
+      config,
+      registration.request().postData(),
+    ),
+    (body) => publicWebsiteAssetOperationSchema.parse((body as { data: unknown }).data),
+    (probe) => writeRegisteredResponseProbe(directory, probe),
+  );
+  targetSubmissionCheckpoint('snapshot-schema');
   const targetSnapshot = parsePublicWebsiteAssetSnapshotText(target.snapshotText);
+  targetSubmissionCheckpoint('snapshot-kind', targetSnapshot.kind === 'target');
   expect(targetSnapshot.kind).toBe('target');
+  targetSubmissionCheckpoint('response-tenant', target.tenantId === config.tenantId);
   expect(target.tenantId).toBe(config.tenantId);
+  targetSubmissionCheckpoint('response-actor', target.actorId === config.actorId);
   expect(target.actorId).toBe(config.actorId);
   if (targetSnapshot.kind !== 'target') throw new Error('Owned target receipt refused');
+  targetSubmissionCheckpoint('snapshot-url', targetSnapshot.url === config.publicUrl);
   expect(targetSnapshot.url).toBe(config.publicUrl);
+  targetSubmissionCheckpoint('snapshot-estate', targetSnapshot.estateId === config.estateId);
   expect(targetSnapshot.estateId).toBe(config.estateId);
+  targetSubmissionCheckpoint('snapshot-system', targetSnapshot.systemId === config.systemId);
   expect(targetSnapshot.systemId).toBe(config.systemId);
   const foreign = await page.request.get(operationPath + '/' + target.operationKey, {
     headers: { 'X-Tenant-Id': state.tenantB.id },
   });
+  targetSubmissionCheckpoint('foreign-http-status', foreign.status());
   expect([403, 404]).toContain(foreign.status());
+  targetSubmissionCheckpoint('foreign-body-check');
   expect((await foreign.text()).includes(target.snapshotText)).toBe(false);
 
   process.stdout.write('[registered-website-stage] capture-prepare\n');
@@ -111,19 +182,41 @@ export async function registeredWebsiteSourceInBrowser(
     .getByRole('button', { name: 'Load saved targets', exact: true })
     .click({ timeout: 15_000 });
   const loadedTargets = await targetsResponse;
+  targetSelectionCheckpoint('http-status', loadedTargets.status());
   expect(loadedTargets.status()).toBe(200);
-  expect(loadedTargets.request().headers()['x-tenant-id']).toBe(config.tenantId);
-  const targetsPage = publicWebsiteAssetSelectionPageSchema.parse(
-    (await loadedTargets.json()).data,
+  targetSelectionCheckpoint(
+    'request-tenant',
+    loadedTargets.request().headers()['x-tenant-id'] === config.tenantId,
   );
+  expect(loadedTargets.request().headers()['x-tenant-id']).toBe(config.tenantId);
+  targetSelectionCheckpoint('response-schema');
+  const targetsPage = await probeRegisteredResponse(
+    loadedTargets,
+    'saved-targets',
+    registeredResponseScope(loadedTargets.request().headers(), config),
+    (body) => publicWebsiteAssetSelectionPageSchema.parse((body as { data: unknown }).data),
+    (probe) => writeRegisteredResponseProbe(directory, probe),
+  );
+  targetSelectionCheckpoint('response-kind', targetsPage.kind === 'targets');
   if (targetsPage.kind !== 'targets') throw new Error('Owned target selection refused');
+  targetSelectionCheckpoint('response-tenant', targetsPage.tenantId === config.tenantId);
   expect(targetsPage.tenantId).toBe(config.tenantId);
+  targetSelectionCheckpoint('response-actor', targetsPage.actorId === config.actorId);
   expect(targetsPage.actorId).toBe(config.actorId);
+  targetSelectionCheckpoint('response-estate', targetsPage.estateId === config.estateId);
   expect(targetsPage.estateId).toBe(config.estateId);
+  targetSelectionCheckpoint('response-system', targetsPage.systemId === config.systemId);
   expect(targetsPage.systemId).toBe(config.systemId);
   const selectedTarget = targetsPage.rows.find((row) => row.id === targetSnapshot.id);
+  targetSelectionCheckpoint(
+    'target-digest',
+    selectedTarget?.snapshotSha256 === target.snapshotSha256,
+    selectedTarget !== undefined,
+  );
   expect(selectedTarget?.snapshotSha256).toBe(target.snapshotSha256);
+  targetSelectionCheckpoint('target-withdrawn', selectedTarget?.withdrawn === false);
   expect(selectedTarget?.withdrawn).toBe(false);
+  targetSelectionCheckpoint('target-inventory-current', selectedTarget?.inventoryCurrent === true);
   expect(selectedTarget?.inventoryCurrent).toBe(true);
   await registeredCombobox(console, 'Registered public target').selectOption(targetSnapshot.id, {
     timeout: 15_000,

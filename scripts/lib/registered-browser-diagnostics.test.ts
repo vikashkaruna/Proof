@@ -1,6 +1,17 @@
+import { z } from 'zod';
+import { probeRegisteredResponse } from './registered-response-probe.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, symlinkSync, chmodSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+  symlinkSync,
+  chmodSync,
+  linkSync,
+  statSync,
+  readFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -8,6 +19,9 @@ import {
   readRegisteredBrowserDiagnostics,
   readRegisteredBrowserProgress,
   assertRegisteredDiagnosticDestinationAbsent,
+  writeRegisteredResponseProbe,
+  readRegisteredResponseProbes,
+  registeredResponseProbePath,
 } from './registered-browser-diagnostics.js';
 const secret = 'private-persona-secret https://private.invalid/?token=secret';
 const lifecycle = {
@@ -31,7 +45,7 @@ const payload = {
                   status: 'failed',
                   errors: [
                     {
-                      message: `${secret} expect(locator).toBeVisible() ${secret}`,
+                      message: `Error: expect(locator).toBeVisible()\n${secret}`,
                       stack: secret,
                       snippet: secret,
                       location: {
@@ -180,6 +194,213 @@ test('owned log tail yields only the last fixed marker and refuses unsafe files'
     assert.equal(readRegisteredBrowserProgress(path), 'unknown');
     rmSync(path);
     assert.equal(readRegisteredBrowserProgress(directory), 'unknown');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('saved-target boundary retains only fixed checkpoints and HTTP status or equality booleans', () => {
+  for (const [progress, expected] of [
+    ['saved-targets-http-status:200', { checkpoint: 'http-status', httpStatus: 200 }],
+    ['saved-targets-http-status:403', { checkpoint: 'http-status', httpStatus: 403 }],
+    ['saved-targets-response-schema', { checkpoint: 'response-schema' }],
+    ['saved-targets-request-tenant:false', { checkpoint: 'request-tenant', matches: false }],
+    ['saved-targets-response-actor:true', { checkpoint: 'response-actor', matches: true }],
+    [
+      'saved-targets-target-digest:false:false',
+      { checkpoint: 'target-digest', matches: false, targetPresent: false },
+    ],
+    [
+      'saved-targets-target-digest:false:true',
+      { checkpoint: 'target-digest', matches: false, targetPresent: true },
+    ],
+    [
+      'saved-targets-target-inventory-current:false',
+      { checkpoint: 'target-inventory-current', matches: false },
+    ],
+  ] as const) {
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.deepEqual(result.targetSelection, expected);
+    assert.equal(result.progress, `saved-targets-${expected.checkpoint}`);
+    assert(!JSON.stringify(result).includes(secret));
+  }
+  for (const progress of [
+    'saved-targets-http-status:99',
+    'saved-targets-http-status:600',
+    'saved-targets-http-status:0200',
+    'saved-targets-http-status:200:' + secret,
+    'saved-targets-request-tenant:1',
+    'saved-targets-request-tenant:true:false',
+    'saved-targets-target-digest:false',
+    'saved-targets-response-secret:true',
+    'saved-targets-response-schema:' + secret,
+  ]) {
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.equal(result.targetSelection, undefined);
+    assert.equal(result.progress, 'unknown');
+    assert(!JSON.stringify(result).includes(secret));
+  }
+});
+
+test('actual bounded log reader transports the latest failing target checkpoint with no values', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'axiom-selection-progress-'));
+  const path = join(directory, 'browser.private.log');
+  try {
+    writeFileSync(
+      path,
+      `${secret}\n[registered-website-stage] load-saved-targets\n` +
+        '[registered-website-stage] saved-targets-http-status:200\n' +
+        '[registered-website-stage] saved-targets-request-tenant:true\n' +
+        '[registered-website-stage] saved-targets-target-digest:false:false\n' +
+        '[registered-website-stage] saved-targets-response-secret:' +
+        secret +
+        '\n',
+      { mode: 0o600 },
+    );
+    const progress = readRegisteredBrowserProgress(path);
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.deepEqual(result.targetSelection, {
+      checkpoint: 'target-digest',
+      matches: false,
+      targetPresent: false,
+    });
+    assert(!JSON.stringify(result).includes(secret));
+    assert(!JSON.stringify(result).includes('http'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('earlier target submission retains status and fixed equality flags without response data', () => {
+  for (const [progress, expected] of [
+    ['target-submit-http-status:201', { checkpoint: 'http-status', httpStatus: 201 }],
+    ['target-submit-http-status:409', { checkpoint: 'http-status', httpStatus: 409 }],
+    [
+      'target-submit-foreign-http-status:403',
+      { checkpoint: 'foreign-http-status', httpStatus: 403 },
+    ],
+    ['target-submit-response-schema', { checkpoint: 'response-schema' }],
+    ['target-submit-snapshot-schema', { checkpoint: 'snapshot-schema' }],
+    ['target-submit-foreign-body-check', { checkpoint: 'foreign-body-check' }],
+    ...[
+      'snapshot-kind',
+      'response-tenant',
+      'response-actor',
+      'snapshot-url',
+      'snapshot-estate',
+      'snapshot-system',
+    ].flatMap((checkpoint) => [
+      [`target-submit-${checkpoint}:true`, { checkpoint, matches: true }] as const,
+      [`target-submit-${checkpoint}:false`, { checkpoint, matches: false }] as const,
+    ]),
+  ] as const) {
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.deepEqual(result.targetSubmission, expected);
+    assert.equal(result.progress, `target-submit-${expected.checkpoint}`);
+    assert(!JSON.stringify(result).includes(secret));
+  }
+  for (const progress of [
+    'target-submit-http-status:99',
+    'target-submit-http-status:600',
+    'target-submit-http-status:0201',
+    'target-submit-http-status:201:' + secret,
+    'target-submit-response-schema:' + secret,
+    'target-submit-response-actor:1',
+    'target-submit-response-actor:true:false',
+    'target-submit-secret:true',
+  ]) {
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.equal(result.targetSubmission, undefined);
+    assert.equal(result.progress, 'unknown');
+    assert(!JSON.stringify(result).includes(secret));
+  }
+});
+
+test('owned log tail carries the failing submission checkpoint without private values', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'axiom-submit-progress-'));
+  const path = join(directory, 'browser.private.log');
+  try {
+    writeFileSync(
+      path,
+      `${secret}\n[registered-website-stage] target-submit\n[registered-website-stage] target-submit-http-status:201\n[registered-website-stage] target-submit-response-actor:false\n[registered-website-stage] target-submit-secret:${secret}\n`,
+      { mode: 0o600 },
+    );
+    const progress = readRegisteredBrowserProgress(path);
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.deepEqual(result.targetSubmission, { checkpoint: 'response-actor', matches: false });
+    assert(!JSON.stringify(result).includes(secret));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('parse error codeframe cannot become a matcher; genuine header/metadata remains meaningful', () => {
+  const input = structuredClone(payload);
+  const error = input.suites[0]!.specs[0]!.tests[0]!.results[0]!.errors[0]!;
+  error.message =
+    'Error: [invalid_type]\n124 | expect(registration.status()).toBe(201);\n126 | schema.parse(body.data)';
+  assert.equal(registeredBrowserDiagnostics(input, lifecycle).results[0]?.matcher, 'unknown');
+  error.message = 'Error: expect(received).toBe(expected) // equality\n' + secret;
+  error.message =
+    '\u001b[31mError: expect(received).toBe(expected) // equality\u001b[39m\n' + secret;
+  assert.equal(registeredBrowserDiagnostics(input, lifecycle).results[0]?.matcher, 'toBe');
+});
+
+test('failed parse is durably private before same error escapes and strict reader accepts only safe fields', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'axiom-response-probe-'));
+  try {
+    const error = new z.ZodError([{ code: 'custom', path: ['receipt', 'id'], message: secret }]);
+    await assert.rejects(
+      probeRegisteredResponse(
+        {
+          json: async () => ({ data: { receipt: { id: secret } } }),
+          headers: () => ({ 'content-type': 'application/json' }),
+        },
+        'target-submit',
+        {
+          tenantMatches: true,
+          actorMatches: true,
+          bodyKindMatches: true,
+          operationKeyMatches: true,
+        },
+        () => {
+          throw error;
+        },
+        (probe) => writeRegisteredResponseProbe(directory, probe),
+      ),
+      (e) => e === error,
+    );
+    const path = registeredResponseProbePath(directory, 'target-submit');
+    assert.equal(statSync(path).mode & 0o777, 0o600);
+    const read = readRegisteredResponseProbes(directory);
+    assert.equal(read[0]?.state, 'available');
+    assert.equal(read[1]?.state, 'missing');
+    assert(!JSON.stringify(read).includes(secret));
+    const probe = JSON.parse(readFileSync(path, 'utf8'));
+    assert.throws(() => writeRegisteredResponseProbe(directory, probe));
+    for (const changed of [
+      { ...probe, rawBody: secret },
+      { ...probe, issues: [{ code: 'custom', path: [secret] }] },
+      { ...probe, issues: [{ code: secret, path: [] }] },
+      { ...probe, phase: 'saved-targets' },
+    ]) {
+      writeFileSync(path, JSON.stringify(changed));
+      const output = readRegisteredResponseProbes(directory);
+      assert.equal(output[0]?.state, 'refused');
+      assert(!JSON.stringify(output).includes(secret));
+    }
+    writeFileSync(path, JSON.stringify(probe));
+    chmodSync(path, 0o644);
+    assert.equal(readRegisteredResponseProbes(directory)[0]?.state, 'refused');
+    chmodSync(path, 0o600);
+    linkSync(path, join(directory, 'hardlink'));
+    assert.equal(readRegisteredResponseProbes(directory)[0]?.state, 'refused');
+    rmSync(join(directory, 'hardlink'));
+    writeFileSync(path, 'x'.repeat(8193));
+    assert.equal(readRegisteredResponseProbes(directory)[0]?.state, 'refused');
+    rmSync(path);
+    symlinkSync(join(directory, 'missing'), path);
+    assert.equal(readRegisteredResponseProbes(directory)[0]?.state, 'refused');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
