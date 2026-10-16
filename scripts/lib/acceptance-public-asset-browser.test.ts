@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   registeredBrowserRequested,
+  createRegisteredBrowserConfig,
   registeredBrowserConfigSchema,
   writeRegisteredBrowserFile,
   readRegisteredBrowserFile,
@@ -314,4 +315,24 @@ test('actual runtime search paths match Docker and pytest local-package custody 
     configured.map((path) => resolve(root, 'services/agent-runtime', path)),
   );
   assert.equal(new Set(declared).size, declared.length);
+});
+
+test('browser configuration projects validated inventory IDs and excludes internal receipt metadata', () => {
+  const original = config();
+  const scope = {
+    estateId: original.estateId,
+    systemId: original.systemId,
+    engagementId: original.engagementId,
+    intakeReceipt: '12345',
+    internalMetadata: { neverForward: true },
+  };
+  assert.deepEqual(createRegisteredBrowserConfig(original, scope), original);
+  for (const name of ['estateId', 'systemId', 'engagementId']) {
+    assert.throws(() =>
+      createRegisteredBrowserConfig(original, { ...scope, [name]: 'invalid-inventory-id' }),
+    );
+  }
+  assert.throws(() =>
+    createRegisteredBrowserConfig({ ...original, unknownConfigField: 'refused' }, scope),
+  );
 });

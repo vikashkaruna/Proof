@@ -51,6 +51,22 @@ export const registeredBrowserConfigSchema = z
       ctx.addIssue({ code: 'custom', message: 'fixture tenant mismatch' });
   });
 export type RegisteredBrowserConfig = z.infer<typeof registeredBrowserConfigSchema>;
+/** Pure fixture configuration boundary; server-only metadata must not leak. */
+export function createRegisteredBrowserConfig(
+  base: Record<string, unknown>,
+  scope: Record<string, unknown>,
+) {
+  const selected = z
+    .object({ estateId: uuid, systemId: uuid, engagementId: uuid })
+    .safeParse(scope);
+  if (!selected.success) throw new Error('registered browser scope refused');
+  return registeredBrowserConfigSchema.parse({
+    ...base,
+    estateId: selected.data.estateId,
+    systemId: selected.data.systemId,
+    engagementId: selected.data.engagementId,
+  });
+}
 export const registeredBrowserSubmissionSchema = z
   .object({
     version: z.literal(1),

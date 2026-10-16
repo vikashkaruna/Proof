@@ -1,5 +1,6 @@
 import {
   registeredBrowserRequested,
+  createRegisteredBrowserConfig,
   registeredBrowserDirectory,
   writeRegisteredBrowserFile,
   waitForRegisteredSubmission,
@@ -1600,29 +1601,35 @@ except Exception as error:
               const demo = await db.from('tenants').select('is_demo').eq('id', tenantId).single();
               assert.equal(demo.error, null);
               assert.equal(demo.data?.is_demo, true);
-              const config = {
-                version: 1 as const,
-                kind: 'owned-demo-registered-website-browser' as const,
-                nonce: browserNonce,
-                codeSha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
-                databaseId: selectedParity.databaseId,
-                projectId: selectedParity.projectId,
-                apiOrigin: 'http://127.0.0.1:56321' as const,
-                bffOrigin: 'http://127.0.0.1:4400' as const,
-                tenantId,
-                tenantSlug: `worker-${tenantId}`,
-                actorId,
-                ...scope,
-                isDemo: true as const,
-                publicUrl: 'https://fixture.axiomproof.ai/' as const,
-                email: created.user!.email!,
-                password: ownerPassword,
-                loginSecret: factor.secret,
-              };
+              phase = 'normal-auth-public-source-browser-config-validate';
+              const config = createRegisteredBrowserConfig(
+                {
+                  version: 1 as const,
+                  kind: 'owned-demo-registered-website-browser' as const,
+                  nonce: browserNonce,
+                  codeSha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+                  databaseId: selectedParity.databaseId,
+                  projectId: selectedParity.projectId,
+                  apiOrigin: 'http://127.0.0.1:56321' as const,
+                  bffOrigin: 'http://127.0.0.1:4400' as const,
+                  tenantId,
+                  tenantSlug: `worker-${tenantId}`,
+                  actorId,
+                  isDemo: true as const,
+                  publicUrl: 'https://fixture.axiomproof.ai/' as const,
+                  email: created.user!.email!,
+                  password: ownerPassword,
+                  loginSecret: factor.secret,
+                },
+                scope,
+              );
+              phase = 'normal-auth-public-source-browser-config-write';
               writeRegisteredBrowserFile(directory, 'config', config);
+              phase = 'normal-auth-public-source-browser-launcher-prepare';
               prepareRegisteredBrowserLaunchers(process.cwd(), directory, config);
               const browserLog = openSync(join(directory, 'browser.private.log'), 'wx', 0o600);
               try {
+                phase = 'normal-auth-public-source-browser-start';
                 registeredBrowserProcess = spawn(
                   'pnpm',
                   [
@@ -1667,6 +1674,7 @@ except Exception as error:
               });
               // Attach a handler immediately while the source phase is still waiting.
               void registeredBrowserCompletion.catch(() => undefined);
+              phase = 'normal-auth-public-source-browser-submission-wait';
               return waitForRegisteredSubmission(directory, config, {
                 deadline: Date.now() + 180000,
                 signal: AbortSignal.timeout(180000),
