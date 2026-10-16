@@ -1,5 +1,6 @@
 import {
   readRegisteredBrowserDiagnostics,
+  readRegisteredBrowserProgress,
   assertRegisteredDiagnosticDestinationAbsent,
 } from './lib/registered-browser-diagnostics.js';
 import {
@@ -2692,7 +2693,14 @@ main()
       if (registeredDiagnosticDirectory) {
         const diagnostic = readRegisteredBrowserDiagnostics(
           join(registeredDiagnosticDirectory, 'browser-results.private.json'),
-          { exitCode: registeredExitCode, signal: registeredExitSignal, phase },
+          {
+            exitCode: registeredExitCode,
+            signal: registeredExitSignal,
+            phase,
+            progress: readRegisteredBrowserProgress(
+              join(registeredDiagnosticDirectory, 'browser.private.log'),
+            ),
+          },
         );
         mkdirSync('.axiom-runtime/workload-assessment', { recursive: true, mode: 0o700 });
         writeFileSync(

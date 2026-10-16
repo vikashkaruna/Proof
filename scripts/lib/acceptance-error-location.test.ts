@@ -124,3 +124,21 @@ test('global setup errors expose only fixed categories, never private cause valu
     ),
   );
 });
+
+test('registered fixture assertion retains only its exact reviewed source coordinate', () => {
+  assert.equal(
+    acceptanceErrorLocation({
+      file: '/private-persona/tests/e2e/fixtures/public-asset-workflow.ts',
+      line: 147,
+      column: 29,
+    }),
+    'tests/e2e/fixtures/public-asset-workflow.ts:147:29',
+  );
+  for (const file of [
+    '/private/tests/e2e/fixtures/foreign.ts',
+    '/private/fixtures/public-asset-workflow.ts',
+    '/private/tests/e2e/fixtures/public-asset-workflow.ts/private-secret',
+    '/private/tests/e2e/fixtures/public-asset-workflow.ts\nprivate-secret',
+  ])
+    assert.equal(acceptanceErrorLocation({ file, line: 147, column: 29 }), undefined);
+});
