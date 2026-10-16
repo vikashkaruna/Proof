@@ -218,24 +218,24 @@ export async function signupAction(formData: FormData) {
 }
 
 export async function logoutAction() {
+  // The provider must read the existing session before its cookies are removed.
+  // Clearing them first turns signOut into an unauthenticated no-op.
+  try {
+    const supabase = await createSupabaseServerClient();
+    const result = await supabase.auth.signOut();
+    if (result.error) console.warn('[logoutAction] Provider sign-out was unavailable');
+  } catch {
+    console.warn('[logoutAction] Provider sign-out was unavailable');
+  }
+
+  // Local sign-out still completes if the provider is unreachable.
   const cookieStore = await cookies();
   cookieStore.set('axiom_e2e_logged_out', 'true', { path: '/', httpOnly: false });
   cookieStore.delete('axiom_user_email');
-
-  // Explicitly delete any sb-*-auth-token cookies to ensure session purge
   for (const cookie of cookieStore.getAll()) {
     if (cookie.name.startsWith('sb-') && cookie.name.includes('-auth-token')) {
       cookieStore.delete(cookie.name);
     }
-  }
-
-  try {
-    const supabase = await createSupabaseServerClient();
-    if (supabase?.auth?.signOut) {
-      await supabase.auth.signOut();
-    }
-  } catch (err) {
-    console.error('Error during signOut:', err);
   }
 
   try {

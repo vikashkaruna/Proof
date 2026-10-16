@@ -92,6 +92,7 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
       </Card>
 
       <MfaEnrolment
+        key={`${ctx.userId}:${ctx.tenantId}`}
         tenantId={ctx.tenantId}
         accountEmail={ctx.email ?? 'your account'}
         initialStatus={initialStatus}
