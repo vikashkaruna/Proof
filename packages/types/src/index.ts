@@ -42,3 +42,4 @@ export * from './public-control-review-set';
 export * from './assessment-source-operation';
 
 export * from './public-website-assets';
+export * from './public-website-asset-console';

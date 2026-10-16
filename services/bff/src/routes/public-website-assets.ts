@@ -3,6 +3,8 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import {
   Capability,
+  publicWebsiteAssetSelectionSchema,
+  publicWebsiteAssetCancellationRequestSchema,
   PUBLIC_WEBSITE_ASSET_MAX_BYTES,
   encodePublicWebsiteAssetRequest,
   parsePublicWebsiteAssetRequestText,
@@ -17,7 +19,8 @@ import {
 } from '../connectors/public-website.js';
 import { validateFreshPublicCapture } from '../connectors/public-capture-validation-v2.js';
 import {
-  verifyWebsiteAssetOperation,
+  verifyWebsiteAssetOutcome,
+  verifyWebsiteAssetSelection,
   verifyWebsiteCaptureTarget,
 } from '../services/public-website-assets.js';
 
@@ -37,7 +40,43 @@ export function publicWebsiteAssetRoutes(
     deps.write ??
     (async (name, args, signal) => createHumanActionWriter().rpc(name, args).abortSignal(signal));
   const app = new Hono<{ Variables: Variables }>();
-  app.use('*', boundedJsonBody(PUBLIC_WEBSITE_ASSET_MAX_BYTES));
+  app.use('/public-website-assets/operations', boundedJsonBody(PUBLIC_WEBSITE_ASSET_MAX_BYTES));
+  app.use(
+    '/public-website-assets/operations/:key/cancel',
+    boundedJsonBody(PUBLIC_WEBSITE_ASSET_MAX_BYTES * 4),
+  );
+  app.get('/public-website-assets/selection', async (c) => {
+    const denied = requireCapability(c, Capability.POSTURE_READ);
+    if (denied) return denied;
+    c.header('Cache-Control', 'private, no-store');
+    const raw = c.req.query();
+    const parsed = publicWebsiteAssetSelectionSchema.safeParse({
+      ...raw,
+      after: raw.after ?? null,
+    });
+    if (!parsed.success) return c.json({ error: { code: 'invalid_request' } }, 400);
+    const q = parsed.data,
+      scope = { tenantId: c.get('tenantId'), actorId: c.get('user').id };
+    try {
+      const result = await read(
+        'list_public_website_asset_selection',
+        {
+          p_tenant_id: scope.tenantId,
+          p_actor_id: scope.actorId,
+          p_kind: q.kind,
+          p_estate_id: q.kind === 'targets' ? q.estateId : null,
+          p_system_id: q.kind === 'targets' ? q.systemId : null,
+          p_target_id: q.kind === 'targets' ? null : q.targetId,
+          p_after: q.after,
+        },
+        c.req.raw.signal,
+      );
+      if (result.error) throw Error();
+      return c.json({ data: verifyWebsiteAssetSelection(result.data, scope, q) });
+    } catch {
+      return c.json({ error: { code: 'website_asset_unavailable' } }, 503);
+    }
+  });
   app.get('/public-website-assets/operations/:key', async (c) => {
     const denied = requireCapability(c, Capability.POSTURE_READ);
     if (denied) return denied;
@@ -60,7 +99,7 @@ export function publicWebsiteAssetRoutes(
       )
         return c.json({ data: { state: 'not_found' } }, 200);
       return c.json({
-        data: verifyWebsiteAssetOperation(result.data, { ...scope, operationKey: key.data }),
+        data: verifyWebsiteAssetOutcome(result.data, { ...scope, operationKey: key.data }),
       });
     } catch {
       return c.json({ error: { code: 'website_asset_unavailable' } }, 503);
@@ -115,7 +154,7 @@ export function publicWebsiteAssetRoutes(
         )
           return c.json(
             {
-              data: verifyWebsiteAssetOperation(prior.data, {
+              data: verifyWebsiteAssetOutcome(prior.data, {
                 ...scope,
                 operationKey: request.operationKey,
                 requestText,
@@ -173,15 +212,64 @@ export function publicWebsiteAssetRoutes(
         );
       } else result = await write('record_public_website_asset_operation', args, signal);
       if (result.error) throw Error();
-      const saved = verifyWebsiteAssetOperation(result.data, {
+      const saved = verifyWebsiteAssetOutcome(result.data, {
         ...scope,
         operationKey: request.operationKey,
         requestText,
       });
-      return c.json({ data: saved }, saved.replayed ? 200 : 201);
+      return c.json({ data: saved }, saved.state === 'cancelled' || saved.replayed ? 200 : 201);
     } catch (cause) {
       if (cause instanceof PublicWebsiteRefused)
         return c.json({ error: { code: cause.code } }, 422);
+      return c.json({ error: { code: 'website_asset_unavailable' } }, 503);
+    }
+  });
+  app.post('/public-website-assets/operations/:key/cancel', async (c) => {
+    for (const capability of [Capability.CONNECTOR_MANAGE, Capability.ESTATE_MANAGE]) {
+      const denied = requireCapability(c, capability);
+      if (denied) return denied;
+    }
+    c.header('Cache-Control', 'private, no-store');
+    const scope = { tenantId: c.get('tenantId'), actorId: c.get('user').id };
+    const expected = z.uuid().safeParse(c.req.header('X-Expected-Actor-Id'));
+    if (!expected.success || expected.data.toLowerCase() !== scope.actorId.toLowerCase())
+      return c.json({ error: { code: 'actor_context_changed' } }, 409);
+    let input: z.infer<typeof publicWebsiteAssetCancellationRequestSchema>;
+    try {
+      input = publicWebsiteAssetCancellationRequestSchema.parse(
+        parseCatalogueJson(
+          new TextDecoder('utf-8', { fatal: true }).decode(await c.req.arrayBuffer()),
+          PUBLIC_WEBSITE_ASSET_MAX_BYTES * 4,
+        ),
+      );
+    } catch {
+      return c.json({ error: { code: 'invalid_request' } }, 400);
+    }
+    const request = parsePublicWebsiteAssetRequestText(input.requestText);
+    const key = z.uuid().safeParse(c.req.param('key'));
+    if (!key.success || key.data.toLowerCase() !== request.operationKey)
+      return c.json({ error: { code: 'invalid_request' } }, 400);
+    try {
+      const result = await write(
+        'cancel_public_website_asset_operation',
+        {
+          p_tenant_id: scope.tenantId,
+          p_actor_id: scope.actorId,
+          p_request_text: input.requestText,
+          p_reason: input.reason,
+          p_confirmed: true,
+        },
+        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30000)]),
+      );
+      if (result.error) throw Error();
+      const saved = verifyWebsiteAssetOutcome(result.data, {
+        ...scope,
+        operationKey: request.operationKey,
+        requestText: input.requestText,
+        cancellationReason: input.reason,
+      });
+      return c.json({ data: saved }, saved.state === 'cancelled' && !saved.replayed ? 201 : 200);
+    } catch {
       return c.json({ error: { code: 'website_asset_unavailable' } }, 503);
     }
   });
