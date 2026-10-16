@@ -143,3 +143,9 @@ ec0f06167de0fb6940dab182ac1c090aafb1eb34:tests/database/local-custody-credential
 
 # Named public signing fixture in owned archive/parity harnesses, not production configuration.
 5a5fc8ce4c14d4beb635ae21a2423b7950c6866e:tests/e2e/tests/approval-archive-provider.spec.ts:generic-api-key:17
+
+# Verified 2026-10-16: deterministic SHA-256 keyPolicySha256 metadata in two
+# transaction-rolled-back synthetic custody fixtures, independently recomputed
+# with LocalKeyPolicy. These exact historical findings are not credentials.
+cc7eec8cad1bd6da176116c52c1a30be90ead250:tests/database/local-custody-intent-cancellation.test.sql:generic-api-key:15
+cc7eec8cad1bd6da176116c52c1a30be90ead250:tests/database/local-custody-operator-context.test.sql:generic-api-key:15

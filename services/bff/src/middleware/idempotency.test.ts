@@ -49,6 +49,11 @@ async function buildApp(
     '/v1/public-website-assets/operations/extra',
     '/v1/public-website-assets/operations/not-a-uuid/cancel',
     '/v1/public-website-assets/operations/99990000-0000-4000-8000-000000000004/cancel-extra',
+    '/v1/local-custody-policy/challenge',
+    '/v1/local-custody-policy/verify',
+    '/v1/local-custody-policy/record',
+    '/v1/local-custody-policy/recover',
+    '/v1/local-custody-policy/record-extra',
     '/v1/engagements',
     '/v1/engagements-extra',
     '/v1/engagements/extra',
@@ -361,3 +366,28 @@ it.each([
   expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({ error: { code: 'idempotency_unavailable' } });
 });
+
+it.each(['challenge', 'verify', 'record', 'recover'])(
+  'custody %s always reaches live SQL authority rather than cached receipts',
+  async (step) => {
+    const double = createSupabaseDouble({
+      idempotencyHit: { response_status: 200, response_body: { cached: true } },
+    });
+    double.state.failRpc = 'claim_request';
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    for (let i = 0; i < 2; i++) {
+      const response = await app.request('/v1/local-custody-policy/' + step, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'custody-exact-intent' },
+        body: '{}',
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ executed: true, key: 'custody-exact-intent' });
+    }
+    expect(double.createClient).not.toHaveBeenCalled();
+    expect(
+      (await app.request('/v1/local-custody-policy/' + step, { method: 'POST', body: '{}' }))
+        .status,
+    ).toBe(400);
+  },
+);

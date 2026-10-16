@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdmin } from '@axiom/supabase';
 import { requiresMandatoryHumanMfa } from '@axiom/types';
@@ -305,6 +306,8 @@ export type VerifyChallengeResult =
     };
 
 export interface ConsumeChallengeOptions {
+  /** Verified live session for custody; its content binding remains in the opaque digest. */
+  sessionId?: string | null;
   /** Required for catalogue adoption; its session is additionally bound in the digest. */
   tenantId?: string;
   challengeId: string | null | undefined;
@@ -929,6 +932,32 @@ export function createMfaService(
           : DEFAULT_CHALLENGE_TTL_MS);
 
       const supabase = clientFactory();
+      if (opts.purpose === 'local_custody_policy') {
+        const { data, error } = await supabase.rpc('issue_local_custody_mfa_challenge', {
+          p_tenant_id: opts.tenantId,
+          p_actor_id: opts.userId,
+          p_session_id: opts.sessionId,
+          p_factor_id: factor.id,
+          p_operation_key: opts.boundResourceRef,
+          p_bound_payload_sha256: opts.boundPayloadSha256,
+          p_ttl_ms: ttl,
+        });
+        if (error) throw new Error('Could not issue custody MFA challenge');
+        const row = z
+          .object({
+            id: z.uuid(),
+            expires_at: z.iso.datetime({ offset: true }),
+            max_attempts: z.number().int().positive(),
+          })
+          .strict()
+          .parse(data);
+        return {
+          ok: true,
+          challengeId: row.id,
+          expiresAt: row.expires_at,
+          maxAttempts: row.max_attempts,
+        };
+      }
       const { data, error } = await supabase
         .from('mfa_challenges')
         .insert({
@@ -1116,6 +1145,37 @@ export function createMfaService(
         (await activeTotpFactor(userId))?.id !== challenge.factor_id
       )
         return { ok: false, reason: 'challenge_not_found' };
+      if (challenge.purpose === 'local_custody_policy') {
+        // The trusted service has already charged the attempt and verified the
+        // code/counter above. PostgreSQL owns only the persisted clock/CAS gate.
+        const { data, error } = await supabase.rpc('satisfy_local_custody_mfa_challenge', {
+          p_tenant_id: tenantId,
+          p_actor_id: userId,
+          p_session_id: sessionId,
+          p_factor_id: challenge.factor_id,
+          p_operation_key: boundResourceRef,
+          p_bound_payload_sha256: boundPayloadSha256,
+          p_challenge_id: challenge.id,
+          p_expected_attempts: challenge.attempts + 1,
+          p_satisfied_with: satisfiedWith,
+        });
+        if (error) return { ok: false, reason: 'challenge_not_found' };
+        z.object({
+          id: z.literal(challenge.id),
+          satisfied_at: z.iso.datetime({ offset: true }),
+          satisfied_with: z.literal(satisfiedWith),
+        })
+          .strict()
+          .parse(data);
+        return {
+          ok: true,
+          satisfiedWith,
+          challengeId: challenge.id,
+          purpose: challenge.purpose,
+          boundResourceRef: challenge.bound_resource_ref,
+          factorId: challenge.factor_id,
+        };
+      }
       const { data: satisfied, error: satisfyErr } = await supabase
         .from('mfa_challenges')
         .update({ satisfied_at: new Date().toISOString(), satisfied_with: satisfiedWith })
@@ -1138,6 +1198,8 @@ export function createMfaService(
 
     async consumeChallenge(opts) {
       if (!opts.challengeId) return { ok: false, reason: 'challenge_required' };
+      if (opts.purpose === 'local_custody_policy' && !opts.sessionId)
+        return { ok: false, reason: 'binding_mismatch' };
 
       const supabase = clientFactory();
       const { data, error } = await supabase
@@ -1188,6 +1250,36 @@ export function createMfaService(
           };
       }
 
+      if (opts.purpose === 'local_custody_policy') {
+        const { data, error } = await supabase.rpc('consume_local_custody_mfa_challenge', {
+          p_tenant_id: opts.tenantId,
+          p_actor_id: opts.userId,
+          p_session_id: opts.sessionId,
+          p_factor_id: challenge.factor_id,
+          p_operation_key: opts.boundResourceRef,
+          p_bound_payload_sha256: opts.boundPayloadSha256,
+          p_challenge_id: challenge.id,
+          p_expected_attempts: challenge.attempts,
+          p_consumed_for: opts.consumedFor ?? opts.boundResourceRef,
+        });
+        if (error) return { ok: false, reason: 'binding_mismatch' };
+        const row = z
+          .object({
+            id: z.literal(challenge.id),
+            satisfied_at: z.iso.datetime({ offset: true }),
+            expires_at: z.iso.datetime({ offset: true }),
+            factor_id: z.literal(challenge.factor_id),
+          })
+          .strict()
+          .parse(data);
+        return {
+          ok: true,
+          challengeId: row.id,
+          satisfiedAt: row.satisfied_at,
+          expiresAt: row.expires_at,
+          factorId: row.factor_id!,
+        };
+      }
       // Atomic single use — the same conditional-update pattern the execution
       // gate uses to spend an approval token. Two requests racing here produce
       // one winner and one `challenge_already_consumed`.
@@ -1208,7 +1300,7 @@ export function createMfaService(
         ok: true,
         challengeId: challenge.id,
         satisfiedAt: challenge.satisfied_at,
-        ...(opts.purpose === 'catalogue_adoption' || opts.purpose === 'local_custody_policy'
+        ...(opts.purpose === 'catalogue_adoption'
           ? { expiresAt: challenge.expires_at, factorId: challenge.factor_id! }
           : {}),
       };

@@ -179,6 +179,15 @@ export function createApp(
       return boundedJsonBody(16384)(c, next);
     return next();
   });
+  app.use('/v1/local-custody-policy/*', async (c, next) => {
+    if (
+      c.req.method === 'POST' &&
+      /^\/v1\/local-custody-policy\/(?:challenge|verify|record|recover)$/.test(c.req.path)
+    )
+      return boundedJsonBody(65536)(c, next);
+    if (c.req.method === 'POST') return c.json({ error: { code: 'invalid_request' } }, 400);
+    return next();
+  });
   app.use('/v1/*', reportBodyLimit);
   app.use('/v1/*', reportAuthority());
   app.use('/v1/*', idempotency);
