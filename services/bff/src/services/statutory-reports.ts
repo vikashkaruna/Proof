@@ -283,7 +283,9 @@ export class StatutoryReportService {
       }
       case 'auditor': {
         if (
-          (rawContent.schema_version === 2 || rawContent.schema_version === 3) &&
+          (rawContent.schema_version === 2 ||
+            rawContent.schema_version === 3 ||
+            rawContent.schema_version === 4) &&
           rawContent.kind === 'auditor_pack'
         ) {
           const validatedContent = AuditorAssessmentPackSchema.parse(rawContent);
@@ -377,7 +379,8 @@ export class StatutoryReportService {
     if (
       report.kind === 'auditor' &&
       ((raw as Record<string, unknown>)?.schema_version === 2 ||
-        (raw as Record<string, unknown>)?.schema_version === 3) &&
+        (raw as Record<string, unknown>)?.schema_version === 3 ||
+        (raw as Record<string, unknown>)?.schema_version === 4) &&
       report.status === 'published'
     ) {
       throw new EvidenceError('retained_pdf_required', 409);

@@ -11,10 +11,15 @@ attestation; every job has its own PID namespace and only a read-only API socket
 from __future__ import annotations
 
 import base64
+import ctypes
 import hashlib
 import json
 import os
 import shutil
+import signal
+import stat
+import platform
+import re
 import subprocess  # nosec B404 - fixture runner for pinned local docker CLIs; list argv, no shell
 import sys
 import tarfile
@@ -45,11 +50,217 @@ AGENTS = [
 ]
 
 
+def owned_process_birth(pid: int) -> str | None:
+    """Kernel birth identity, not wall-clock-second ps output or a process name."""
+    if pid <= 1:
+        raise RuntimeError("owned process identity refused")
+    if platform.system() == "Linux":
+        try:
+            fields = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()
+            ticks = fields[19]
+            boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+            if not ticks.isdecimal() or not re.fullmatch(r"[a-f0-9-]{36}", boot):
+                raise RuntimeError("owned process birth refused")
+            return f"linux:{boot}:{ticks}"
+        except FileNotFoundError:
+            return None
+    if platform.system() == "Darwin":
+        # macOS SDK sys/proc_info.h proc_bsdinfo, PROC_PIDTBSDINFO=3.
+        class BsdInfo(ctypes.Structure):
+            _fields_ = [("prefix", ctypes.c_uint32 * 12), ("comm", ctypes.c_char * 16),
+                        ("name", ctypes.c_char * 32), ("counts", ctypes.c_uint32 * 5),
+                        ("nice", ctypes.c_int32), ("seconds", ctypes.c_uint64),
+                        ("microseconds", ctypes.c_uint64)]
+        info = BsdInfo()
+        library = ctypes.CDLL("/usr/lib/libproc.dylib")
+        library.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+        library.proc_pidinfo.restype = ctypes.c_int
+        size = library.proc_pidinfo(pid, 3, 0, ctypes.byref(info), ctypes.sizeof(info))
+        if size == ctypes.sizeof(info) and info.prefix[3] == pid:
+            return f"darwin:{info.seconds}:{info.microseconds}"
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return None
+    raise RuntimeError("owned process birth unavailable")
+
+
+def read_owned_browser_json(path: Path) -> dict:
+    metadata = path.lstat()
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077 or metadata.st_size > 65536:
+        raise RuntimeError("owned browser file refused")
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate key")
+            result[key] = value
+        return result
+    value = json.loads(path.read_text(), object_pairs_hook=pairs)
+    if not isinstance(value, dict):
+        raise RuntimeError("owned browser file refused")
+    return value
+
+
+def owned_browser_launch_config(directory: Path, nonce: str, code_sha: str) -> dict:
+    directory = Path(directory)
+    if directory.resolve() != directory or not directory.is_dir() or directory.stat().st_mode & 0o077:
+        raise RuntimeError("owned browser directory refused")
+    if not re.fullmatch(r"[a-f0-9]{32}", nonce) or not re.fullmatch(r"[a-f0-9]{40}", code_sha):
+        raise RuntimeError("owned browser scope refused")
+    if directory == ROOT / ".axiom-runtime":
+        raise RuntimeError("owned browser directory refused")
+    directory.relative_to(ROOT / ".axiom-runtime")
+    value = read_owned_browser_json(directory / "launch-config.private.json")
+    if set(value) != {"version", "nonce", "codeSha", "root", "node", "python", "next", "chromium"} or value["version"] != 1 or value["nonce"] != nonce or value["codeSha"] != code_sha or value["root"] != str(ROOT):
+        raise RuntimeError("owned browser configuration refused")
+    if value["python"]["path"] != str(Path(sys.executable).resolve()):
+        raise RuntimeError("owned Python executable refused")
+    actual = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=True, timeout=5).stdout.strip()  # nosec B603 B607 - fixed read-only source identity
+    if actual != code_sha:
+        raise RuntimeError("owned browser source changed")
+    return value
+
+
+def register_owned_browser_group(directory: Path, nonce: str, code_sha: str, kind: str) -> dict:
+    if kind not in {"next", "chromium"} or os.getpid() <= 1 or os.getpgrp() != os.getpid():
+        raise RuntimeError("owned browser group refused")
+    birth = owned_process_birth(os.getpid())
+    if not birth:
+        raise RuntimeError("owned browser birth refused")
+    value = {"version": 1, "nonce": nonce, "codeSha": code_sha, "kind": kind,
+             "pid": os.getpid(), "pgid": os.getpgrp(), "birth": birth}
+    path = Path(directory) / f"group-{os.getpid()}.private.json"
+    with open(path, "x", opener=lambda name, flags: os.open(name, flags, 0o600)) as output:
+        output.write(json.dumps(value))
+    return value
+
+
+def cleanup_owned_browser_groups(directory: Path, nonce: str, code_sha: str, grace: float = 3) -> dict:
+    if not 0 <= grace <= 3:
+        raise RuntimeError("owned cleanup bound refused")
+    paths = sorted(Path(directory).glob("group-*.private.json"))
+    if len(paths) > 16:
+        raise RuntimeError("owned browser group count refused")
+    # Validate EVERY record before sending ANY signal. No names, ports, argv or
+    # environment searches establish ownership, and stale PID reuse is refused.
+    records = []
+    for path in paths:
+        value = read_owned_browser_json(path)
+        if set(value) != {"version", "nonce", "codeSha", "kind", "pid", "pgid", "birth"} or value["version"] != 1 or value["nonce"] != nonce or value["codeSha"] != code_sha or value["kind"] not in {"next", "chromium"} or type(value["pid"]) is not int or value["pid"] <= 1 or value["pgid"] != value["pid"] or path.name != f"group-{value['pid']}.private.json":
+            raise RuntimeError("owned browser registry refused")
+        birth = owned_process_birth(value["pid"])
+        if birth is not None and (birth != value["birth"] or os.getpgid(value["pid"]) != value["pgid"]):
+            raise RuntimeError("owned browser stale identity refused")
+        if birth is not None:
+            records.append(value)
+        else:
+            try:
+                os.killpg(value["pgid"], 0)
+            except ProcessLookupError:
+                continue
+            raise RuntimeError("owned browser group lost its birth identity")
+    for value in records:
+        try:
+            os.killpg(value["pgid"], signal.SIGINT)
+        except ProcessLookupError:
+            pass
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline and any(owned_process_birth(v["pid"]) is not None for v in records):
+        time.sleep(0.05)
+    for value in records:
+        birth = owned_process_birth(value["pid"])
+        if birth is not None:
+            if birth != value["birth"] or os.getpgid(value["pid"]) != value["pgid"]:
+                raise RuntimeError("owned browser cleanup identity changed")
+            try:
+                os.killpg(value["pgid"], signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+    return {"registeredGroups": len(paths), "signalledGroups": len(records)}
+
+
+def launch_owned_browser(kind: str, directory: Path, nonce: str, code_sha: str, arguments: list[str]) -> None:
+    config = owned_browser_launch_config(directory, nonce, code_sha)
+    selected = ["python", "node", "next"] if kind == "next" else ["python", "chromium"] if kind == "chromium" else []
+    if not selected:
+        raise RuntimeError("owned browser executable refused")
+    for name in selected:
+        entry = config[name]
+        if not isinstance(entry, dict) or set(entry) != {"path", "sha256"} or not isinstance(entry["path"], str):
+            raise RuntimeError("owned browser executable refused")
+        path = Path(entry["path"])
+        if not path.is_absolute() or path.resolve() != path or not path.is_file():
+            raise RuntimeError("owned browser executable changed")
+        with path.open("rb") as binary:
+            if hashlib.file_digest(binary, "sha256").hexdigest() != entry["sha256"]:
+                raise RuntimeError("owned browser executable changed")
+    register_owned_browser_group(directory, nonce, code_sha, kind)
+    if kind == "next":
+        if arguments:
+            raise RuntimeError("owned Next arguments refused")
+        command = [config["node"]["path"], config["next"]["path"]]
+        subprocess.run(command + ["build"], cwd=ROOT / "apps/web", check=True, timeout=120)  # nosec B603 - exact hash-bound executable and fixed arguments
+        os.chdir(ROOT / "apps/web")
+        os.execv(command[0], command + ["start", "--port", "3301"])  # nosec B606 - exact hash-bound local fixture executable
+    else:
+        if "--remote-debugging-pipe" not in arguments:
+            raise RuntimeError("owned Chromium transport refused")
+        # Playwright supplies CDP pipes as fd3/fd4. Preserve these existing
+        # inherited pipes across Python exec; never redirect or reconstruct them.
+        for descriptor in (3, 4):
+            os.fstat(descriptor)
+            os.set_inheritable(descriptor, True)
+        os.execv(config["chromium"]["path"], [config["chromium"]["path"], *arguments])  # nosec B606 - exact hash-bound Chromium binary; Playwright supplies its launch arguments
+
+
+def run_owned_verifier(args: list[str], data: str | None, timeout: int) -> subprocess.CompletedProcess[str]:
+    """One owned session; original operational timeout plus bounded cleanup."""
+    child = subprocess.Popen(  # nosec B603 - exact repository fixture argv, no shell
+        args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, cwd=ROOT, start_new_session=True,
+    )
+    owned_group = child.pid
+    if owned_group <= 1 or os.getpgid(child.pid) != owned_group:
+        child.kill()
+        child.communicate()
+        raise RuntimeError("owned verifier process group refused")
+    try:
+        stdout, stderr = child.communicate(input=data, timeout=timeout)
+        return subprocess.CompletedProcess(args, child.returncode, stdout, stderr)
+    finally:
+        try:
+            os.killpg(owned_group, signal.SIGINT)
+        except ProcessLookupError:
+            pass
+        try:
+            child.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            if os.environ.get("AXIOM_REGISTERED_WEBSITE_BROWSER") == "true":
+                directory = Path(os.environ["AXIOM_REGISTERED_WEBSITE_BROWSER_DIRECTORY"])
+                if (directory / "launch-config.private.json").exists():
+                    config = read_owned_browser_json(directory / "launch-config.private.json")
+                    owned_browser_launch_config(directory, config["nonce"], config["codeSha"])
+                    cleanup_owned_browser_groups(directory, config["nonce"], config["codeSha"])
+        finally:
+            try:
+                os.killpg(owned_group, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            child.communicate()
+
+
 def run(
     args: list[str], *, data: str | None = None, required: bool = True, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run(  # nosec B603 - every call site passes fixed repo/docker argv, no shell
-        args, input=data, capture_output=True, text=True, cwd=ROOT, timeout=timeout, check=False
+    result = (
+        run_owned_verifier(args, data, timeout)
+        if args == ["pnpm", "exec", "tsx", "scripts/verify-workload-assessment.ts"]
+        else subprocess.run(  # nosec B603 - every call site passes fixed repo/docker argv, no shell
+            args, input=data, capture_output=True, text=True, cwd=ROOT, timeout=timeout, check=False
+        )
     )
     if required and result.returncode:
         report_public_image_startup(args, result.stderr)
@@ -470,7 +681,14 @@ plugins {
 
 if __name__ == "__main__":
     try:
-        main()
+        if len(sys.argv) >= 6 and sys.argv[1] == "--owned-browser-launch":
+            launch_owned_browser(sys.argv[2], Path(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6:])
+        elif len(sys.argv) == 5 and sys.argv[1] == "--cleanup-owned-browser-groups":
+            selected = Path(sys.argv[2])
+            owned_browser_launch_config(selected, sys.argv[3], sys.argv[4])
+            print(json.dumps(cleanup_owned_browser_groups(selected, sys.argv[3], sys.argv[4])))
+        else:
+            main()
     except Exception:
         # Exception text can contain a failed subprocess's private output.
         print("Isolated workload identity acceptance failed. No private output was emitted.")

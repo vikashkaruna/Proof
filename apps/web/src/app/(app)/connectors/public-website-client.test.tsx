@@ -988,3 +988,17 @@ it('reconciles a known save whose own entry cleared before remaining-journal val
   await waitFor(() => expect(saved).toHaveBeenCalledExactlyOnceWith(contextualCheck));
   expect(posts).toBe(2);
 });
+
+it('keeps recent check summary and Discovery link visible while raw facts start collapsed', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ data: [check] })));
+  render(<PublicWebsiteClient tenantId="tenant-1" canManage={false} canOpenDiscovery />);
+  const link = await screen.findByRole('link', { name: 'Review this saved website evidence' });
+  expect(link.closest('details')).toBeNull();
+  const summary = screen.getByText('Show retained HTML facts and hashes');
+  const details = summary.closest('details');
+  expect(details?.hasAttribute('open')).toBe(false);
+  expect(details?.textContent).toContain(check.contentSha256);
+  expect(details?.textContent).toContain('How we use data');
+  expect(screen.getByText('Privacy').closest('details')).toBeNull();
+  expect(screen.getByText(/Fetched/).closest('details')).toBeNull();
+});

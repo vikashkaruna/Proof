@@ -11,9 +11,16 @@ export const dynamic = 'force-dynamic';
 export default async function DiscoveryPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ checkId?: string | string[] }>;
+  searchParams?: Promise<{
+    checkId?: string | string[];
+    targetId?: string | string[];
+    associationId?: string | string[];
+  }>;
 } = {}) {
-  const requestedCheck = (await searchParams)?.checkId;
+  const params = await searchParams;
+  const requestedCheck = params?.checkId;
+  const targetHint = z.uuid().safeParse(params?.targetId);
+  const associationHint = z.uuid().safeParse(params?.associationId);
   const selectedCheck = z.uuid().safeParse(requestedCheck);
   const { supabase, tenantId, userId, role, isAxiomInternal } = await requireCapabilityContext(
     routeCapability('/discovery'),
@@ -61,7 +68,24 @@ export default async function DiscoveryPage({
       {requestedCheck !== undefined && !selectedCheck.success && (
         <p role="alert">The saved website check link is invalid. Choose a saved check below.</p>
       )}
+      {((params?.targetId !== undefined && !targetHint.success) ||
+        (params?.associationId !== undefined && !associationHint.success)) && (
+        <p role="alert">
+          The website association link is invalid. Select saved estate/system records explicitly;
+          this link establishes no association.
+        </p>
+      )}
       <PublicSourceWorkflow
+        {...(targetHint.success || associationHint.success
+          ? {
+              assetHint: {
+                targetId: targetHint.success ? targetHint.data.toLowerCase() : undefined,
+                associationId: associationHint.success
+                  ? associationHint.data.toLowerCase()
+                  : undefined,
+              },
+            }
+          : {})}
         initialCheckId={selectedCheck.success ? selectedCheck.data.toLowerCase() : undefined}
         tenantId={tenantId}
         actorId={userId}

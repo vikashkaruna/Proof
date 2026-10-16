@@ -9,7 +9,8 @@ import {
   publicEvidenceCatalogueRowsMatchV2,
 } from '@axiom/control-library';
 import {
-  parsePublicControlReviewSetRequestText,
+  parsePublicControlReviewSetAnyRequestText as parsePublicControlReviewSetRequestText,
+  publicControlReviewSetAnyRequestSchema,
   publicControlReviewSetRequestSchema,
   type PublicControlAssessmentV2,
   publicControlAssessmentV2Schema,
@@ -29,6 +30,11 @@ import {
   type ResolvedHumanControlReview,
 } from './control-review-client';
 
+import {
+  PublicControlAssetSelection,
+  type AssetReviewHint,
+  type ConfirmedReviewAssociation,
+} from './public-control-asset-selection';
 const button = 'rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50';
 const field =
   'block w-full max-w-full rounded border border-slate-300 bg-white p-2 text-sm text-slate-900';
@@ -45,6 +51,7 @@ type Props = {
   canReview: boolean;
   canRun?: boolean;
   assessment: PublicControlAssessmentV2;
+  assetHint?: AssetReviewHint;
 };
 
 /** Saved human declarations remain distinct from observed facts and compliance conclusions. */
@@ -52,13 +59,17 @@ export function PublicControlHumanReview(props: Props) {
   const s = props.assessment.source;
   return (
     <HumanReview
-      key={`${s.tenantId}/${props.actorId}/${s.engagementId}/${s.checkId}/${s.projectionSha256}`}
+      key={`${s.tenantId}/${props.actorId}/${s.engagementId}/${s.checkId}/${s.projectionSha256}/${props.assetHint?.targetId ?? ''}/${props.assetHint?.associationId ?? ''}`}
       {...props}
     />
   );
 }
-function HumanReview({ actorId, canReview, canRun = false, assessment }: Props) {
+function HumanReview({ actorId, canReview, canRun = false, assessment, assetHint }: Props) {
   const source = assessment.source;
+  const [linkedMode, setLinkedMode] = useState(false);
+  const [associationRevision, setAssociationRevision] = useState(0);
+  const [associationRef, setAssociationRef] = useState<ConfirmedReviewAssociation | null>(null);
+
   const [head, setHead] = useState<HumanControlReviewHead | null>(null);
   const [judgments, setJudgments] = useState<PublicControlReviewSetRequest['answers']>({});
   const [applicability, setApplicability] =
@@ -69,6 +80,11 @@ function HumanReview({ actorId, canReview, canRun = false, assessment }: Props) 
   const [error, setError] = useState(''),
     [notice, setNotice] = useState('');
   const [confirmed, setConfirmed] = useState(false);
+  const associationChanged = useCallback((value: ConfirmedReviewAssociation | null) => {
+    setAssociationRef(value);
+    if (value) setLinkedMode(true);
+    setConfirmed(false);
+  }, []);
   const [cancellations, setCancellations] = useState<
     Record<string, { reason: string; confirmed: boolean }>
   >({});
@@ -108,6 +124,8 @@ function HumanReview({ actorId, canReview, canRun = false, assessment }: Props) 
     function applyHead(value: HumanControlReviewHead) {
       if (!mounted.current) return;
       setHead(value);
+      setAssociationRef(null);
+      setAssociationRevision((value) => value + 1);
       const previous = value.review;
       const sameEstate = previous?.estate_id === value.estateId;
       setJudgments(
@@ -301,6 +319,12 @@ function HumanReview({ actorId, canReview, canRun = false, assessment }: Props) 
       if (mounted.current) setBusy(false);
     }
   }
+  const associationRequired = Boolean(
+    linkedMode ||
+    assetHint?.targetId ||
+    assetHint?.associationId ||
+    head?.review?.snapshot.version === 2,
+  );
   function record() {
     if (
       !canReview ||
@@ -309,12 +333,13 @@ function HumanReview({ actorId, canReview, canRun = false, assessment }: Props) 
       !storageReady ||
       !confirmed ||
       dirty ||
-      operations.length
+      operations.length ||
+      (associationRequired && !associationRef)
     )
       return;
     void task(async () => {
-      const parsedRequest = publicControlReviewSetRequestSchema.safeParse({
-        version: 1,
+      const parsedRequest = publicControlReviewSetAnyRequestSchema.safeParse({
+        ...(associationRef ? { version: 2, associationRef } : { version: 1 }),
         operationKey: generateUUID(),
         engagementId: source.engagementId,
         checkId: source.checkId,
@@ -350,6 +375,38 @@ function HumanReview({ actorId, canReview, canRun = false, assessment }: Props) 
         stay unassessed. This records unverified human judgments, not an assessment score or
         released report.
       </p>
+      {head?.estateId && (
+        <PublicControlAssetSelection
+          key={associationRevision}
+          tenantId={source.tenantId}
+          actorId={actorId}
+          estateId={head.estateId}
+          checkId={source.checkId}
+          payloadSha256={source.projectionSha256}
+          hint={assetHint}
+          disabled={!canReview || busy || operations.length > 0}
+          onConfirmed={associationChanged}
+        />
+      )}
+      {associationRequired && !associationRef && (
+        <p>
+          Confirm a current matching saved website association before recording a linked review. The
+          incoming link and earlier history do not establish new authority.
+        </p>
+      )}
+      {!associationRef && !associationRequired && (
+        <p>
+          This legacy review records evidence without a registered website asset association. It
+          does not establish estate/system ownership. Select and confirm a saved association above
+          to record a new linked version explicitly.
+        </p>
+      )}
+      {head?.review?.snapshot.version === 1 && (
+        <p>
+          Earlier version 1 review: no registered website association was frozen. Its exact history
+          and requests remain unchanged.
+        </p>
+      )}
       {head?.review && (
         <p className="break-all text-sm">
           Latest recorded review
@@ -690,14 +747,20 @@ function HumanReview({ actorId, canReview, canRun = false, assessment }: Props) 
           <button
             type="button"
             className={button}
-            disabled={dirty || !confirmed || !applicability.rationale.trim()}
+            disabled={
+              dirty ||
+              !confirmed ||
+              !applicability.rationale.trim() ||
+              (associationRequired && !associationRef)
+            }
             onClick={record}
           >
             Record human control review
           </button>
           <p className="text-sm">
-            Assessment and reporting handoff is still under implementation. Recording this review
-            does not invoke Parikshan or release a report.
+            Continue a recorded review in Assessment to request a run explicitly. Reports require a
+            completed assessment and separate human review and release. Recording this review does
+            not invoke Parikshan or release a report.
           </p>
         </fieldset>
       )}

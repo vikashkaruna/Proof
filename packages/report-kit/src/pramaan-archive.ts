@@ -5,7 +5,10 @@ import { zipSync, type Zippable } from 'fflate';
 import { z } from 'zod';
 import { FrozenBoardSourceSchema } from './board-source';
 import { FrozenAuditorSourceSchema } from './auditor-source';
-import { verifyFrozenHumanControlReview } from './public-control-provenance';
+import {
+  verifyFrozenHumanControlReviewWithAsset,
+  verifyFrozenHumanControlReview,
+} from './public-control-provenance';
 import { BRANDING } from './branding';
 
 const uuid = z.uuid();
@@ -44,7 +47,7 @@ export function buildPramaanBoardArchive(input: PramaanBoardArchiveInput) {
   }
   const source = z
     .object({
-      schema_version: z.union([z.literal(1), z.literal(2)]),
+      schema_version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
       kind: z.literal('board_source'),
       tenant_id: uuid,
       engagement_id: uuid,
@@ -58,14 +61,16 @@ export function buildPramaanBoardArchive(input: PramaanBoardArchiveInput) {
   )
     throw new Error('Pramaan source belongs to a different tenant, engagement, or board request');
   const rawSource = (
-    source.schema_version === 2
+    source.schema_version !== 1
       ? parseCatalogueJson(Buffer.from(input.sourceBytes).toString('utf8'), 4 * 1024 * 1024)
       : JSON.parse(Buffer.from(input.sourceBytes).toString('utf8'))
   ) as Record<string, unknown>;
-  if (source.schema_version === 2) {
+  if (source.schema_version !== 1) {
     const frozen = FrozenBoardSourceSchema.parse(rawSource);
-    if (frozen.schema_version !== 2) throw new Error('Public review archive source refused');
-    verifyFrozenHumanControlReview(frozen.human_control_review, {
+    if (frozen.schema_version === 1) throw new Error('Public review archive source refused');
+    (frozen.schema_version === 3
+      ? verifyFrozenHumanControlReviewWithAsset
+      : verifyFrozenHumanControlReview)(frozen.human_control_review, {
       tenantId: parsed.tenantId,
       engagementId: parsed.engagementId,
       assessmentRunId: frozen.assessment_run_id,
@@ -146,7 +151,7 @@ export function buildPramaanAuditorArchive(input: PramaanSourceArchiveInput) {
     throw new Error('Pramaan source bytes do not match exact provider versions');
   const source = z
     .object({
-      schema_version: z.union([z.literal(1), z.literal(2)]),
+      schema_version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
       kind: z.literal('statutory_source'),
       report_kind: z.literal('auditor'),
       tenant_id: uuid,
@@ -161,14 +166,16 @@ export function buildPramaanAuditorArchive(input: PramaanSourceArchiveInput) {
   )
     throw new Error('Pramaan source belongs to a different tenant, engagement, or auditor request');
   const rawSource = (
-    source.schema_version === 2
+    source.schema_version !== 1
       ? parseCatalogueJson(Buffer.from(input.sourceBytes).toString('utf8'), 4 * 1024 * 1024)
       : JSON.parse(Buffer.from(input.sourceBytes).toString('utf8'))
   ) as Record<string, unknown>;
-  if (source.schema_version === 2) {
+  if (source.schema_version !== 1) {
     const frozen = FrozenAuditorSourceSchema.parse(rawSource);
-    if (frozen.schema_version !== 2) throw new Error('Public review archive source refused');
-    verifyFrozenHumanControlReview(frozen.human_control_review, {
+    if (frozen.schema_version === 1) throw new Error('Public review archive source refused');
+    (frozen.schema_version === 3
+      ? verifyFrozenHumanControlReviewWithAsset
+      : verifyFrozenHumanControlReview)(frozen.human_control_review, {
       tenantId: parsed.tenantId,
       engagementId: parsed.engagementId,
       assessmentRunId: frozen.assessment_run_id,

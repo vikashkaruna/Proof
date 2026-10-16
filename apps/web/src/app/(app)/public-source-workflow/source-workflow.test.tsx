@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { webcrypto } from 'node:crypto';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { canonicalJson, sha256 } from '@axiom/ledger';
 import { PublicSourceWorkflow } from './source-workflow';
@@ -241,6 +241,35 @@ async function ready() {
       (screen.getByRole('button', { name: 'Refresh choices' }) as HTMLButtonElement).disabled,
     ).toBe(false),
   );
+}
+/** Observe the next real SHA operation immediately before selecting an observation.
+ * The gate controls completion only; native SHA bytes and production verification remain real. */
+function nextObservationDigest() {
+  let release!: () => void;
+  let entered!: () => void;
+  let finished!: () => void;
+  let failed!: (cause: unknown) => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const completed = new Promise<void>((resolve, reject) => {
+    finished = resolve;
+    failed = reject;
+  });
+  const realDigest = webcrypto.subtle.digest.bind(webcrypto.subtle);
+  const spy = vi.spyOn(webcrypto.subtle, 'digest').mockImplementationOnce((algorithm, input) => {
+    entered();
+    const result = realDigest(algorithm, input).then(async (bytes) => {
+      await gate;
+      return bytes;
+    });
+    void result.then(() => finished(), failed);
+    return result;
+  });
+  return { started, completed, release, spy };
 }
 beforeEach(() => {
   localStorage.clear();
@@ -619,7 +648,46 @@ it('explains disabled prerequisites and readiness through source binding and ret
   f.observations.set(DRISHTI, f.drishti);
   fireEvent.click(screen.getByRole('button', { name: 'Refresh observations' }));
   await ready();
-  fireEvent.click(await screen.findByRole('button', { name: 'Select Drishti observation' }));
+  const selection = await screen.findByRole('button', { name: 'Select Drishti observation' });
+  const digest = nextObservationDigest();
+  await act(async () => {
+    fireEvent.click(selection);
+    await digest.started;
+    digest.release();
+    await digest.completed;
+  });
+  expect(digest.spy).toHaveBeenCalledTimes(1);
+  expect(digest.spy.mock.calls[0]?.[0]).toBe('SHA-256');
+  await screen.findByRole('heading', { name: 'Drishti public observation' });
+  await ready();
+  expect(actionStatus('Run Vibhaag on selected observation').action.disabled).toBe(false);
+  expect(actionStatus('Run Vibhaag on selected observation').message).toContain('Ready');
+});
+
+it('keeps a selected observation pending until real SHA completion and synchronizes its final readiness', async () => {
+  const f = await fixture();
+  f.setBound();
+  f.observations.set(DRISHTI, f.drishti);
+  view();
+  await selectSource();
+  await ready();
+  const selection = await screen.findByRole('button', { name: 'Select Drishti observation' });
+  const digest = nextObservationDigest();
+  fireEvent.click(selection);
+  await digest.started;
+  expect(actionStatus('Run Vibhaag on selected observation').action.disabled).toBe(true);
+  expect(actionStatus('Run Vibhaag on selected observation').message).toContain(
+    'Loading recorded state',
+  );
+  // The previous click-then-find form expires while a legitimate digest is pending.
+  // This uses the original Testing Library deadline; no sleep or extra timeout.
+  await expect(
+    screen.findByRole('heading', { name: 'Drishti public observation' }),
+  ).rejects.toThrow('Unable to find');
+  await act(async () => {
+    digest.release();
+    await digest.completed;
+  });
   await screen.findByRole('heading', { name: 'Drishti public observation' });
   await ready();
   expect(actionStatus('Run Vibhaag on selected observation').action.disabled).toBe(false);

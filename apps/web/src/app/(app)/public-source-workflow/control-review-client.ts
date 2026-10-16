@@ -5,14 +5,20 @@ import {
 } from '@axiom/control-library';
 import { canonicalJson } from '@axiom/ledger';
 import {
-  cancelPublicControlReviewOperationRequestSchema,
-  parsePublicControlReviewSetRequestText,
-  publicControlReviewCancellationRowSchema,
+  cancelPublicControlReviewAnyOperationRequestSchema as cancelPublicControlReviewOperationRequestSchema,
+  parsePublicControlReviewSetAnyRequestText as parsePublicControlReviewSetRequestText,
+  publicControlReviewAnyCancellationRowSchema as publicControlReviewCancellationRowSchema,
   publicControlReviewCancellationSnapshotSchema,
   publicControlReviewSetRequestSchema,
-  publicControlReviewSetRowSchema,
-  publicControlReviewSetSnapshotSchema,
+  publicControlReviewSetAnyRowSchema as publicControlReviewSetRowSchema,
+  publicControlReviewSetAnySnapshotSchema as publicControlReviewSetSnapshotSchema,
   publicControlAssessmentV2Schema,
+  PUBLIC_CONTROL_REVIEW_REQUEST_CODEC,
+  PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC,
+  PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2,
+  PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2,
+  parsePublicWebsiteAssetSnapshotText,
+  parsePublicWebsiteAssetRequestText,
   type PublicControlAssessmentV2,
 } from '@axiom/types';
 import {
@@ -23,7 +29,7 @@ import {
 
 const uuid = z.uuid().transform((v) => v.toLowerCase());
 const row = publicControlReviewSetRowSchema
-  .extend({ snapshot: publicControlReviewSetSnapshotSchema })
+  .safeExtend({ snapshot: publicControlReviewSetSnapshotSchema })
   .strict();
 const head = z
   .object({
@@ -81,6 +87,19 @@ async function jsonResponse(response: Response) {
     );
   }
 }
+/** Compare the UTC second and complete decimal fraction; Date alone loses PostgreSQL microseconds. */
+function sameReviewInstant(left: string, right: string) {
+  const instant = (value: string) => {
+    const fraction = /\.(\d+)(?=Z|[+-]\d{2}:\d{2}$)/.exec(value);
+    return [
+      Date.parse(value.replace(/\.\d+(?=Z|[+-]\d{2}:\d{2}$)/, '')),
+      (fraction?.[1] ?? '').replace(/0+$/, ''),
+    ] as const;
+  };
+  const a = instant(left),
+    b = instant(right);
+  return Number.isFinite(a[0]) && Number.isFinite(b[0]) && a[0] === b[0] && a[1] === b[1];
+}
 function validateRow(
   value: z.infer<typeof row>,
   scope: { tenantId: string; engagementId: string; checkId: string },
@@ -100,6 +119,68 @@ function validateRow(
   )
     throw new Error('Human review readback does not match its saved context.');
   const request = parsePublicControlReviewSetRequestText(value.request_text);
+  if (
+    request.version !== value.snapshot.version ||
+    value.request_codec !==
+      (request.version === 2
+        ? PUBLIC_CONTROL_REVIEW_REQUEST_CODEC_V2
+        : PUBLIC_CONTROL_REVIEW_REQUEST_CODEC) ||
+    value.snapshot_codec !==
+      (request.version === 2
+        ? PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC_V2
+        : PUBLIC_CONTROL_REVIEW_SNAPSHOT_CODEC)
+  )
+    throw Error('Human review codec pairing differs from its saved version.');
+  if (request.version === 2 && value.snapshot.version === 2) {
+    const asset = value.snapshot.assetProvenance;
+    const target = parsePublicWebsiteAssetSnapshotText(asset.target.snapshot_text);
+    const association = parsePublicWebsiteAssetSnapshotText(asset.association.snapshot_text);
+    const targetRequest = parsePublicWebsiteAssetRequestText(asset.target.request_text);
+    const associationRequest = parsePublicWebsiteAssetRequestText(asset.association.request_text);
+    if (
+      target.kind !== 'target' ||
+      association.kind !== 'association' ||
+      targetRequest.kind !== 'register_target' ||
+      (associationRequest.kind !== 'capture' && associationRequest.kind !== 'associate_capture') ||
+      asset.target.actor_id !== target.actorId ||
+      asset.association.actor_id !== association.actorId ||
+      asset.target.operation_key !== targetRequest.operationKey ||
+      asset.association.operation_key !== associationRequest.operationKey ||
+      association.captureReceipt.id !== value.snapshot.captureReceipt ||
+      !sameReviewInstant(association.checkedAt, value.snapshot.checkedAt) ||
+      asset.tenant_id !== scope.tenantId ||
+      asset.estate_id !== value.estate_id ||
+      target.tenantId !== scope.tenantId ||
+      association.tenantId !== scope.tenantId ||
+      target.estateId !== value.estate_id ||
+      target.systemId !== asset.system_id ||
+      target.id !== request.associationRef.targetId ||
+      association.targetId !== target.id ||
+      association.id !== request.associationRef.associationId ||
+      association.checkId !== scope.checkId ||
+      association.payloadSha256 !== request.expectedSource.payloadSha256 ||
+      asset.target.snapshot_sha256 !== request.associationRef.targetSha256 ||
+      asset.association.snapshot_sha256 !== request.associationRef.associationSha256 ||
+      association.targetSha256 !== asset.target.snapshot_sha256 ||
+      asset.association.receipt.id !== request.associationRef.associationReceipt.id ||
+      asset.association.receipt.entry_hash !==
+        request.associationRef.associationReceipt.entryHash ||
+      canonicalJson(targetRequest) !== asset.target.request_text ||
+      canonicalJson(associationRequest) !== asset.association.request_text ||
+      targetRequest.estateId !== target.estateId ||
+      targetRequest.systemId !== target.systemId ||
+      targetRequest.expectedEstateVersion !== target.estateVersion ||
+      targetRequest.expectedSystemVersion !== target.systemVersion ||
+      targetRequest.url !== target.url ||
+      associationRequest.targetId !== target.id ||
+      associationRequest.expectedTargetSha256 !== asset.target.snapshot_sha256 ||
+      (associationRequest.kind === 'associate_capture' &&
+        (associationRequest.checkId !== scope.checkId ||
+          associationRequest.expectedPayloadSha256 !== association.payloadSha256 ||
+          associationRequest.expectedCaptureReceipt !== association.captureReceipt.id))
+    )
+      throw Error('Human review asset provenance differs from its saved association.');
+  }
   const manifest = publicControlCatalogueV2Manifest();
   for (const [controlId, questions] of Object.entries(request.answers)) {
     const control = manifest.controls.find((row) => row.control.id === controlId)?.control;

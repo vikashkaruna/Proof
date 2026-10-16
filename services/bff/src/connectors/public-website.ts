@@ -413,24 +413,26 @@ function consentTarget(body: Buffer, base: URL, seen: ReadonlySet<string>): URL 
       /* Same bounded base handling as legacy. */
     }
   }
+  let cookieNotice: URL | undefined;
   for (const element of elements) {
     if (element.tagName !== 'a') continue;
     const href = element.attrs.find((attr) => attr.name === 'href')?.value;
     if (!href) continue;
     try {
       const target = parsePublicUrl(new URL(href, documentBase).href);
-      if (
-        target.origin === base.origin &&
-        target.href.length <= 512 &&
-        !seen.has(target.href) &&
-        /consent/i.test(publicHtmlText(element) + ' ' + target.pathname)
-      )
-        return target;
+      if (target.origin !== base.origin || target.href.length > 512 || seen.has(target.href))
+        continue;
+      const description = publicHtmlText(element) + ' ' + target.pathname;
+      // Keep an explicit consent page preferred; a linked cookie notice is a
+      // consent-related source when there is no dedicated consent page. This
+      // still consumes only the existing fifth-page slot and grants no access.
+      if (/consent/i.test(description)) return target;
+      if (!cookieNotice && /\bcookies?\b/i.test(description)) cookieNotice = target;
     } catch {
       /* Only ordinary same-origin public navigation is eligible. */
     }
   }
-  return undefined;
+  return cookieNotice;
 }
 
 /** Fresh v2 evidence is extracted from the same accepted response bytes before

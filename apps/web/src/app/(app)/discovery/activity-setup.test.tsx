@@ -208,3 +208,35 @@ it.each([
     }
   },
 );
+
+it('passes verified-shape association query values only as hints without granting permissions', async () => {
+  state.role = UserRole.REVIEWER;
+  const checkId = '33333333-3333-4333-8333-333333333333',
+    targetId = '99999999-9999-4999-8999-999999999999',
+    associationId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  render(
+    await DiscoveryPage({ searchParams: Promise.resolve({ checkId, targetId, associationId }) }),
+  );
+  expect(state.workflow).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      initialCheckId: checkId,
+      assetHint: { targetId, associationId },
+      canReview: true,
+      canInvoke: false,
+      canCapture: false,
+    }),
+  );
+});
+it('does not turn malformed or repeated association query values into a saved binding', async () => {
+  state.role = UserRole.REVIEWER;
+  render(
+    await DiscoveryPage({
+      searchParams: Promise.resolve({
+        targetId: ['99999999-9999-4999-8999-999999999999'],
+        associationId: 'bad',
+      }),
+    }),
+  );
+  expect(screen.getByRole('alert').textContent).toContain('association link is invalid');
+  expect(state.workflow.mock.calls.at(-1)?.[0]).not.toHaveProperty('assetHint');
+});

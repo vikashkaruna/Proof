@@ -166,6 +166,28 @@ test('browser handoff is strict, bounded and cannot carry authentication materia
     codeSha256: hash,
   };
   assert(publicReportBrowserHandoffSchema.safeParse(value).success);
+  const asset = {
+    targetId: id,
+    targetSha256: hash,
+    associationId: randomUUID(),
+    associationSha256: hash,
+    checkId: randomUUID(),
+  };
+  assert(
+    publicReportBrowserHandoffSchema.safeParse({ ...value, source: { ...source, asset } }).success,
+  );
+  assert(
+    !publicReportBrowserHandoffSchema.safeParse({
+      ...value,
+      source: { ...source, asset: { ...asset, ownershipVerified: true } },
+    }).success,
+  );
+  assert(
+    !publicReportBrowserHandoffSchema.safeParse({
+      ...value,
+      source: { ...source, asset: { ...asset, targetSha256: 'bad' } },
+    }).success,
+  );
   for (const changed of [
     { ...value, token: 'synthetic-secret' },
     { ...value, source: { ...source, password: 'synthetic-secret' } },

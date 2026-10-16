@@ -6,6 +6,7 @@ import { UserRole } from '@axiom/types';
 
 const state = vi.hoisted(() => ({
   role: 'viewer' as UserRole,
+  internal: false,
   errors: {} as Record<string, Error | null>,
   rows: {} as Record<string, unknown>,
   calls: [] as Array<[string, string, unknown]>,
@@ -13,6 +14,8 @@ const state = vi.hoisted(() => ({
 vi.mock('@/lib/tenant-context', () => ({
   requireCapabilityContext: async () => ({
     tenantId: 'tenant-1',
+    userId: 'actor-1',
+    isAxiomInternal: state.internal,
     role: state.role,
     supabase: {
       from: (table: string) => {
@@ -41,8 +44,24 @@ vi.mock('./connectors-client', () => ({
     </p>
   ),
 }));
+vi.mock('./public-website-asset-inventory', () => ({
+  PublicWebsiteAssetInventory: ({
+    tenantId,
+    actorId,
+    canManage,
+  }: {
+    tenantId: string;
+    actorId: string;
+    canManage: boolean;
+  }) => (
+    <p>
+      Website {tenantId} actor {actorId} manage {String(canManage)}
+    </p>
+  ),
+}));
 beforeEach(() => {
   state.role = UserRole.VIEWER;
+  state.internal = false;
   state.errors = {};
   state.rows = {};
   state.calls = [];
@@ -81,5 +100,22 @@ it.each(['connectors', 'estate_systems'])(
     const view = renderToStaticMarkup(await ConnectorsPage());
     expect(view).toContain('Connector inventory could not be loaded');
     expect(view).not.toContain('Client tenant-1');
+  },
+);
+
+it.each([
+  [UserRole.OWNER, false, true],
+  [UserRole.ADMIN, false, true],
+  [UserRole.REVIEWER, false, false],
+  [UserRole.FOUNDER, false, false],
+  [UserRole.FOUNDER, true, true],
+] as const)(
+  'gates website management for %s with internal=%s',
+  async (role, internal, permitted) => {
+    state.role = role;
+    state.internal = internal;
+    expect(renderToStaticMarkup(await ConnectorsPage())).toContain(
+      'Website tenant-1 actor actor-1 manage ' + String(permitted),
+    );
   },
 );
