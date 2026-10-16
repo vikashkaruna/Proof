@@ -4,7 +4,12 @@ import { dirname, join, resolve } from 'node:path';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import { DispatchRefused } from './dispatch-payload.js';
 import { dispatchKmsBinding } from './dispatch-key-policy.js';
-import { LocalKeyPolicy, type LocalKeyCaller, type LocalKeyAdmission } from './local-key-policy.js';
+import type {
+  LocalKeyAuthority,
+  LocalKeyCaller,
+  LocalKeyAdmission,
+  LocalKeyAuthorization,
+} from './local-key-policy.js';
 
 /** Unmounted key-service primitive. Master keys never leave this process.
  * Directory provisioning, durable admission verification and peer authentication
@@ -12,9 +17,14 @@ import { LocalKeyPolicy, type LocalKeyCaller, type LocalKeyAdmission } from './l
 export class LocalKeyService {
   constructor(
     private readonly directory: string,
-    private readonly policy: LocalKeyPolicy,
+    private readonly policy: LocalKeyAuthority,
     private readonly admission?: LocalKeyAdmission,
   ) {}
+
+  private sameAuthority(before: void | LocalKeyAuthorization, after: void | LocalKeyAuthorization) {
+    if (before?.kind !== after?.kind || before?.commitment !== after?.commitment)
+      throw new DispatchRefused();
+  }
 
   private async directoryGate() {
     if (
@@ -72,7 +82,14 @@ export class LocalKeyService {
     let secret: Buffer | undefined;
     let temporary: string | undefined;
     try {
-      await this.policy.require(bound, 'provision', keyRef, deadline, this.admission);
+      const authorization = await this.policy.require(
+        bound,
+        'provision',
+        keyRef,
+        deadline,
+        this.admission,
+        null,
+      );
       await this.directoryGate();
       secret = randomBytes(32);
       temporary = join(this.directory, '.pending-' + randomBytes(16).toString('hex'));
@@ -87,7 +104,10 @@ export class LocalKeyService {
       } finally {
         await file.close();
       }
-      await this.policy.require(bound, 'provision', keyRef, deadline, this.admission);
+      this.sameAuthority(
+        authorization,
+        await this.policy.require(bound, 'provision', keyRef, deadline, this.admission, null),
+      );
       // Atomic no-replace publication: a key version can never be overwritten.
       await link(temporary, this.filename(keyRef));
       await unlink(temporary);
@@ -116,7 +136,8 @@ export class LocalKeyService {
     try {
       if (!(context instanceof Uint8Array) || context.byteLength > 4096)
         throw new DispatchRefused();
-      const binding = dispatchKmsBinding(Buffer.from(context)),
+      const frozenContext = Buffer.from(context);
+      const binding = dispatchKmsBinding(frozenContext),
         ref = this.policy.value.primary;
       if (
         binding.tenant !== bound.tenantId ||
@@ -125,14 +146,24 @@ export class LocalKeyService {
       )
         throw new DispatchRefused();
       clear = Buffer.from(plaintext);
-      await this.policy.require(bound, 'wrap', ref, deadline, this.admission);
+      const authorization = await this.policy.require(
+        bound,
+        'wrap',
+        ref,
+        deadline,
+        this.admission,
+        frozenContext,
+      );
       master = await this.key(ref);
       const nonce = randomBytes(12),
         cipher = createCipheriv('aes-256-gcm', master, nonce);
       cipher.setAAD(binding.aad);
       const encrypted = Buffer.concat([cipher.update(clear), cipher.final()]);
       const wrappedKey = Buffer.concat([Buffer.from([1]), nonce, cipher.getAuthTag(), encrypted]);
-      await this.policy.require(bound, 'wrap', ref, deadline, this.admission);
+      this.sameAuthority(
+        authorization,
+        await this.policy.require(bound, 'wrap', ref, deadline, this.admission, frozenContext),
+      );
       return { keyRef: ref, wrappedKey };
     } catch {
       throw new DispatchRefused();
@@ -155,17 +186,28 @@ export class LocalKeyService {
         throw new DispatchRefused();
       if (!(wrapped instanceof Uint8Array) || wrapped.byteLength !== 61)
         throw new DispatchRefused();
-      const binding = dispatchKmsBinding(Buffer.from(context)),
+      const frozenContext = Buffer.from(context);
+      const binding = dispatchKmsBinding(frozenContext),
         bytes = Buffer.from(wrapped);
       if (binding.tenant !== bound.tenantId || bytes.length !== 61 || bytes[0] !== 1)
         throw new DispatchRefused();
-      await this.policy.require(bound, 'unwrap', keyRef, deadline, this.admission);
+      const authorization = await this.policy.require(
+        bound,
+        'unwrap',
+        keyRef,
+        deadline,
+        this.admission,
+        frozenContext,
+      );
       master = await this.key(keyRef);
       const cipher = createDecipheriv('aes-256-gcm', master, bytes.subarray(1, 13));
       cipher.setAAD(binding.aad);
       cipher.setAuthTag(bytes.subarray(13, 29));
       clear = Buffer.concat([cipher.update(bytes.subarray(29)), cipher.final()]);
-      await this.policy.require(bound, 'unwrap', keyRef, deadline, this.admission);
+      this.sameAuthority(
+        authorization,
+        await this.policy.require(bound, 'unwrap', keyRef, deadline, this.admission, frozenContext),
+      );
       return Buffer.from(clear);
     } catch {
       throw new DispatchRefused();

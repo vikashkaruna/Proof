@@ -27,3 +27,46 @@ describe('ledger action compatibility', () => {
     ).toBe(false);
   });
 });
+
+it.each(['custody.local_credential_issued', 'custody.local_credential_revoked'])(
+  'decodes retained %s as a system fact without inventing human approval',
+  (actionType) => {
+    const entry = AuditLedgerEntrySchema.parse({
+      id: '401',
+      tenantId: '11111111-1111-4111-8111-111111111111',
+      sequenceNo: 12,
+      correlationId: '22222222-2222-4222-8222-222222222222',
+      actorType: 'system',
+      actorId: 'axiom-local-custody-issuer',
+      agentVersion: null,
+      modelId: null,
+      promptHash: null,
+      actionType,
+      targetRef: '22222222-2222-4222-8222-222222222222',
+      inputHash: 'a'.repeat(64),
+      outputHash: 'b'.repeat(64),
+      approvalTokenId: null,
+      approverId: null,
+      preStateRef: null,
+      postStateRef: null,
+      result: 'success',
+      detail: { credential_id: '22222222-2222-4222-8222-222222222222', activation_epoch: 1 },
+      occurredAt: '2026-10-16T00:00:00Z',
+      prevEntryHash: 'c'.repeat(64),
+      entryHash: 'd'.repeat(64),
+    });
+    expect(entry.actorType).toBe('system');
+    expect(entry.actorId).toBe('axiom-local-custody-issuer');
+    expect(entry.actionType).toBe(actionType);
+    expect(entry.inputHash).toBe('a'.repeat(64));
+    expect(entry.entryHash).toBe('d'.repeat(64));
+    expect(entry.approvalTokenId).toBeNull();
+    expect(entry.approverId).toBeNull();
+    expect(entry.modelId).toBeNull();
+    expect(
+      AuditLedgerEntrySchema.shape.actionType.safeParse(
+        actionType.replace('credential_', 'report_signing_'),
+      ).success,
+    ).toBe(false);
+  },
+);

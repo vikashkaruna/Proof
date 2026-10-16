@@ -1,4 +1,4 @@
-"""Explicit historical143/current144 SQL phases; pure preparation, no DB transport.
+"""Explicit historical143/current latest SQL phases; pure preparation, no DB transport.
 
 The parent owns one disposable container and executes emitted SQL with psql.
 No product downgrade flag, historical rewrite, broad exception or skipped suite.
@@ -50,9 +50,39 @@ def plan(root: Path = ROOT) -> dict:
         all(name in files for name in (*HISTORICAL, CURRENT)),
         "required_report_suite_missing",
     )
+    # 0000 bootstrap is canonical; unpublished0132 was reserved and never shipped.
+    migrations = sorted((root / "infra/supabase/migrations").glob("*.sql"))
+    versions = [int(p.name[:4]) for p in migrations if p.name[:4].isdigit()]
+    need(
+        bool(versions)
+        and len(versions) == len(migrations)
+        and versions == [v for v in range(versions[-1] + 1) if v != 132]
+        and versions[-1] >= 145,
+        "canonical_latest145_migrations_required",
+    )
+    need(
+        all(
+            name in files
+            for name in (
+                "local-custody-credential-issuance.test.sql",
+                "local-custody-credential-issuance-demo.test.sql",
+            )
+        ),
+        "issuer145_suites_required",
+    )
+    need(
+        versions[-1] < 146 or "local-custody-credential-identity.test.sql" in files,
+        "identity146_suite_required",
+    )
+    need(
+        versions[-1] < 147
+        or "local-public-control-assessment-dispatch.test.sql" in files,
+        "dispatch147_suite_required",
+    )
     return {
+        "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),
-        "current144": [name for name in files if name not in HISTORICAL],
+        "current": [name for name in files if name not in HISTORICAL],
         "all": files,
     }
 
@@ -182,7 +212,7 @@ create temporary table coverage144_old_expected as
 def verify_inventory(directory: Path, root: Path = ROOT) -> None:
     expected = plan(root)
     expected_rows = [f"143|{name}" for name in expected["historical143"]] + [
-        f"144|{name}" for name in expected["current144"]
+        f"{expected['currentVersion']}|{name}" for name in expected["current"]
     ]
     actual = (directory / "executed-suites.txt").read_text().splitlines()
     need(
@@ -196,7 +226,8 @@ def verify_inventory(directory: Path, root: Path = ROOT) -> None:
                 "exactOnce": True,
                 "noneOmitted": True,
                 "historical143": expected["historical143"],
-                "current144": expected["current144"],
+                "currentVersion": expected["currentVersion"],
+                "current": expected["current"],
             },
             indent=2,
         )
@@ -212,6 +243,7 @@ def main() -> None:
             "prepare",
             "historical-list",
             "current-list",
+            "current-version",
             "current-program",
             "legacy-program",
             "verify",
@@ -223,8 +255,10 @@ def main() -> None:
     directory = protected(args.directory)
     if args.action == "prepare":
         prepare(directory)
+    elif args.action == "current-version":
+        print(plan()["currentVersion"])
     elif args.action.endswith("-list"):
-        phase = "historical143" if args.action == "historical-list" else "current144"
+        phase = "historical143" if args.action == "historical-list" else "current"
         print("\n".join(plan()[phase]))
     elif args.action == "current-program":
         print(current_program(directory))

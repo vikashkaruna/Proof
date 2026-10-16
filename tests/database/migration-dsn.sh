@@ -44,6 +44,7 @@ PGPASSWORD="$db_password" psql -w "$dsn" -v ON_ERROR_STOP=1 -q -f tests/database
 
 # Explicit privileged role bootstrap only for this owned disposable fixture.
 python3 tests/database/lib/preprovision-local-custody-verifier.py --container "$container" --image "$image"
+python3 tests/database/lib/preprovision-local-custody-issuer.py --container "$container" --image "$image"
 
 # ─── TLS is required unless the caller opts out ──────────────────────
 # A deployed database is reached over a network the runner does not own, so

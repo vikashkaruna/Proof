@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, symlinkSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   registeredBrowserDiagnostics,
   readRegisteredBrowserDiagnostics,
+  readRegisteredBrowserProgress,
   assertRegisteredDiagnosticDestinationAbsent,
 } from './registered-browser-diagnostics.js';
 const secret = 'private-persona-secret https://private.invalid/?token=secret';
@@ -125,6 +126,60 @@ test('cancelled/early child without report retains only bounded lifecycle and re
       () => assertRegisteredDiagnosticDestinationAbsent(path),
       /archive prior owned evidence/,
     );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('actual helper failure coordinate and fixed progress survive without private browser fields', () => {
+  const input = structuredClone(payload);
+  input.suites[0]!.specs[0]!.tests[0]!.results[0]!.errors[0]!.location = {
+    file: '/private-persona/tests/e2e/fixtures/public-asset-workflow.ts',
+    line: 147,
+    column: 29,
+  };
+  const result = registeredBrowserDiagnostics(input, {
+    ...lifecycle,
+    progress: 'capture-response-loss',
+  });
+  assert.equal(result.results[0]?.location, 'tests/e2e/fixtures/public-asset-workflow.ts:147:29');
+  assert.equal(result.progress, 'capture-response-loss');
+  assert(!JSON.stringify(result).includes('private'));
+  for (const progress of [secret, 'capture-response-loss ' + secret, 1, null]) {
+    const refused = registeredBrowserDiagnostics(input, { ...lifecycle, progress });
+    assert.equal(refused.progress, 'unknown');
+    assert(!JSON.stringify(refused).includes(secret));
+  }
+});
+
+test('owned log tail yields only the last fixed marker and refuses unsafe files', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'axiom-progress-'));
+  const path = join(directory, 'browser.private.log');
+  try {
+    assert.equal(readRegisteredBrowserProgress(path), 'unknown');
+    writeFileSync(
+      path,
+      secret +
+        '\n[registered-website-stage] login\n' +
+        '[registered-website-stage] capture-response-loss\n' +
+        '[registered-website-stage] ' +
+        secret +
+        '\n',
+      { mode: 0o600 },
+    );
+    assert.equal(readRegisteredBrowserProgress(path), 'capture-response-loss');
+    // Prefix markers outside the fixed read bound must not be read as current progress.
+    writeFileSync(path, '[registered-website-stage] login\n' + 'x'.repeat(131072) + '\n');
+    assert.equal(readRegisteredBrowserProgress(path), 'unknown');
+    writeFileSync(path, secret.repeat(2048) + '\n[registered-website-stage] human-review\n');
+    assert.equal(readRegisteredBrowserProgress(path), 'human-review');
+    chmodSync(path, 0o644);
+    assert.equal(readRegisteredBrowserProgress(path), 'unknown');
+    rmSync(path);
+    symlinkSync(join(directory, 'foreign'), path);
+    assert.equal(readRegisteredBrowserProgress(path), 'unknown');
+    rmSync(path);
+    assert.equal(readRegisteredBrowserProgress(directory), 'unknown');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

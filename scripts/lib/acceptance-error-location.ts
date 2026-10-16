@@ -50,6 +50,8 @@ export function acceptanceErrorLocation(location: unknown): string | undefined {
     (column as number) <= 0
   )
     return undefined;
+  if (/(?:^|\/)tests\/e2e\/fixtures\/public-asset-workflow\.ts$/.test(file))
+    return `tests/e2e/fixtures/public-asset-workflow.ts:${line}:${column}`;
   const match = /(?:^|\/)tests\/e2e\/tests\/([^/]+)$/.exec(file);
   if (!match?.[1] || !knownSpecs.has(match[1])) return undefined;
   return `tests/e2e/tests/${match[1]}:${line}:${column}`;

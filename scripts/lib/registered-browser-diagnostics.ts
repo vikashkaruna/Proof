@@ -16,6 +16,60 @@ const matchers = [
   'toEqual',
   'toMatchObject',
 ] as const;
+const progressStages = new Set([
+  'login',
+  'connectors',
+  'estate-selection',
+  'system-selection',
+  'inventory-visual-check',
+  'target-submit',
+  'capture-prepare',
+  'load-saved-targets',
+  'capture-response-loss',
+  'capture-reload',
+  'capture-exact-replay',
+  'discovery',
+  'source-binding',
+  'drishti',
+  'vibhaag',
+  'control-evidence',
+  'human-review',
+  'assessment-submit',
+  'submission-retain',
+]);
+/** Read only a bounded private regular-file tail; never return browser output. */
+export function readRegisteredBrowserProgress(path: string): string {
+  let descriptor: number | undefined;
+  try {
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) return 'unknown';
+    const bytes = Buffer.alloc(65_536);
+    const count = readSync(
+      descriptor,
+      bytes,
+      0,
+      bytes.length,
+      Math.max(0, stat.size - bytes.length),
+    );
+    let progress = 'unknown';
+    // A partial first tail line cannot be a trusted complete marker.
+    const lines = bytes.subarray(0, count).toString('utf8').split(/\r?\n/);
+    if (stat.size > bytes.length) lines.shift();
+    for (const line of lines) {
+      const marker = '[registered-website-stage] ';
+      const offset = line.indexOf(marker);
+      if (offset < 0) continue;
+      const candidate = line.slice(offset + marker.length);
+      if (progressStages.has(candidate)) progress = candidate;
+    }
+    return progress;
+  } catch {
+    return 'unknown';
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
 const record = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -28,6 +82,7 @@ export function registeredBrowserDiagnostics(
     signal: unknown;
     phase: unknown;
     report: 'available' | 'missing' | 'refused';
+    progress?: unknown;
   },
 ) {
   const results: { caseId: string; status: string; location?: string; matcher: string }[] = [];
@@ -97,6 +152,10 @@ export function registeredBrowserDiagnostics(
     version: 1,
     kind: 'sanitized-registered-browser-diagnostics',
     phase,
+    progress:
+      typeof lifecycle.progress === 'string' && progressStages.has(lifecycle.progress)
+        ? lifecycle.progress
+        : 'unknown',
     report: lifecycle.report,
     exitCode,
     signal,
@@ -113,7 +172,7 @@ export function registeredBrowserDiagnostics(
 /** Refuse non-regular files/symlinks and bound the actual read, not just stat size. */
 export function readRegisteredBrowserDiagnostics(
   path: string,
-  lifecycle: { exitCode: unknown; signal: unknown; phase: unknown },
+  lifecycle: { exitCode: unknown; signal: unknown; phase: unknown; progress?: unknown },
 ) {
   let descriptor: number | undefined;
   try {

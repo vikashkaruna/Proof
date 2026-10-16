@@ -8,7 +8,7 @@ import {
   localCustodyEventReceiptSchema,
   encodeLocalCustodyEvent,
 } from '@axiom/types';
-import { LocalKeyPolicy, localKeyReference } from './local-key-policy.js';
+import { LocalKeyPolicy, localKeyReference, type LocalKeyAuthority } from './local-key-policy.js';
 import { dispatchKmsBinding } from './dispatch-key-policy.js';
 import { DispatchRefused } from './dispatch-payload.js';
 const uuid = z
@@ -156,9 +156,13 @@ export function createLocalCustodyAdmissionReader(read: LocalCustodyReadRpc) {
         throw new DispatchRefused();
       if (bound.expectedRunId !== null) uuid.parse(bound.expectedRunId);
       const context = bound.context === null ? null : dispatchKmsBinding(bound.context);
+      const contextFields: unknown =
+        bound.context === null ? null : JSON.parse(bound.context.toString('utf8'));
+      const contextWorkload =
+        contextFields === null ? null : z.array(z.unknown()).parse(contextFields)[5];
       if (
         (bound.operation === 'provision') !== (context === null) ||
-        (context && context.tenant !== bound.tenantId)
+        (context && (context.tenant !== bound.tenantId || contextWorkload !== bound.workloadId))
       )
         throw new DispatchRefused();
       if (pending >= 8) throw new DispatchRefused();
@@ -271,3 +275,83 @@ export function createLocalCustodyAdmissionReader(read: LocalCustodyReadRpc) {
   };
 }
 export { localCustodyPolicySchema };
+
+/** Unmounted durable143 adapter. The read port must hold an independently issued
+ * least-privilege verifier credential. Neither a caller claim nor is_demo alone
+ * establishes authority. Accepted grants retain their actual revoked state. */
+export function createLocalCustodyKeyAuthority(
+  policyText: string,
+  policySha256: string,
+  read: LocalCustodyReadRpc,
+): LocalKeyAuthority {
+  const p = verifyLocalCustodyPolicy(policyText, policySha256);
+  const reader = createLocalCustodyAdmissionReader(read);
+  const value = Object.freeze({ primary: p.keyPolicy.primary });
+  const authority: LocalKeyAuthority = {
+    value,
+    async require(caller, operation, keyRef, deadline, legacyAdmission, context) {
+      try {
+        if (
+          legacyAdmission !== undefined ||
+          caller.role !==
+            ({ provision: 'operator', wrap: 'producer', unwrap: 'controller' } as const)[
+              operation
+            ] ||
+          caller.tenantId !== p.tenantId ||
+          caller.workloadId !== p.targetWorkloadId ||
+          !caller.servicePrincipal ||
+          (operation === 'unwrap' ? !caller.originalRunId : caller.originalRunId !== undefined) ||
+          (operation === 'provision' ? context !== null : !(context instanceof Uint8Array))
+        )
+          throw new DispatchRefused();
+        const row = await reader({
+          tenantId: p.tenantId,
+          policyId: p.policyId,
+          policySha256,
+          keyPolicySha256: p.keyPolicySha256,
+          workloadId: caller.workloadId,
+          servicePrincipal: caller.servicePrincipal,
+          operation,
+          keyRef,
+          context: context ?? null,
+          expectedRunId: caller.originalRunId ?? null,
+          deadline,
+        });
+        if ((operation === 'unwrap') !== (row.kind === 'accepted_job')) throw new DispatchRefused();
+        return Object.freeze({
+          kind: 'durable_local_custody_143' as const,
+          // The original immutable grant may outlive policy revocation. Do not
+          // put mutable policyState, reminders or short read expiry in this pin.
+          commitment: createHash('sha256')
+            .update(
+              JSON.stringify([
+                row.tenantId,
+                row.policyId,
+                row.policySha256,
+                row.keyPolicySha256,
+                row.operation,
+                row.keyRef,
+                row.workloadId,
+                row.servicePrincipal,
+                row.contextSha256,
+                row.kind,
+                row.grant && [
+                  row.grant.jobId,
+                  row.grant.runId,
+                  row.grant.contextSha256,
+                  row.grant.grantSha256,
+                  row.grant.originalExpiresAt,
+                  row.grant.activationEventId,
+                  row.grant.activationEpoch,
+                ],
+              ]),
+            )
+            .digest('hex'),
+        });
+      } catch {
+        throw new DispatchRefused();
+      }
+    },
+  };
+  return Object.freeze(authority);
+}

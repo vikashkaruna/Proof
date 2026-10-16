@@ -39,6 +39,7 @@ sql() {
 sql < tests/database/bootstrap.sql
 # Explicit privileged role bootstrap only for this owned disposable fixture.
 python3 tests/database/lib/preprovision-local-custody-verifier.py --container "$container" --image "$image"
+python3 tests/database/lib/preprovision-local-custody-issuer.py --container "$container" --image "$image"
 
 # Original138/142 assertions exercise their genuine historical NEW-request policy.
 python3 scripts/migrate-database.py --container "$container" --user postgres --database axiom_policy_test --migrations "$phase_dir/migrations143"
@@ -60,18 +61,23 @@ for version in 2 3; do
 done
 python3 scripts/migrate-database.py --container "$container" --user postgres --database axiom_policy_test
 bash tests/database/migration-runner.sh "$container"
+current_version=$(python3 tests/database/lib/report-policy-phases.py current-version --directory "$phase_dir")
 while IFS= read -r suite; do
-  echo "Testing $suite (current144)"
-  if [ "$suite" = controller-credential-issuance.test.sql ]; then
+  echo "Testing $suite (current$current_version)"
+  if [[ "$suite" = controller-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance-demo.test.sql || "$suite" = local-custody-credential-identity.test.sql ]]; then
     # The production migration deliberately grants no issuer membership to
     # postgres. Only this disposable test session assumes the private role.
     docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "tests/database/$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
   elif [ "$suite" = coverage-first-public-reports.test.sql ]; then
     python3 tests/database/lib/report-policy-phases.py current-program --directory "$phase_dir" | sql
+  elif [ "$suite" = local-public-control-assessment-dispatch.test.sql ]; then
+    # SQL-only sessions/MFA + stored owner/founder/operator policy events in the
+    # owned fixture. No real Auth/SPIRE/key-service acceptance is claimed.
+    { python3 tests/database/lib/local-public-control-assessment-dispatch-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
   else
     sql < "tests/database/$suite"
   fi
-  printf '144|%s\n' "$suite" >> "$phase_dir/executed-suites.txt"
+  printf '%s|%s\n' "$current_version" "$suite" >> "$phase_dir/executed-suites.txt"
 done < <(python3 tests/database/lib/report-policy-phases.py current-list --directory "$phase_dir")
 python3 tests/database/lib/report-policy-phases.py verify --directory "$phase_dir"
 python3 tests/database/sudhaar-review-adoption-fixture.py | sql
@@ -105,6 +111,8 @@ bash tests/database/concurrent-public-source-reviews.sh "$container"
 bash tests/database/concurrent-public-control-review-sets.sh "$container"
 bash tests/database/public-control-assessment-sources.sh "$container"
 bash tests/database/concurrent-public-control-review-assets.sh "$container"
+bash tests/database/concurrent-local-custody-issuance.sh "$container" "$image"
+bash tests/database/concurrent-local-public-control-assessment-dispatch.sh "$container" "$image"
 bash tests/database/concurrent-assessment-dispatch.sh "$container"
 bash tests/database/concurrent-assessment-scheduling.sh "$container"
 bash tests/database/concurrent-assessment-retention.sh "$container"

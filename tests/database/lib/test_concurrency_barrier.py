@@ -185,5 +185,83 @@ class Review141PhaseTests(unittest.TestCase):
             BARRIER.validate_review141_phase(changed)
 
 
+class Custody145ContractTests(unittest.TestCase):
+    def proof(self):
+        return {
+            "phase": "credential",
+            "holder": 101,
+            "contender": 102,
+            "blocked_by_holder": True,
+            "holder_phase": True,
+            "contender_phase": True,
+            "locks": [
+                {
+                    "pid": pid,
+                    "locktype": "advisory",
+                    "relation": None,
+                    "classid": "12",
+                    "objid": "34",
+                    "objsubid": 1,
+                    "mode": "ExclusiveLock",
+                    "granted": pid == 101,
+                    "transactionid": None,
+                }
+                for pid in (101, 102)
+            ],
+        }
+
+    def test_exact_tenant_and_credential_keys_and_safe_projection(self):
+        for phase, expected in [
+            ("tenant", "hashtextextended('99143000-0000-4000-8000-000000000011',47)"),
+            (
+                "credential",
+                "hashtextextended('axiom.local-custody.issue.99143000-0000-4000-8000-000000000011',0)",
+            ),
+        ]:
+            query = BARRIER.custody145_probe_query(
+                "custody145:" + phase + ":99143000-0000-4000-8000-000000000011",
+                101,
+                102,
+            )
+            self.assertIn(expected, query)
+            self.assertIn("pg_blocking_pids(102)", query)
+            self.assertIn("not granted", query)
+            self.assertIn("objsubid=1", query)
+            self.assertNotIn("pg_stat_activity.query", query)
+
+    def test_contract_rejects_arbitrary_names_nil_uuid_and_pid(self):
+        for value in [
+            "custody145:other:99143000-0000-4000-8000-000000000011",
+            "custody145:tenant:00000000-0000-0000-0000-000000000000",
+            "custody145:tenant:99143000-0000-4000-8000-000000000011';drop role x",
+            "custody145:credential:ABC",
+        ]:
+            with self.assertRaises(BARRIER.BarrierFailure):
+                BARRIER.custody145_probe_query(value, 101, 102)
+        with self.assertRaises(BARRIER.BarrierFailure):
+            BARRIER.custody145_probe_query(
+                "custody145:tenant:99143000-0000-4000-8000-000000000011", True, 102
+            )
+        self.assertIsNone(
+            BARRIER.custody145_probe_query("review141:tenant:unchanged", 101, 102)
+        )
+
+    def test_requires_exact_wait_holder_and_safe_lock_metadata(self):
+        self.assertEqual(BARRIER.validate_custody145_phase(self.proof()), self.proof())
+        for key in ["blocked_by_holder", "holder_phase", "contender_phase"]:
+            value = self.proof()
+            value[key] = False
+            with self.assertRaises(BARRIER.BarrierFailure):
+                BARRIER.validate_custody145_phase(value)
+        for update in [
+            {"query": "private"},
+            {"holder": 102},
+            {"locks": [{"query": "private"}]},
+            {"locks": []},
+        ]:
+            with self.assertRaises(BARRIER.BarrierFailure):
+                BARRIER.validate_custody145_phase({**self.proof(), **update})
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,13 +22,14 @@ vi.mock('@axiom/supabase', () => ({
 }));
 
 const verify = vi.fn(async () => ({ intact: true }));
+const query = vi.fn(async (): Promise<unknown[]> => []);
 
 async function app(role: UserRole) {
   const { v1Routes } = await import('./v1.js');
   const routes = v1Routes({
     approvalEngine: {} as never,
     killSwitch: { isActive: async () => false } as never,
-    ledger: { verify } as never,
+    ledger: { verify, query } as never,
     mfa: {} as never,
     realtime: {} as never,
   });
@@ -46,6 +47,8 @@ async function app(role: UserRole) {
 beforeEach(() => {
   vi.resetModules();
   verify.mockClear();
+  query.mockReset();
+  query.mockResolvedValue([]);
   db.service = createFakeDb({});
 });
 
@@ -69,3 +72,30 @@ describe('ledger verification capability', () => {
     },
   );
 });
+
+it.each(['custody.local_credential_issued', 'custody.local_credential_revoked'])(
+  'returns %s to a tenant reader as exact system history without issuing authority',
+  async (actionType) => {
+    const rows = [
+      {
+        id: '145',
+        tenant_id: TENANT,
+        actor_type: 'system',
+        actor_id: 'axiom-local-custody-issuer',
+        action_type: actionType,
+        target_ref: USER,
+        input_hash: 'a'.repeat(64),
+        output_hash: 'b'.repeat(64),
+        entry_hash: 'c'.repeat(64),
+        approval_token_id: null,
+        approver_id: null,
+      },
+    ];
+    query.mockResolvedValueOnce(rows);
+    const response = await (await app(UserRole.VIEWER)).request('/v1/ledger?limit=25');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ entries: rows, count: 1 });
+    expect(query).toHaveBeenCalledWith({ tenantId: TENANT, limit: 25 });
+    expect(verify).not.toHaveBeenCalled();
+  },
+);

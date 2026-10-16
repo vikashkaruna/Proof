@@ -110,3 +110,36 @@ d08e25ebd5eda00fe15ad4fd0c25510190266b53:docs/help/maintenance/source-index.json
 # non-secret synthetic UUIDs/mode/key references. Exact historical findings only.
 fdbc2bcb1a7e674efe83b457f2805f34acfb7172:tests/database/local-custody-admission.test.sql:generic-api-key:139
 fdbc2bcb1a7e674efe83b457f2805f34acfb7172:tests/database/local-custody-admission.test.sql:generic-api-key:15
+
+# Public synthetic custody-policy SHA-256 vectors, independently rederived from
+# fixture UUIDs/mode/key references. Exact historical findings only; no credential.
+c0a46c880255eb731483657834f30444690f3a9c:tests/database/local-custody-credential-issuance-demo.test.sql:generic-api-key:30
+c0a46c880255eb731483657834f30444690f3a9c:tests/database/local-custody-credential-issuance.test.sql:generic-api-key:29
+
+# Public synthetic identity-policy SHA-256 vector, independently rederived from
+# fixture UUIDs/mode/key references. Exact historical finding only; no credential.
+ec0f06167de0fb6940dab182ac1c090aafb1eb34:tests/database/local-custody-credential-identity.test.sql:generic-api-key:29
+
+# Reviewed 2026-10-16: seven exact historical non-secret findings from full history.
+# No rule/path-wide exclusions; future commits with the same text remain scanned.
+
+# Public SHA-256 pin of the reviewed upstream Semgrep private-key detection rule.
+16abccdc9fb3dfd41f01fc19e93cec9207f55e67:.github/semgrep/policy.json:generic-api-key:15
+
+# Named synthetic storage secret used only by the disposable backup/restore test.
+00643749c720a71b46509a0c8e0838630a434857:tests/scripts/test-backup-restore.sh:generic-api-key:93
+
+# Same named synthetic storage secret in the recovery-evidence mock fixture.
+00643749c720a71b46509a0c8e0838630a434857:tests/scripts/test_recovery_evidence.py:generic-api-key:198
+
+# Python function signature/type annotation; the fixture generates its Ed25519 key dynamically.
+420d3a4a38848aad36abdb32f453535605d6dfd5:services/agent-runtime/tests/test_offline_license.py:generic-api-key:16
+
+# Named public approval-signing test material in the Pramaan FakeLedger fixture.
+5a5fc8ce4c14d4beb635ae21a2423b7950c6866e:services/agent-runtime/tests/test_pramaan.py:generic-api-key:65
+
+# Named public signing fixture in the isolated migration-DSN test.
+5a5fc8ce4c14d4beb635ae21a2423b7950c6866e:tests/database/migration-dsn.sh:generic-api-key:125
+
+# Named public signing fixture in owned archive/parity harnesses, not production configuration.
+5a5fc8ce4c14d4beb635ae21a2423b7950c6866e:tests/e2e/tests/approval-archive-provider.spec.ts:generic-api-key:17
