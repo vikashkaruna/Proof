@@ -149,14 +149,17 @@ insert into local147_fixture.policy_saved select 'activate',local147_fixture.pol
 create table local147_fixture.clock(deadline timestamptz not null);
 insert into local147_fixture.clock values(clock_timestamp()+interval '10 minutes');
 create function local147_fixture.enqueue(n int,actor int default 3,changes jsonb default '{}') returns jsonb language plpgsql as $$
-declare r jsonb;s jsonb;input_text text;snap jsonb;outcome jsonb;p jsonb:=local147_fixture.policy();policy_sha text;begin
+declare r jsonb;s jsonb;input_text text;snap jsonb;outcome jsonb;p jsonb:=local147_fixture.policy();policy_sha text;proof_sha text;begin
  select value into r from local147_fixture.review;
  snap:=(r->>'snapshot_text')::jsonb;
  input_text:=controller_security.canonical_questionnaire_json(jsonb_build_object('tenant_id',local147_fixture.id(31),'engagement_id',local147_fixture.id(41),'library_version','0.1.1','answers',snap->'normalizedAnswers','sdf_self_attested',snap#>'{request,applicability,sdfSelfAttested}','processes_children',snap#>'{request,applicability,processesChildren}','processes_health',snap#>'{request,applicability,processesHealth}'));
  s:=jsonb_build_object('inputSha256',encode(sha256(convert_to(input_text,'UTF8')),'hex'));
+ -- Stable full operation UUID makes distinct synthetic task proofs unique;
+ -- exact same-operation retries retain the original proof commitment.
+ proof_sha:=encode(sha256(convert_to('axiom.local147.task-proof:'||local147_fixture.id(n)::text,'UTF8')),'hex');
  policy_sha:=encode(sha256(convert_to(controller_security.canonical_questionnaire_json(p),'UTF8')),'hex');
  set local role human_action_writer;
- outcome:=public.enqueue_local_public_control_assessment_dispatch(local147_fixture.id(n),local147_fixture.id(31),local147_fixture.id(actor),local147_fixture.id(81),(r->>'estate_id')::uuid,local147_fixture.id(41),local147_fixture.id(n),coalesce(changes->>'inputHash',s->>'inputSha256'),repeat('c',64),(select deadline from local147_fixture.clock),coalesce(changes->>'keyRef',p#>>'{keyPolicy,primary}'),decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),local147_fixture.id(91),coalesce(changes->>'policySha256',policy_sha),p->>'keyPolicySha256',(select (v->>'eventId')::uuid from local147_fixture.policy_saved where kind='activate'),coalesce((changes->>'activationEpoch')::bigint,1),repeat('b',64),(r->>'id')::uuid,coalesce(changes->>'reviewRequestSha256',r->>'request_sha256'),coalesce(changes->>'reviewSnapshotSha256',r->>'snapshot_sha256'));
+ outcome:=public.enqueue_local_public_control_assessment_dispatch(local147_fixture.id(n),local147_fixture.id(31),local147_fixture.id(actor),local147_fixture.id(81),(r->>'estate_id')::uuid,local147_fixture.id(41),local147_fixture.id(n),coalesce(changes->>'inputHash',s->>'inputSha256'),proof_sha,(select deadline from local147_fixture.clock),coalesce(changes->>'keyRef',p#>>'{keyPolicy,primary}'),decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),local147_fixture.id(91),coalesce(changes->>'policySha256',policy_sha),p->>'keyPolicySha256',(select (v->>'eventId')::uuid from local147_fixture.policy_saved where kind='activate'),coalesce((changes->>'activationEpoch')::bigint,1),repeat('b',64),(r->>'id')::uuid,coalesce(changes->>'reviewRequestSha256',r->>'request_sha256'),coalesce(changes->>'reviewSnapshotSha256',r->>'snapshot_sha256'));
  reset role;return outcome;
 exception when others then reset role;raise;end $$;
 grant select on local147_fixture.review,local147_fixture.clock,local147_fixture.policy_saved to human_action_writer;
