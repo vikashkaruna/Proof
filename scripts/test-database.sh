@@ -64,7 +64,7 @@ bash tests/database/migration-runner.sh "$container"
 current_version=$(python3 tests/database/lib/report-policy-phases.py current-version --directory "$phase_dir")
 while IFS= read -r suite; do
   echo "Testing $suite (current$current_version)"
-  if [[ "$suite" = controller-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance-demo.test.sql ]]; then
+  if [[ "$suite" = controller-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance-demo.test.sql || "$suite" = local-custody-credential-identity.test.sql ]]; then
     # The production migration deliberately grants no issuer membership to
     # postgres. Only this disposable test session assumes the private role.
     docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "tests/database/$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
