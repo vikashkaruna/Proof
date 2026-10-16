@@ -54,7 +54,7 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { readFileSync, mkdirSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { mkdtemp, realpath, chmod, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, delimiter } from 'node:path';
 import { createRemoteAssessmentServer } from '../services/bff/src/workloads/assessment-remote.js';
 import { GoogleSchedulerIdentity } from '../services/bff/src/workloads/scheduler-identity.js';
 import { startAssessmentControllerSocket } from '../services/bff/src/workloads/assessment-socket.js';
@@ -1047,7 +1047,11 @@ except Exception as error:
           cwd: directory,
           env: {
             PATH: process.env.PATH,
-            PYTHONPATH: join(process.cwd(), 'services/agent-runtime/src'),
+            PYTHONPATH: [
+              join(process.cwd(), 'services/agent-runtime/src'),
+              join(process.cwd(), 'packages/offline-license-python'),
+              join(process.cwd(), 'packages/model-accounting-python'),
+            ].join(delimiter),
             // Test environment permits loopback; configured scoped writer still uses real SQL.
             ENVIRONMENT: 'test',
             LOG_LEVEL: 'error',

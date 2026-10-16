@@ -2,9 +2,17 @@ import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, chmodSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  chmodSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+  readFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   registeredBrowserRequested,
   registeredBrowserConfigSchema,
@@ -283,4 +291,27 @@ print('cdp-pipes-passed')
   });
   assert.equal(result.status, 0, 'owned CDP exec regression failed');
   assert.equal(result.stdout.trim(), 'cdp-pipes-passed');
+});
+
+test('actual runtime search paths match Docker and pytest local-package custody without dropping license or accounting modules', () => {
+  const root = process.cwd();
+  const source = readFileSync(join(root, 'scripts/verify-workload-assessment.ts'), 'utf8');
+  const expression = /PYTHONPATH:\s*\[([\s\S]+?)\]\.join\(delimiter\)/.exec(source);
+  assert(expression, 'runtime must compose all shared package roots using the platform delimiter');
+  const declared = [...expression[1]!.matchAll(/join\(process\.cwd\(\), '([^']+)'\)/g)].map(
+    (match) => join(root, match[1]!),
+  );
+  const docker = readFileSync(join(root, 'infra/docker/Dockerfile.agent-runtime'), 'utf8');
+  const expected = /PYTHONPATH="([^"]+)"/
+    .exec(docker)![1]!
+    .split(':')
+    .map((path) => join(root, path.replace(/^\/app\//, '')));
+  const project = readFileSync(join(root, 'services/agent-runtime/pyproject.toml'), 'utf8');
+  const configured = JSON.parse(/pythonpath\s*=\s*(\[[^\n]+\])/.exec(project)![1]!) as string[];
+  assert.deepEqual(declared, expected);
+  assert.deepEqual(
+    declared,
+    configured.map((path) => resolve(root, 'services/agent-runtime', path)),
+  );
+  assert.equal(new Set(declared).size, declared.length);
 });
