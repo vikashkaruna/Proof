@@ -149,23 +149,25 @@ insert into local147_fixture.policy_saved select 'activate',local147_fixture.pol
 create table local147_fixture.clock(deadline timestamptz not null);
 insert into local147_fixture.clock values(clock_timestamp()+interval '10 minutes');
 create function local147_fixture.enqueue(n int,actor int default 3,changes jsonb default '{}') returns jsonb language plpgsql as $$
-declare r jsonb;s jsonb;input_text text;snap jsonb;outcome jsonb;p jsonb:=local147_fixture.policy();begin
+declare r jsonb;s jsonb;input_text text;snap jsonb;outcome jsonb;p jsonb:=local147_fixture.policy();policy_sha text;begin
  select value into r from local147_fixture.review;
  snap:=(r->>'snapshot_text')::jsonb;
  input_text:=controller_security.canonical_questionnaire_json(jsonb_build_object('tenant_id',local147_fixture.id(31),'engagement_id',local147_fixture.id(41),'library_version','0.1.1','answers',snap->'normalizedAnswers','sdf_self_attested',snap#>'{request,applicability,sdfSelfAttested}','processes_children',snap#>'{request,applicability,processesChildren}','processes_health',snap#>'{request,applicability,processesHealth}'));
  s:=jsonb_build_object('inputSha256',encode(sha256(convert_to(input_text,'UTF8')),'hex'));
+ policy_sha:=encode(sha256(convert_to(controller_security.canonical_questionnaire_json(p),'UTF8')),'hex');
  set local role human_action_writer;
- outcome:=public.enqueue_local_public_control_assessment_dispatch(local147_fixture.id(n),local147_fixture.id(31),local147_fixture.id(actor),local147_fixture.id(81),(r->>'estate_id')::uuid,local147_fixture.id(41),local147_fixture.id(n),coalesce(changes->>'inputHash',s->>'inputSha256'),repeat('c',64),(select deadline from local147_fixture.clock),coalesce(changes->>'keyRef',p#>>'{keyPolicy,primary}'),decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),local147_fixture.id(91),coalesce(changes->>'policySha256',encode(sha256(convert_to(controller_security.canonical_questionnaire_json(p),'UTF8')),'hex')),p->>'keyPolicySha256',(select (v->>'eventId')::uuid from local147_fixture.policy_saved where kind='activate'),coalesce((changes->>'activationEpoch')::bigint,1),repeat('b',64),(r->>'id')::uuid,coalesce(changes->>'reviewRequestSha256',r->>'request_sha256'),coalesce(changes->>'reviewSnapshotSha256',r->>'snapshot_sha256'));
+ outcome:=public.enqueue_local_public_control_assessment_dispatch(local147_fixture.id(n),local147_fixture.id(31),local147_fixture.id(actor),local147_fixture.id(81),(r->>'estate_id')::uuid,local147_fixture.id(41),local147_fixture.id(n),coalesce(changes->>'inputHash',s->>'inputSha256'),repeat('c',64),(select deadline from local147_fixture.clock),coalesce(changes->>'keyRef',p#>>'{keyPolicy,primary}'),decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),local147_fixture.id(91),coalesce(changes->>'policySha256',policy_sha),p->>'keyPolicySha256',(select (v->>'eventId')::uuid from local147_fixture.policy_saved where kind='activate'),coalesce((changes->>'activationEpoch')::bigint,1),repeat('b',64),(r->>'id')::uuid,coalesce(changes->>'reviewRequestSha256',r->>'request_sha256'),coalesce(changes->>'reviewSnapshotSha256',r->>'snapshot_sha256'));
  reset role;return outcome;
 exception when others then reset role;raise;end $$;
 grant select on local147_fixture.review,local147_fixture.clock,local147_fixture.policy_saved to human_action_writer;
 create function local147_fixture.revoke_policy() returns jsonb language sql as $$select local147_fixture.policy_write(local147_fixture.policy_request(154,'revoke',(select (v->>'eventId')::uuid from local147_fixture.policy_saved where kind='activate')),3)$$;
 insert into controller_security.credentials(id,tenant_id,expires_at) values(local147_fixture.id(181),local147_fixture.id(31),clock_timestamp()+interval '1 hour');
 create function local147_fixture.claim(n int,changes jsonb default '{}') returns jsonb language plpgsql as $$
-declare p jsonb:=local147_fixture.policy();v jsonb;begin
+declare p jsonb:=local147_fixture.policy();v jsonb;policy_sha text;begin
+ policy_sha:=encode(sha256(convert_to(controller_security.canonical_questionnaire_json(p),'UTF8')),'hex');
  perform set_config('request.jwt.claims',jsonb_build_object('role','axiom_assessment_controller','sub',coalesce((changes->>'credentialId')::uuid,local147_fixture.id(181)),'tenant_id',coalesce(changes->>'tenantId',local147_fixture.id(31)::text),'iat',floor(extract(epoch from clock_timestamp()))::bigint,'exp',coalesce((changes->>'exp')::bigint,floor(extract(epoch from clock_timestamp()))::bigint+120))::text,true);
  set local role axiom_assessment_controller;
- v:=public.claim_local_assessment_dispatch(local147_fixture.id(31),local147_fixture.id(n),local147_fixture.id(91),coalesce(changes->>'policySha256',encode(sha256(convert_to(controller_security.canonical_questionnaire_json(p),'UTF8')),'hex')),p->>'keyPolicySha256');reset role;return v;
+ v:=public.claim_local_assessment_dispatch(local147_fixture.id(31),local147_fixture.id(n),local147_fixture.id(91),coalesce(changes->>'policySha256',policy_sha),p->>'keyPolicySha256');reset role;return v;
 exception when others then reset role;raise;end $$;
 set constraints all immediate;set constraints all deferred;
 """
