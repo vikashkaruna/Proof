@@ -1,6 +1,8 @@
 import {
   readRegisteredBrowserDiagnostics,
   readRegisteredBrowserProgress,
+  readRegisteredResponseProbes,
+  registeredResponseProbePath,
   assertRegisteredDiagnosticDestinationAbsent,
 } from './lib/registered-browser-diagnostics.js';
 import {
@@ -137,6 +139,10 @@ async function main() {
     assertRegisteredDiagnosticDestinationAbsent(
       '.axiom-runtime/workload-assessment/registered-browser-diagnostics.json',
     );
+    for (const probePhase of ['target-submit', 'saved-targets'] as const)
+      assertRegisteredDiagnosticDestinationAbsent(
+        registeredResponseProbePath(registeredBrowserDirectory(process.cwd()), probePhase),
+      );
     phase = 'setup';
   }
   const browserNonce = randomBytes(16).toString('hex');
@@ -2705,7 +2711,10 @@ main()
         mkdirSync('.axiom-runtime/workload-assessment', { recursive: true, mode: 0o700 });
         writeFileSync(
           '.axiom-runtime/workload-assessment/registered-browser-diagnostics.json',
-          JSON.stringify(diagnostic) + '\n',
+          JSON.stringify({
+            ...diagnostic,
+            responseProbes: readRegisteredResponseProbes(registeredDiagnosticDirectory),
+          }) + '\n',
           { flag: 'wx', mode: 0o600 },
         );
         process.stderr.write(`Registered browser diagnostic: ${JSON.stringify(diagnostic)}\n`);

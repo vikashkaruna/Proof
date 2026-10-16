@@ -1,5 +1,19 @@
+import { join } from 'node:path';
+import {
+  registeredResponseProbeSchema,
+  type RegisteredResponseProbe,
+} from './registered-response-probe.js';
 /** Safe CI evidence only. Raw browser reports remain private. */
-import { constants, openSync, fstatSync, readSync, closeSync, lstatSync } from 'node:fs';
+import {
+  constants,
+  openSync,
+  fstatSync,
+  readSync,
+  closeSync,
+  lstatSync,
+  writeFileSync,
+  fsyncSync,
+} from 'node:fs';
 import { acceptanceErrorLocation } from './acceptance-error-location.js';
 const title =
   'finalized source, released board PDF, and source-bound Pramaan dossier use exact retained versions';
@@ -145,15 +159,28 @@ export function registeredBrowserDiagnostics(
           const location = errors
             .map((error) => acceptanceErrorLocation(record(error).location))
             .find(Boolean);
-          // Match only an exact known assertion token; never return message text.
+          // A matcher token in a Zod/codeframe message is not an assertion.
           const matcher =
-            matchers.find((name) =>
-              errors.some(
-                (error) =>
-                  typeof record(error).message === 'string' &&
-                  new RegExp(`\\b${name}\\(`).test(record(error).message as string),
-              ),
-            ) ?? 'unknown';
+            errors
+              .map((error) => {
+                const details = record(error);
+                const proven = record(details.matcherResult).name;
+                if (typeof proven === 'string' && matchers.some((name) => name === proven))
+                  return proven;
+                const header =
+                  typeof details.message === 'string'
+                    ? details.message
+                        .slice(0, 2048)
+                        .split(/\r?\n/, 1)[0]!
+                        .replace(/\u001b\[[0-9;]*m/g, '')
+                    : '';
+                return matchers.find((name) =>
+                  new RegExp(`^(?:Error: )?expect\\([^\\r\\n]*\\)\\.(?:not\\.)?${name}\\(`).test(
+                    header,
+                  ),
+                );
+              })
+              .find(Boolean) ?? 'unknown';
           results.push({
             caseId: 'registered-source-board-auditor-recovery',
             status:
@@ -262,4 +289,90 @@ export function assertRegisteredDiagnosticDestinationAbsent(path: string) {
   throw new Error(
     'registered browser diagnostic target exists; archive prior owned evidence before a fresh attempt',
   );
+}
+
+const probePhases = ['target-submit', 'saved-targets'] as const;
+export function registeredResponseProbePath(
+  directory: string,
+  phase: RegisteredResponseProbe['phase'],
+) {
+  return join(directory, `registered-response-probe-${phase}.private.json`);
+}
+/** Exclusive bounded private evidence; a diagnostic failure never changes the original test error. */
+export function writeRegisteredResponseProbe(directory: string, value: RegisteredResponseProbe) {
+  const probe = registeredResponseProbeSchema.parse(value);
+  const parent = lstatSync(directory);
+  if (
+    !parent.isDirectory() ||
+    parent.isSymbolicLink() ||
+    parent.uid !== process.getuid?.() ||
+    (parent.mode & 0o077) !== 0
+  )
+    throw Error('private probe directory refused');
+  const text = JSON.stringify(probe) + '\n';
+  if (Buffer.byteLength(text) > 8192) throw Error('private probe bound refused');
+  const fd = openSync(
+    registeredResponseProbePath(directory, probe.phase),
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+    0o600,
+  );
+  try {
+    writeFileSync(fd, text);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  const dirfd = openSync(
+    directory,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    fsyncSync(dirfd);
+  } finally {
+    closeSync(dirfd);
+  }
+}
+/** Only strict known fields can enter the public artifact, never a raw error/report. */
+export function readRegisteredResponseProbes(directory: string) {
+  return probePhases.map((phase) => {
+    let fd: number | undefined;
+    try {
+      fd = openSync(
+        registeredResponseProbePath(directory, phase),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      const info = fstatSync(fd);
+      if (
+        !info.isFile() ||
+        info.nlink !== 1 ||
+        info.uid !== process.getuid?.() ||
+        (info.mode & 0o777) !== 0o600 ||
+        info.size > 8192
+      )
+        throw Error('private probe refused');
+      const bytes = Buffer.alloc(8193);
+      let count = 0,
+        size: number;
+      do {
+        size = readSync(fd, bytes, count, bytes.length - count, null);
+        count += size;
+      } while (size && count < bytes.length);
+      if (count > 8192) throw Error('private probe refused');
+      const probe = registeredResponseProbeSchema.parse(
+        JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, count))),
+      );
+      if (probe.phase !== phase) throw Error('private probe phase refused');
+      return { phase, state: 'available' as const, probe };
+    } catch (error) {
+      return {
+        phase,
+        state:
+          error instanceof Error && 'code' in error && error.code === 'ENOENT'
+            ? ('missing' as const)
+            : ('refused' as const),
+      };
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  });
 }
