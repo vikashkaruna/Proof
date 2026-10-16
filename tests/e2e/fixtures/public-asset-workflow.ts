@@ -13,6 +13,7 @@ import {
 } from '../../../scripts/lib/acceptance-public-asset-browser';
 import {
   publicWebsiteAssetOperationSchema,
+  publicWebsiteAssetSelectionPageSchema,
   recordedPublicSourceBindingSchema,
   publicAgentObservationSchema,
   parsePublicWebsiteAssetSnapshotText,
@@ -92,6 +93,38 @@ export async function registeredWebsiteSourceInBrowser(
 
   process.stdout.write('[registered-website-stage] capture-prepare\n');
   await registeredCombobox(console, 'Operation').selectOption('capture', { timeout: 15_000 });
+  process.stdout.write('[registered-website-stage] load-saved-targets\n');
+  const targetsResponse = page.waitForResponse(
+    (r) => {
+      const url = new URL(r.url());
+      return (
+        url.pathname === '/api/bff/v1/public-website-assets/selection' &&
+        r.request().method() === 'GET' &&
+        url.searchParams.get('kind') === 'targets' &&
+        url.searchParams.get('estateId') === config.estateId &&
+        url.searchParams.get('systemId') === config.systemId
+      );
+    },
+    { timeout: 15_000 },
+  );
+  await console
+    .getByRole('button', { name: 'Load saved targets', exact: true })
+    .click({ timeout: 15_000 });
+  const loadedTargets = await targetsResponse;
+  expect(loadedTargets.status()).toBe(200);
+  expect(loadedTargets.request().headers()['x-tenant-id']).toBe(config.tenantId);
+  const targetsPage = publicWebsiteAssetSelectionPageSchema.parse(
+    (await loadedTargets.json()).data,
+  );
+  if (targetsPage.kind !== 'targets') throw new Error('Owned target selection refused');
+  expect(targetsPage.tenantId).toBe(config.tenantId);
+  expect(targetsPage.actorId).toBe(config.actorId);
+  expect(targetsPage.estateId).toBe(config.estateId);
+  expect(targetsPage.systemId).toBe(config.systemId);
+  const selectedTarget = targetsPage.rows.find((row) => row.id === targetSnapshot.id);
+  expect(selectedTarget?.snapshotSha256).toBe(target.snapshotSha256);
+  expect(selectedTarget?.withdrawn).toBe(false);
+  expect(selectedTarget?.inventoryCurrent).toBe(true);
   await registeredCombobox(console, 'Registered public target').selectOption(targetSnapshot.id, {
     timeout: 15_000,
   });
