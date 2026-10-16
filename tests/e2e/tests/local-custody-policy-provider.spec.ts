@@ -67,9 +67,18 @@ async function signIn(person: Person) {
   await person.context.addCookies([tenantCookie(tenant.slug)]);
   const unauthenticated = await person.page.request.get(
     '/api/bff/v1/local-custody-policy/context',
-    { headers: { 'X-Tenant-Id': tenant.id, 'X-Expected-Actor-Id': person.who.id } },
+    {
+      headers: { 'X-Tenant-Id': tenant.id, 'X-Expected-Actor-Id': person.who.id },
+      maxRedirects: 0,
+    },
   );
-  expect(unauthenticated.status()).toBe(401);
+  // The web middleware redirects unauthenticated requests before the API bridge.
+  // Inspect that refusal directly instead of following it to the public login HTML.
+  expect(unauthenticated.status()).toBe(307);
+  const login = new URL(unauthenticated.headers()['location'] ?? '', webOrigin);
+  expect(login.origin).toBe(new URL(webOrigin).origin);
+  expect(login.pathname).toBe('/login');
+  expect(login.searchParams.get('redirect')).toBe('/api/bff/v1/local-custody-policy/context');
   await signInAs(person.page, person.who.email, person.who.password);
   const secret = person.who.totpSecret;
   if (!secret) throw Error('Enrolled test factor required');
