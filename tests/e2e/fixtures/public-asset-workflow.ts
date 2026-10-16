@@ -2,6 +2,7 @@
  * and normal Auth/MFA; only public network bytes and KMS/storage are fixtures. */
 import { expect, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { signInAs, state } from '../fixtures';
 import { tenantCookie } from '../target';
@@ -28,23 +29,50 @@ export async function registeredWebsiteSourceInBrowser(
   directory: string,
 ) {
   expect(state.supabaseUrl.replace(/\/$/, '')).toBe(config.apiOrigin);
+  process.stdout.write('[registered-website-stage] login\n');
   await signInAs(page, config.email, config.password, config.loginSecret);
   await page.context().addCookies([tenantCookie(config.tenantSlug)]);
-  await page.goto('/connectors');
+  process.stdout.write('[registered-website-stage] connectors\n');
+  await page.goto('/connectors', { timeout: 15_000 });
   const console = page.getByRole('region', { name: 'Registered public website targets' });
   await expect(console).toBeVisible();
-  await console.getByLabel('Estate', { exact: true }).selectOption(config.estateId);
-  await console.getByLabel('System', { exact: true }).selectOption(config.systemId);
-  await console.getByLabel('Public HTTPS website URL').fill(config.publicUrl);
+  process.stdout.write('[registered-website-stage] estate-selection\n');
+  await console
+    .getByLabel('Estate', { exact: true })
+    .selectOption(config.estateId, { timeout: 15_000 });
+  process.stdout.write('[registered-website-stage] system-selection\n');
+  await console
+    .getByLabel('System', { exact: true })
+    .selectOption(config.systemId, { timeout: 15_000 });
+  await console.getByLabel('Public HTTPS website URL').fill(config.publicUrl, { timeout: 15_000 });
   await console
     .getByLabel('I reviewed this selected context and authorize this exact metadata operation.')
-    .check();
+    .check({ timeout: 15_000 });
+  process.stdout.write('[registered-website-stage] inventory-visual-check\n');
+  await console.screenshot({
+    path: join(directory, 'website-console-desktop.private.png'),
+    timeout: 15_000,
+  });
+  const originalViewport = page.viewportSize();
+  if (originalViewport) {
+    try {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await console.screenshot({
+        path: join(directory, 'website-console-mobile.private.png'),
+        timeout: 15_000,
+      });
+    } finally {
+      await page.setViewportSize(originalViewport);
+    }
+  }
+  process.stdout.write('[registered-website-stage] target-submit\n');
   const registered = page.waitForResponse(
     (r) => new URL(r.url()).pathname === operationPath && r.request().method() === 'POST',
+    { timeout: 15_000 },
   );
   await console
     .getByRole('button', { name: 'Record selected website operation', exact: true })
-    .click();
+    .click({ timeout: 15_000 });
   const registration = await registered;
   expect(registration.status()).toBe(201);
   const target = publicWebsiteAssetOperationSchema.parse((await registration.json()).data);
@@ -62,18 +90,22 @@ export async function registeredWebsiteSourceInBrowser(
   expect([403, 404]).toContain(foreign.status());
   expect((await foreign.text()).includes(target.snapshotText)).toBe(false);
 
-  await console.getByLabel('Operation', { exact: true }).selectOption('capture');
+  process.stdout.write('[registered-website-stage] capture-prepare\n');
+  await console
+    .getByLabel('Operation', { exact: true })
+    .selectOption('capture', { timeout: 15_000 });
   await console
     .getByLabel('Registered public target', { exact: true })
-    .selectOption(targetSnapshot.id);
+    .selectOption(targetSnapshot.id, { timeout: 15_000 });
   await console
     .getByLabel('I reviewed this selected context and authorize this exact metadata operation.')
-    .check();
+    .check({ timeout: 15_000 });
   let committed: z.infer<typeof publicWebsiteAssetOperationSchema> | undefined;
   let firstBody = '';
   let firstHeaders: Record<string, string> = {};
   // Lose ONLY the browser response after the real server has committed the
   // source and association. No fabricated receipt, intercepted SQL or Auth.
+  process.stdout.write('[registered-website-stage] capture-response-loss\n');
   await page.route('**' + operationPath, async (route) => {
     if (route.request().method() !== 'POST') return route.continue();
     firstBody = route.request().postData() ?? '';
@@ -87,7 +119,7 @@ export async function registeredWebsiteSourceInBrowser(
   });
   await console
     .getByRole('button', { name: 'Record selected website operation', exact: true })
-    .click();
+    .click({ timeout: 15_000 });
   const retained = console.getByRole('article');
   await expect(retained).toHaveCount(1);
   await expect(retained).toContainText('unconfirmed');
@@ -114,7 +146,8 @@ export async function registeredWebsiteSourceInBrowser(
       automatic++;
   };
   page.on('request', count);
-  await page.reload();
+  process.stdout.write('[registered-website-stage] capture-reload\n');
+  await page.reload({ timeout: 15_000 });
   const restored = page.getByRole('article', { name: /^Retained website operation / });
   await expect(restored).toHaveCount(1);
   await expect(restored).toContainText(firstBody);
@@ -124,11 +157,15 @@ export async function registeredWebsiteSourceInBrowser(
   expect(automatic).toBe(0);
   await restored
     .getByLabel('I reviewed this exact retained request and authorize its retry.')
-    .check();
+    .check({ timeout: 15_000 });
+  process.stdout.write('[registered-website-stage] capture-exact-replay\n');
   const replayResponse = page.waitForResponse(
     (r) => new URL(r.url()).pathname === operationPath && r.request().method() === 'POST',
+    { timeout: 15_000 },
   );
-  await restored.getByRole('button', { name: 'Retry exact retained request', exact: true }).click();
+  await restored
+    .getByRole('button', { name: 'Retry exact retained request', exact: true })
+    .click({ timeout: 15_000 });
   const replay = await replayResponse;
   expect(replay.status()).toBe(200);
   expect(replay.request().postData()).toBe(firstBody);
@@ -147,32 +184,47 @@ export async function registeredWebsiteSourceInBrowser(
     throw new Error('Owned association receipt refused');
   expect(associationSnapshot.targetId).toBe(targetSnapshot.id);
   expect(associationSnapshot.targetSha256).toBe(target.snapshotSha256);
-  await page.getByRole('link', { name: 'Continue this saved check in Discovery' }).click();
-  await page.getByLabel('Engagement', { exact: true }).selectOption(config.engagementId);
+  process.stdout.write('[registered-website-stage] discovery\n');
+  await page
+    .getByRole('link', { name: 'Continue this saved check in Discovery' })
+    .click({ timeout: 15_000 });
+  await page
+    .getByLabel('Engagement', { exact: true })
+    .selectOption(config.engagementId, { timeout: 15_000 });
   await expect(page.getByLabel('Saved public website check', { exact: true })).toHaveValue(
     associationSnapshot.checkId,
   );
   const workflow = page.getByRole('region', { name: 'Public website agent workflow', exact: true });
-  await workflow.getByRole('button', { name: 'Preview saved source', exact: true }).click();
+  await workflow
+    .getByRole('button', { name: 'Preview saved source', exact: true })
+    .click({ timeout: 15_000 });
   await expect(
     workflow.getByRole('button', { name: 'Record source binding', exact: true }),
   ).toBeEnabled();
+  process.stdout.write('[registered-website-stage] source-binding\n');
   const bindingResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname === '/api/bff/v1/public-source-bindings' &&
       r.request().method() === 'POST',
+    { timeout: 15_000 },
   );
-  await workflow.getByRole('button', { name: 'Record source binding', exact: true }).click();
+  await workflow
+    .getByRole('button', { name: 'Record source binding', exact: true })
+    .click({ timeout: 15_000 });
   const bindingSaved = await bindingResponse;
   expect(bindingSaved.status()).toBe(201);
   const binding = recordedPublicSourceBindingSchema.parse((await bindingSaved.json()).data);
   expect(binding.runtime_binding.tenant_id).toBe(config.tenantId);
   expect(binding.runtime_binding.check_id).toBe(associationSnapshot.checkId);
+  process.stdout.write('[registered-website-stage] drishti\n');
   const drishtiResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname.endsWith('/agents/drishti/run') && r.request().method() === 'POST',
+    { timeout: 15_000 },
   );
-  await workflow.getByRole('button', { name: 'Run Drishti on saved source', exact: true }).click();
+  await workflow
+    .getByRole('button', { name: 'Run Drishti on saved source', exact: true })
+    .click({ timeout: 15_000 });
   const drishtiSaved = await drishtiResponse;
   expect(drishtiSaved.status()).toBe(201);
   const drishti = publicAgentObservationSchema.parse((await drishtiSaved.json()).data);
@@ -194,15 +246,19 @@ export async function registeredWebsiteSourceInBrowser(
     workflow.getByRole('heading', { name: 'Drishti public observation', exact: true }),
   ).toBeVisible();
   await expect(workflow).toContainText('Private hosting: unknown');
-  await workflow.getByRole('button', { name: 'Select Drishti observation', exact: true }).click();
+  await workflow
+    .getByRole('button', { name: 'Select Drishti observation', exact: true })
+    .click({ timeout: 15_000 });
   await expect(workflow).toContainText('Selected Drishti observation: ' + drishti.observation_id);
+  process.stdout.write('[registered-website-stage] vibhaag\n');
   const vibhaagResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname.endsWith('/agents/vibhaag/run') && r.request().method() === 'POST',
+    { timeout: 15_000 },
   );
   await workflow
     .getByRole('button', { name: 'Run Vibhaag on selected observation', exact: true })
-    .click();
+    .click({ timeout: 15_000 });
   const vibhaagSaved = await vibhaagResponse;
   expect(vibhaagSaved.status()).toBe(201);
   const vibhaag = publicAgentObservationSchema.parse((await vibhaagSaved.json()).data);
@@ -223,12 +279,14 @@ export async function registeredWebsiteSourceInBrowser(
   await expect(
     workflow.getByRole('heading', { name: 'Vibhaag structural indicators', exact: true }),
   ).toBeVisible();
+  process.stdout.write('[registered-website-stage] control-evidence\n');
   const reviewResponse = page.waitForResponse(
     (r) => new URL(r.url()).pathname.endsWith('/control-review') && r.request().method() === 'GET',
+    { timeout: 15_000 },
   );
   await page
     .getByRole('button', { name: 'Review website against DPDPA controls', exact: true })
-    .click();
+    .click({ timeout: 15_000 });
   const evidenceResponse = await reviewResponse;
   expect(evidenceResponse.status()).toBe(200);
   const evidence = publicControlAssessmentV2Schema.parse(
@@ -264,41 +322,60 @@ export async function registeredWebsiteSourceInBrowser(
   ).toHaveCount(46);
   const human = page.getByRole('region', { name: 'Human control review' });
   const selection = human.getByRole('region', { name: 'Website association for human review' });
-  await selection.getByLabel('Website review system').selectOption(config.systemId);
+  await selection
+    .getByLabel('Website review system')
+    .selectOption(config.systemId, { timeout: 15_000 });
   await selection
     .getByRole('button', { name: 'Load registered review targets', exact: true })
-    .click();
+    .click({ timeout: 15_000 });
   await selection
     .getByLabel('Registered review target', { exact: true })
-    .selectOption(targetSnapshot.id);
+    .selectOption(targetSnapshot.id, { timeout: 15_000 });
   await selection
     .getByRole('button', { name: 'Load saved review associations', exact: true })
-    .click();
+    .click({ timeout: 15_000 });
   await selection
     .getByLabel('Saved review association', { exact: true })
-    .selectOption(associationSnapshot.id);
+    .selectOption(associationSnapshot.id, { timeout: 15_000 });
   await selection
     .getByLabel('I confirm this exact saved target, check and association for a new human review.')
-    .check();
-  await human.getByLabel('Control to review', { exact: true }).selectOption('DPDPA-GOV-001');
-  await human.getByLabel('Control question', { exact: true }).selectOption('Q1');
-  await human.getByLabel('Human declaration', { exact: true }).selectOption('yes');
+    .check({ timeout: 15_000 });
+  await human
+    .getByLabel('Control to review', { exact: true })
+    .selectOption('DPDPA-GOV-001', { timeout: 15_000 });
+  await human
+    .getByLabel('Control question', { exact: true })
+    .selectOption('Q1', { timeout: 15_000 });
+  await human
+    .getByLabel('Human declaration', { exact: true })
+    .selectOption('yes', { timeout: 15_000 });
   await human
     .getByLabel('Judgment rationale', { exact: true })
     .fill(
       'Synthetic human declaration only; public statements do not prove internal implementation.',
+      { timeout: 15_000 },
     );
-  await human.getByRole('button', { name: 'Add judgment to review draft', exact: true }).click();
+  await human
+    .getByRole('button', { name: 'Add judgment to review draft', exact: true })
+    .click({ timeout: 15_000 });
   await human
     .getByLabel('Applicability rationale', { exact: true })
-    .fill('Synthetic reviewer has no internal evidence of conditional applicability.');
-  await human.getByLabel(/I reviewed these declarations and authorise recording/).check();
+    .fill('Synthetic reviewer has no internal evidence of conditional applicability.', {
+      timeout: 15_000,
+    });
+  await human
+    .getByLabel(/I reviewed these declarations and authorise recording/)
+    .check({ timeout: 15_000 });
+  process.stdout.write('[registered-website-stage] human-review\n');
   const humanResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname === '/api/bff/v1/public-control-review-sets' &&
       r.request().method() === 'POST',
+    { timeout: 15_000 },
   );
-  await human.getByRole('button', { name: 'Record human control review', exact: true }).click();
+  await human
+    .getByRole('button', { name: 'Record human control review', exact: true })
+    .click({ timeout: 15_000 });
   const humanSaved = await humanResponse;
   expect(humanSaved.status()).toBe(201);
   const review = publicControlReviewSetAnyRowSchema
@@ -311,7 +388,7 @@ export async function registeredWebsiteSourceInBrowser(
   expect(review.snapshot.normalizedAnswers['DPDPA-GOV-001']?.Q1).toBe(true);
   await human
     .getByRole('link', { name: 'Request assessment from this recorded human review', exact: true })
-    .click();
+    .click({ timeout: 15_000 });
   let submissions = 0;
   page.on('request', (r) => {
     if (new URL(r.url()).pathname === '/api/bff/v1/assessment/jobs' && r.method() === 'POST')
@@ -320,15 +397,19 @@ export async function registeredWebsiteSourceInBrowser(
   const panel = page.getByRole('region', { name: 'Request a saved assessment' });
   await expect(panel).toContainText(review.id);
   expect(submissions).toBe(0);
-  await panel.getByLabel(/I request Parikshan using this exact recorded human review/).check();
+  await panel
+    .getByLabel(/I request Parikshan using this exact recorded human review/)
+    .check({ timeout: 15_000 });
+  process.stdout.write('[registered-website-stage] assessment-submit\n');
   const requestResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname === '/api/bff/v1/assessment/jobs' &&
       r.request().method() === 'POST',
+    { timeout: 15_000 },
   );
   await panel
     .getByRole('button', { name: 'Request assessment from recorded review', exact: true })
-    .click();
+    .click({ timeout: 15_000 });
   const acceptedResponse = await requestResponse;
   expect(acceptedResponse.status()).toBe(202);
   const accepted = AssessmentRequestReceiptSchema.parse(await acceptedResponse.json());
@@ -357,6 +438,7 @@ export async function registeredWebsiteSourceInBrowser(
     observedStatus: 202,
   });
   expect(submissions).toBe(1);
+  process.stdout.write('[registered-website-stage] submission-retain\n');
   writeRegisteredBrowserFile(directory, 'submission', submission);
   return submission;
 }

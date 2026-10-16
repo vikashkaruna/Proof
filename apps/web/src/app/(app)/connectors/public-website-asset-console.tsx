@@ -99,13 +99,19 @@ function PendingCard({
         a new request key.
       </p>
       {!active && <p>Return to the original organisation to reconcile this request.</p>}
-      <button type="button" disabled={!active || busy} onClick={onRead}>
+      <button
+        className="mb-2 mr-2 rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+        type="button"
+        disabled={!active || busy}
+        onClick={onRead}
+      >
         Check retained operation
       </button>
       {!entry.cancellation && (
         <>
           <label className="block">
             <input
+              className="rounded border border-slate-300 focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
               type="checkbox"
               checked={retry}
               onChange={(e) => setRetry(e.target.checked)}
@@ -114,6 +120,7 @@ function PendingCard({
             I reviewed this exact retained request and authorize its retry.
           </label>
           <button
+            className="mb-2 mr-2 rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             type="button"
             disabled={!active || !canManage || busy || !retry}
             onClick={() => {
@@ -128,6 +135,7 @@ function PendingCard({
       <label className="block">
         Cancellation reason
         <input
+          className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
           value={savedReason ?? reason}
           maxLength={2000}
           disabled={Boolean(savedReason) || !active || !canManage || busy}
@@ -145,6 +153,7 @@ function PendingCard({
       )}
       <label className="block">
         <input
+          className="rounded border border-slate-300 focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
           type="checkbox"
           checked={confirmCancel}
           disabled={!active || !canManage || busy}
@@ -153,6 +162,7 @@ function PendingCard({
         I confirm cancellation of this exact request with this reason.
       </label>
       <button
+        className="mb-2 mr-2 rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         type="button"
         disabled={
           !active || !canManage || busy || !confirmCancel || !(savedReason ?? reason).trim()
@@ -632,7 +642,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
       aria-label="Registered public website targets"
       className="space-y-4 rounded border p-4"
     >
-      <h2 className="font-semibold">Public websites for saved estate systems</h2>
+      <h3 className="font-semibold">Registered website operations</h3>
       <p>
         A public URL is a human-declared reference. It does not verify domain ownership, activate a
         private connector or authorize agent writes.
@@ -687,7 +697,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
           onCancel={(value) => void operate(entry, 'cancel', value)}
         />
       ))}
-      <div aria-label="Saved website selection pages">
+      <div aria-label="Saved website selection pages" className="flex flex-wrap items-start gap-3">
         {(['targets', 'associations', 'captures'] as const).map((kind) => {
           const q = selection(kind),
             key = q ? canonicalJson({ ...q, after: null }) : '',
@@ -696,6 +706,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
           return (
             <div key={kind}>
               <button
+                className="mb-2 mr-2 rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                 type="button"
                 disabled={!q || (same && state.loading)}
                 onClick={() => void loadSelection(kind)}
@@ -713,6 +724,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
               )}
               {same && state.page?.nextCursor && (
                 <button
+                  className="mb-2 mr-2 rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   type="button"
                   disabled={state.loading}
                   onClick={() => void loadSelection(kind, true)}
@@ -728,6 +740,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
         <label className="block">
           Estate
           <select
+            className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
             value={estateId}
             onChange={(e) => {
               setEstate(e.target.value);
@@ -749,6 +762,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
         <label className="block">
           System
           <select
+            className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
             value={systemId}
             onChange={(e) => {
               setSystem(e.target.value);
@@ -771,6 +785,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
         <label className="block">
           Operation
           <select
+            className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
             value={mode}
             onChange={(e) => {
               setMode(e.target.value as typeof mode);
@@ -788,6 +803,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
             Public HTTPS website URL
             <input
               type="url"
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
               value={url}
               maxLength={2048}
               onChange={(e) => {
@@ -801,6 +817,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
           <label className="block">
             Registered public target
             <select
+              className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
               value={targetId}
               onChange={(e) => {
                 setTarget(e.target.value);
@@ -828,6 +845,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
           <label className="block">
             Retained richer capture
             <select
+              className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
               value={captureId}
               onChange={(e) => {
                 setCapture(e.target.value);
@@ -854,6 +872,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
             <label>
               Withdraw scope
               <select
+                className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
                 value={withdrawSubject}
                 onChange={(e) => {
                   setWithdrawSubject(e.target.value as typeof withdrawSubject);
@@ -869,6 +888,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
               <label>
                 Retained association
                 <select
+                  className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
                   value={associationId}
                   onChange={(e) => {
                     setAssociation(e.target.value);
@@ -897,6 +917,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
           <label className="block">
             Withdrawal reason
             <input
+              className="mt-1 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
               value={reason}
               maxLength={2000}
               onChange={(e) => {
@@ -908,6 +929,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
         )}
         <label className="block">
           <input
+            className="rounded border border-slate-300 focus-visible:outline focus-visible:outline-2 disabled:opacity-50"
             type="checkbox"
             checked={confirmation === token}
             onChange={(e) => setConfirmation(e.target.checked ? token : '')}
@@ -915,6 +937,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
           I reviewed this selected context and authorize this exact metadata operation.
         </label>
         <button
+          className="mb-2 mr-2 rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           type="submit"
           disabled={!canManage || !ready || isBusy || entries.length > 0 || confirmation !== token}
         >

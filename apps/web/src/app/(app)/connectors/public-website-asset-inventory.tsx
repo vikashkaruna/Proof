@@ -121,7 +121,10 @@ export function PublicWebsiteAssetInventory({
   }, [tenantId, scope, page, requestKey]);
   const current = state?.key === requestKey ? state : null;
   return (
-    <section aria-label="Registered public website targets" className="space-y-4">
+    <section
+      aria-label="Public website estate inventory"
+      className="space-y-4 [&>button]:mr-2 [&>button]:mb-2"
+    >
       <h2 className="font-semibold">Public websites for saved estate systems</h2>
       {error === requestKey ? (
         <p role="alert">
@@ -140,10 +143,16 @@ export function PublicWebsiteAssetInventory({
           {current.total === 0 && (
             <p>No saved estates. Create an estate and system before registering a website.</p>
           )}
-          <button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>
+          <button
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            type="button"
+            disabled={page === 0}
+            onClick={() => setPage(page - 1)}
+          >
             Previous estate page
           </button>
           <button
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             type="button"
             disabled={page + 1 >= current.pages}
             onClick={() => setPage(page + 1)}
@@ -163,6 +172,7 @@ export function PublicWebsiteAssetInventory({
         </>
       )}
       <button
+        className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         type="button"
         onClick={() => {
           setPage(0);
