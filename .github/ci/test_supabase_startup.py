@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -330,7 +331,23 @@ class StartupDiagnosticTests(unittest.TestCase):
 
     def _startup_shell(self, extra=None):
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve() / "repository"
+            root.mkdir(mode=0o700)
+            # Exercise the real startup script and strict path guard together
+            # inside an owned copied repository. All external commands remain
+            # the existing fake tools; no arbitrary-path guard bypass is used.
+            for name in (
+                "scripts/start-parity-supabase.sh",
+                "infra/supabase/config.toml",
+                "tests/database/lib/preprovision-local-custody-issuer.py",
+                "tests/database/lib/preprovision-local-custody-verifier.py",
+                ".github/ci/diagnose_supabase_startup.py",
+                ".github/ci/observe_supabase_startup.py",
+            ):
+                target = root / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(ROOT / name, target)
+            state = root / ".axiom-runtime/parity"
             bin_dir = root / "bin"
             bin_dir.mkdir()
             stubs = {
@@ -368,13 +385,13 @@ exit 1
                 path.chmod(0o700)
             env = {
                 "PATH": f"{bin_dir}:{Path(sys.executable).parent}:/usr/bin:/bin",
-                "AXIOM_PARITY_STATE_DIR": str(root / "state"),
+                "AXIOM_PARITY_STATE_DIR": str(state),
                 "ATTEMPT_LOG": str(root / "attempts"),
                 "ARGUMENT_LOG": str(root / "arguments"),
                 **(extra or {}),
             }
             result = subprocess.run(
-                ["/bin/bash", str(ROOT / "scripts/start-parity-supabase.sh")],
+                ["/bin/bash", str(root / "scripts/start-parity-supabase.sh")],
                 env=env,
                 capture_output=True,
                 text=True,
@@ -383,7 +400,7 @@ exit 1
             )
             logs = {
                 p.name: (p.read_text(), p.stat().st_mode & 0o777)
-                for p in (root / "state").glob("start*.log")
+                for p in state.glob("start*.log")
             }
             attempts = (
                 (root / "attempts").read_text().splitlines()
