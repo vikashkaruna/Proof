@@ -184,3 +184,75 @@ test('owned log tail yields only the last fixed marker and refuses unsafe files'
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('saved-target boundary retains only fixed checkpoints and HTTP status or equality booleans', () => {
+  for (const [progress, expected] of [
+    ['saved-targets-http-status:200', { checkpoint: 'http-status', httpStatus: 200 }],
+    ['saved-targets-http-status:403', { checkpoint: 'http-status', httpStatus: 403 }],
+    ['saved-targets-response-schema', { checkpoint: 'response-schema' }],
+    ['saved-targets-request-tenant:false', { checkpoint: 'request-tenant', matches: false }],
+    ['saved-targets-response-actor:true', { checkpoint: 'response-actor', matches: true }],
+    [
+      'saved-targets-target-digest:false:false',
+      { checkpoint: 'target-digest', matches: false, targetPresent: false },
+    ],
+    [
+      'saved-targets-target-digest:false:true',
+      { checkpoint: 'target-digest', matches: false, targetPresent: true },
+    ],
+    [
+      'saved-targets-target-inventory-current:false',
+      { checkpoint: 'target-inventory-current', matches: false },
+    ],
+  ] as const) {
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.deepEqual(result.targetSelection, expected);
+    assert.equal(result.progress, `saved-targets-${expected.checkpoint}`);
+    assert(!JSON.stringify(result).includes(secret));
+  }
+  for (const progress of [
+    'saved-targets-http-status:99',
+    'saved-targets-http-status:600',
+    'saved-targets-http-status:0200',
+    'saved-targets-http-status:200:' + secret,
+    'saved-targets-request-tenant:1',
+    'saved-targets-request-tenant:true:false',
+    'saved-targets-target-digest:false',
+    'saved-targets-response-secret:true',
+    'saved-targets-response-schema:' + secret,
+  ]) {
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.equal(result.targetSelection, undefined);
+    assert.equal(result.progress, 'unknown');
+    assert(!JSON.stringify(result).includes(secret));
+  }
+});
+
+test('actual bounded log reader transports the latest failing target checkpoint with no values', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'axiom-selection-progress-'));
+  const path = join(directory, 'browser.private.log');
+  try {
+    writeFileSync(
+      path,
+      `${secret}\n[registered-website-stage] load-saved-targets\n` +
+        '[registered-website-stage] saved-targets-http-status:200\n' +
+        '[registered-website-stage] saved-targets-request-tenant:true\n' +
+        '[registered-website-stage] saved-targets-target-digest:false:false\n' +
+        '[registered-website-stage] saved-targets-response-secret:' +
+        secret +
+        '\n',
+      { mode: 0o600 },
+    );
+    const progress = readRegisteredBrowserProgress(path);
+    const result = registeredBrowserDiagnostics(payload, { ...lifecycle, progress });
+    assert.deepEqual(result.targetSelection, {
+      checkpoint: 'target-digest',
+      matches: false,
+      targetPresent: false,
+    });
+    assert(!JSON.stringify(result).includes(secret));
+    assert(!JSON.stringify(result).includes('http'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
