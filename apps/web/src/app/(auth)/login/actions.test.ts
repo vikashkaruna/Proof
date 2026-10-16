@@ -18,7 +18,12 @@ vi.mock('next/headers', () => ({
   cookies: async () => ({
     delete: (name: string) => state.deletes.push(name),
     set: (name: string) => state.sets.push(name),
-    getAll: () => [{ name: 'sb-project-auth-token' }, { name: 'unrelated' }],
+    getAll: () => [
+      { name: 'sb-project-auth-token' },
+      { name: 'sb-project-auth-token.0' },
+      { name: 'sb-project-auth-token.1' },
+      { name: 'unrelated' },
+    ],
   }),
 }));
 vi.mock('@axiom/supabase', () => ({
@@ -130,3 +135,34 @@ it('purges auth cookies and signs out before returning to the public site', asyn
   expect(state.deletes).not.toContain('unrelated');
   expect(state.signOut).toHaveBeenCalledOnce();
 });
+
+it('revokes the current provider session before removing its auth cookies', async () => {
+  state.signOut.mockImplementation(async () => {
+    expect(state.deletes).toEqual([]);
+    return { error: null };
+  });
+  await expect(logoutAction()).rejects.toThrow('redirect:/');
+  expect(state.deletes).toEqual([
+    'axiom_user_email',
+    'sb-project-auth-token',
+    'sb-project-auth-token.0',
+    'sb-project-auth-token.1',
+  ]);
+});
+
+it.each(['rejected', 'returned'])(
+  'clears local credentials and redirects when provider sign-out fails (%s)',
+  async (failure) => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    if (failure === 'rejected') state.signOut.mockRejectedValue(new Error('private detail'));
+    else state.signOut.mockResolvedValue({ error: { message: 'private detail' } });
+    try {
+      await expect(logoutAction()).rejects.toThrow('redirect:/');
+      expect(state.deletes).toContain('sb-project-auth-token.1');
+      expect(state.deletes).not.toContain('unrelated');
+      expect(warning).toHaveBeenCalledWith('[logoutAction] Provider sign-out was unavailable');
+    } finally {
+      warning.mockRestore();
+    }
+  },
+);
