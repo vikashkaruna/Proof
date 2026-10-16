@@ -115,3 +115,7 @@ fdbc2bcb1a7e674efe83b457f2805f34acfb7172:tests/database/local-custody-admission.
 # fixture UUIDs/mode/key references. Exact historical findings only; no credential.
 c0a46c880255eb731483657834f30444690f3a9c:tests/database/local-custody-credential-issuance-demo.test.sql:generic-api-key:30
 c0a46c880255eb731483657834f30444690f3a9c:tests/database/local-custody-credential-issuance.test.sql:generic-api-key:29
+
+# Public synthetic identity-policy SHA-256 vector, independently rederived from
+# fixture UUIDs/mode/key references. Exact historical finding only; no credential.
+ec0f06167de0fb6940dab182ac1c090aafb1eb34:tests/database/local-custody-credential-identity.test.sql:generic-api-key:29
