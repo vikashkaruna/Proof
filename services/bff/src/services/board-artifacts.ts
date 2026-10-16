@@ -1,3 +1,4 @@
+import { renderReviewedCoverageFirstReport } from '@axiom/report-kit/coverage-first-report';
 /** Exact-version, reviewed board publication. Provider uncertainty stays pending. */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -354,7 +355,13 @@ export class BoardArtifactService {
     const { report, request, source, review } = context;
     let html: string;
     try {
-      html = renderReviewedBoardHtml({
+      const header = JSON.parse(source.source_text);
+      if (header.schema_version === 4 && header.report_kind !== 'board') throw Error();
+      html = (
+        JSON.parse(source.source_text).schema_version === 4
+          ? renderReviewedCoverageFirstReport
+          : renderReviewedBoardHtml
+      )({
         sourceText: source.source_text,
         sourceSha256: source.source_sha256,
         documentText: report.content_text,
@@ -579,7 +586,10 @@ export class BoardArtifactService {
           source_sha256: source.source_sha256,
           content_sha256: report.content_sha256,
           review_sha256: review.review_sha256,
-          renderer_version: 'chromium-board-v1',
+          renderer_version:
+            JSON.parse(source.source_text).schema_version === 4
+              ? 'chromium-board-evidence-v5'
+              : 'chromium-board-v1',
           artifacts,
         },
         p_correlation_id: randomUUID(),

@@ -1,3 +1,8 @@
+import {
+  CoverageFirstSourceV4Schema,
+  parseCoverageFirstJson,
+  verifyCoverageFirstSource,
+} from './coverage-first-source';
 import { parseCatalogueJson } from '@axiom/control-library';
 /** Exact-version derivative archives for published, source-bound reports. */
 import { createHash } from 'node:crypto';
@@ -31,6 +36,28 @@ export type PramaanBoardArchiveInput = PramaanSourceArchiveInput;
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
+/** Only source4 is unwrapped for validation; the ZIP always retains the original
+ * exact provider source bytes and digest, never this derived inner view. */
+function archiveValidationSource(
+  kind: 'board' | 'auditor',
+  input: PramaanSourceArchiveInput,
+  scope: z.infer<typeof inputSchema>,
+) {
+  const text = Buffer.from(input.sourceBytes).toString('utf8');
+  if (JSON.parse(text).schema_version !== 4) return text;
+  const envelope = CoverageFirstSourceV4Schema.parse(parseCoverageFirstJson(text, 4 * 1024 * 1024));
+  if (envelope.report_kind !== kind) throw Error('Coverage archive kind refused');
+  const original = z
+    .object({ assessment_run_id: z.uuid() })
+    .parse(JSON.parse(envelope.retained_source.text));
+  verifyCoverageFirstSource(text, scope.source.sha256, {
+    tenantId: scope.tenantId,
+    engagementId: scope.engagementId,
+    requestId: scope.requestId,
+    assessmentRunId: original.assessment_run_id,
+  });
+  return envelope.retained_source.text;
+}
 /** The archive contains the exact source and PDF bytes, plus a bounded claim manifest. */
 export function buildPramaanBoardArchive(input: PramaanBoardArchiveInput) {
   const parsed = inputSchema.parse(input);
@@ -45,6 +72,7 @@ export function buildPramaanBoardArchive(input: PramaanBoardArchiveInput) {
   ) {
     throw new Error('Pramaan source bytes do not match exact provider versions');
   }
+  const validationText = archiveValidationSource('board', input, parsed);
   const source = z
     .object({
       schema_version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
@@ -53,7 +81,7 @@ export function buildPramaanBoardArchive(input: PramaanBoardArchiveInput) {
       engagement_id: uuid,
       request_id: uuid,
     })
-    .parse(JSON.parse(Buffer.from(input.sourceBytes).toString('utf8')));
+    .parse(JSON.parse(validationText));
   if (
     source.tenant_id !== parsed.tenantId ||
     source.engagement_id !== parsed.engagementId ||
@@ -62,8 +90,8 @@ export function buildPramaanBoardArchive(input: PramaanBoardArchiveInput) {
     throw new Error('Pramaan source belongs to a different tenant, engagement, or board request');
   const rawSource = (
     source.schema_version !== 1
-      ? parseCatalogueJson(Buffer.from(input.sourceBytes).toString('utf8'), 4 * 1024 * 1024)
-      : JSON.parse(Buffer.from(input.sourceBytes).toString('utf8'))
+      ? parseCatalogueJson(validationText, 4 * 1024 * 1024)
+      : JSON.parse(validationText)
   ) as Record<string, unknown>;
   if (source.schema_version !== 1) {
     const frozen = FrozenBoardSourceSchema.parse(rawSource);
@@ -149,6 +177,7 @@ export function buildPramaanAuditorArchive(input: PramaanSourceArchiveInput) {
     !Buffer.from(input.pdfBytes.subarray(0, 5)).equals(Buffer.from('%PDF-'))
   )
     throw new Error('Pramaan source bytes do not match exact provider versions');
+  const validationText = archiveValidationSource('auditor', input, parsed);
   const source = z
     .object({
       schema_version: z.union([z.literal(1), z.literal(2), z.literal(3)]),
@@ -158,7 +187,7 @@ export function buildPramaanAuditorArchive(input: PramaanSourceArchiveInput) {
       engagement_id: uuid,
       request_id: uuid,
     })
-    .parse(JSON.parse(Buffer.from(input.sourceBytes).toString('utf8')));
+    .parse(JSON.parse(validationText));
   if (
     source.tenant_id !== parsed.tenantId ||
     source.engagement_id !== parsed.engagementId ||
@@ -167,8 +196,8 @@ export function buildPramaanAuditorArchive(input: PramaanSourceArchiveInput) {
     throw new Error('Pramaan source belongs to a different tenant, engagement, or auditor request');
   const rawSource = (
     source.schema_version !== 1
-      ? parseCatalogueJson(Buffer.from(input.sourceBytes).toString('utf8'), 4 * 1024 * 1024)
-      : JSON.parse(Buffer.from(input.sourceBytes).toString('utf8'))
+      ? parseCatalogueJson(validationText, 4 * 1024 * 1024)
+      : JSON.parse(validationText)
   ) as Record<string, unknown>;
   if (source.schema_version !== 1) {
     const frozen = FrozenAuditorSourceSchema.parse(rawSource);
