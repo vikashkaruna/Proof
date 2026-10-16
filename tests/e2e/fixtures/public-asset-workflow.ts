@@ -1,6 +1,6 @@
 /** Opt-in owned demo fixture. Every mutation below uses the actual product UI
  * and normal Auth/MFA; only public network bytes and KMS/storage are fixtures. */
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Locator } from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -23,6 +23,10 @@ import {
 } from '../../../packages/types/src/index';
 
 const operationPath = '/api/bff/v1/public-website-assets/operations';
+function registeredCombobox(scope: Page | Locator, name: string) {
+  return scope.getByRole('combobox', { name, exact: true });
+}
+
 export async function registeredWebsiteSourceInBrowser(
   page: Page,
   config: RegisteredBrowserConfig,
@@ -37,13 +41,9 @@ export async function registeredWebsiteSourceInBrowser(
   const console = page.getByRole('region', { name: 'Registered public website targets' });
   await expect(console).toBeVisible();
   process.stdout.write('[registered-website-stage] estate-selection\n');
-  await console
-    .getByLabel('Estate', { exact: true })
-    .selectOption(config.estateId, { timeout: 15_000 });
+  await registeredCombobox(console, 'Estate').selectOption(config.estateId, { timeout: 15_000 });
   process.stdout.write('[registered-website-stage] system-selection\n');
-  await console
-    .getByLabel('System', { exact: true })
-    .selectOption(config.systemId, { timeout: 15_000 });
+  await registeredCombobox(console, 'System').selectOption(config.systemId, { timeout: 15_000 });
   await console.getByLabel('Public HTTPS website URL').fill(config.publicUrl, { timeout: 15_000 });
   await console
     .getByLabel('I reviewed this selected context and authorize this exact metadata operation.')
@@ -91,12 +91,10 @@ export async function registeredWebsiteSourceInBrowser(
   expect((await foreign.text()).includes(target.snapshotText)).toBe(false);
 
   process.stdout.write('[registered-website-stage] capture-prepare\n');
-  await console
-    .getByLabel('Operation', { exact: true })
-    .selectOption('capture', { timeout: 15_000 });
-  await console
-    .getByLabel('Registered public target', { exact: true })
-    .selectOption(targetSnapshot.id, { timeout: 15_000 });
+  await registeredCombobox(console, 'Operation').selectOption('capture', { timeout: 15_000 });
+  await registeredCombobox(console, 'Registered public target').selectOption(targetSnapshot.id, {
+    timeout: 15_000,
+  });
   await console
     .getByLabel('I reviewed this selected context and authorize this exact metadata operation.')
     .check({ timeout: 15_000 });
@@ -188,10 +186,10 @@ export async function registeredWebsiteSourceInBrowser(
   await page
     .getByRole('link', { name: 'Continue this saved check in Discovery' })
     .click({ timeout: 15_000 });
-  await page
-    .getByLabel('Engagement', { exact: true })
-    .selectOption(config.engagementId, { timeout: 15_000 });
-  await expect(page.getByLabel('Saved public website check', { exact: true })).toHaveValue(
+  await registeredCombobox(page, 'Engagement').selectOption(config.engagementId, {
+    timeout: 15_000,
+  });
+  await expect(registeredCombobox(page, 'Saved public website check')).toHaveValue(
     associationSnapshot.checkId,
   );
   const workflow = page.getByRole('region', { name: 'Public website agent workflow', exact: true });
@@ -322,33 +320,30 @@ export async function registeredWebsiteSourceInBrowser(
   ).toHaveCount(46);
   const human = page.getByRole('region', { name: 'Human control review' });
   const selection = human.getByRole('region', { name: 'Website association for human review' });
-  await selection
-    .getByLabel('Website review system')
-    .selectOption(config.systemId, { timeout: 15_000 });
+  await registeredCombobox(selection, 'Website review system').selectOption(config.systemId, {
+    timeout: 15_000,
+  });
   await selection
     .getByRole('button', { name: 'Load registered review targets', exact: true })
     .click({ timeout: 15_000 });
-  await selection
-    .getByLabel('Registered review target', { exact: true })
-    .selectOption(targetSnapshot.id, { timeout: 15_000 });
+  await registeredCombobox(selection, 'Registered review target').selectOption(targetSnapshot.id, {
+    timeout: 15_000,
+  });
   await selection
     .getByRole('button', { name: 'Load saved review associations', exact: true })
     .click({ timeout: 15_000 });
-  await selection
-    .getByLabel('Saved review association', { exact: true })
-    .selectOption(associationSnapshot.id, { timeout: 15_000 });
+  await registeredCombobox(selection, 'Saved review association').selectOption(
+    associationSnapshot.id,
+    { timeout: 15_000 },
+  );
   await selection
     .getByLabel('I confirm this exact saved target, check and association for a new human review.')
     .check({ timeout: 15_000 });
-  await human
-    .getByLabel('Control to review', { exact: true })
-    .selectOption('DPDPA-GOV-001', { timeout: 15_000 });
-  await human
-    .getByLabel('Control question', { exact: true })
-    .selectOption('Q1', { timeout: 15_000 });
-  await human
-    .getByLabel('Human declaration', { exact: true })
-    .selectOption('yes', { timeout: 15_000 });
+  await registeredCombobox(human, 'Control to review').selectOption('DPDPA-GOV-001', {
+    timeout: 15_000,
+  });
+  await registeredCombobox(human, 'Control question').selectOption('Q1', { timeout: 15_000 });
+  await registeredCombobox(human, 'Human declaration').selectOption('yes', { timeout: 15_000 });
   await human
     .getByLabel('Judgment rationale', { exact: true })
     .fill(
