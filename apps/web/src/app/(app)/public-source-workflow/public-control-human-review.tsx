@@ -758,8 +758,9 @@ function HumanReview({ actorId, canReview, canRun = false, assessment, assetHint
             Record human control review
           </button>
           <p className="text-sm">
-            Assessment and reporting handoff is still under implementation. Recording this review
-            does not invoke Parikshan or release a report.
+            Continue a recorded review in Assessment to request a run explicitly. Reports require a
+            completed assessment and separate human review and release. Recording this review does
+            not invoke Parikshan or release a report.
           </p>
         </fieldset>
       )}
