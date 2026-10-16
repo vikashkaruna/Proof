@@ -212,6 +212,143 @@ def validate_custody145_phase(value: object) -> dict:
     return value
 
 
+def custody147_probe_query(contract: str, holder: int, contender: int) -> str | None:
+    """Exact147 row wait, including contender tuple lock on retained row CTID.
+
+    Relations and predicates are fixed here, never caller SQL. CTID is read
+    only as a transient witness while the original transaction remains held.
+    The transactionid wait must be on this exact holder, not any row writer.
+    """
+    if not contract.startswith("custody147:"):
+        return None
+    uuid = r"[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}"
+    engagement = re.fullmatch(r"custody147:engagement:(" + uuid + r")", contract)
+    if engagement is not None:
+        return review141_probe_query(
+            "review141:engagement:" + engagement[1], holder, contender
+        )
+    match = re.fullmatch(
+        r"custody147:row:(membership|user):(" + uuid + r"):(" + uuid + r")", contract
+    )
+    if (
+        match is None
+        or any(
+            type(pid) is not int or not 0 < pid < 2**31 for pid in (holder, contender)
+        )
+        or holder == contender
+    ):
+        raise BarrierFailure("Invalid custody147 row contract")
+    kind, tenant, actor = match.groups()
+    relation = "tenant_users" if kind == "membership" else "users"
+    predicate = (
+        f"target.tenant_id='{tenant}'::uuid and target.user_id='{actor}'::uuid"
+        if kind == "membership"
+        else f"target.id='{actor}'::uuid and exists(select 1 from public.tenant_users m where m.tenant_id='{tenant}'::uuid and m.user_id=target.id)"
+    )
+    blocked = f"exists(select 1 from pg_locks waiter join pg_locks owner using(transactionid) where waiter.pid={contender} and owner.pid={holder} and waiter.locktype='transactionid' and owner.locktype='transactionid' and not waiter.granted and owner.granted)"
+    tuple_lock = f"exists(select 1 from public.{relation} target join pg_locks l on l.pid={contender} and l.locktype='tuple' and l.relation='public.{relation}'::regclass and l.page=split_part(trim(both '()' from target.ctid::text),',',1)::bigint and l.tuple=split_part(trim(both '()' from target.ctid::text),',',2)::integer where {predicate})"
+    return f"select jsonb_build_object('phase','row','kind','{kind}','tenant','{tenant}','actor','{actor}','holder',{holder},'contender',{contender},'blocked_by_holder',{holder}=any(pg_blocking_pids({contender})),'transaction_wait',({blocked}),'exact_tuple',({tuple_lock}),'holder_relation',exists(select 1 from pg_locks where pid={holder} and granted and relation='public.{relation}'::regclass and mode in ('RowShareLock','RowExclusiveLock')),'contender_relation',exists(select 1 from pg_locks where pid={contender} and granted and relation='public.{relation}'::regclass and mode in ('RowShareLock','RowExclusiveLock')),'locks',(select coalesce(jsonb_agg(jsonb_build_object('pid',pid,'locktype',locktype,'relation',relation::text,'page',page,'tuple',tuple,'mode',mode,'granted',granted,'transactionid',transactionid::text)),'[]'::jsonb) from pg_locks where pid in ({holder},{contender})))"
+
+
+def validate_custody147_phase(value: object) -> dict:
+    if isinstance(value, dict) and value.get("phase") == "engagement":
+        return validate_review141_phase(value)
+    fields = {
+        "phase",
+        "kind",
+        "tenant",
+        "actor",
+        "holder",
+        "contender",
+        "blocked_by_holder",
+        "transaction_wait",
+        "exact_tuple",
+        "holder_relation",
+        "contender_relation",
+        "locks",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != fields
+        or value.get("phase") != "row"
+        or value.get("kind") not in {"membership", "user"}
+    ):
+        raise BarrierFailure("Custody147 row metadata refused")
+    contract = f"custody147:row:{value['kind']}:{value['tenant']}:{value['actor']}"
+    custody147_probe_query(contract, value["holder"], value["contender"])
+    if any(
+        value[k] is not True
+        for k in (
+            "blocked_by_holder",
+            "transaction_wait",
+            "exact_tuple",
+            "holder_relation",
+            "contender_relation",
+        )
+    ) or not isinstance(value["locks"], list):
+        raise BarrierFailure("Custody147 exact row wait missing")
+    allowed = {
+        "pid",
+        "locktype",
+        "relation",
+        "page",
+        "tuple",
+        "mode",
+        "granted",
+        "transactionid",
+    }
+    for lock in value["locks"]:
+        if (
+            not isinstance(lock, dict)
+            or set(lock) != allowed
+            or lock.get("pid") not in {value["holder"], value["contender"]}
+            or any(
+                isinstance(v, str) and not re.fullmatch(r"[A-Za-z0-9_]*", v)
+                for v in lock.values()
+            )
+        ):
+            raise BarrierFailure("Custody147 unsafe row metadata refused")
+    if not any(
+        l["pid"] == value["contender"] and l["locktype"] == "tuple"
+        for l in value["locks"]
+    ):
+        raise BarrierFailure("Custody147 contender tuple metadata missing")
+    if not any(
+        l["pid"] == value["contender"]
+        and l["locktype"] == "transactionid"
+        and l["granted"] is False
+        for l in value["locks"]
+    ):
+        raise BarrierFailure("Custody147 contender transaction metadata missing")
+    owners = {
+        lock["transactionid"]
+        for lock in value["locks"]
+        if lock["pid"] == value["holder"]
+        and lock["locktype"] == "transactionid"
+        and lock["granted"] is True
+    }
+    if not any(
+        lock["pid"] == value["contender"]
+        and lock["locktype"] == "transactionid"
+        and lock["granted"] is False
+        and lock["transactionid"] in owners
+        for lock in value["locks"]
+    ):
+        raise BarrierFailure("Custody147 exact holder transaction missing")
+    return value
+
+
+def validate_custody147_mode(contract: str, mode: str) -> None:
+    """147 expiry waits retain the exact engagement witness; no legacy widening."""
+    custody147_probe_query(contract, 1, 2)
+    if not contract.startswith("custody147:") or mode not in (
+        {"blocked", "expires"}
+        if contract.startswith("custody147:engagement:")
+        else {"blocked"}
+    ):
+        raise BarrierFailure("Custody147 proof requires actual blocked mode")
+
+
 def kill_client(client: subprocess.Popen[bytes]) -> None:
     if client.poll() is None:
         # start_new_session=True below makes this exactly our client's group.
@@ -258,6 +395,8 @@ def main() -> int:
         custody145_probe_query(expected_value, 1, 2)
         if mode not in {"blocked", "expires"}:
             raise BarrierFailure("Custody145 proof requires actual blocked mode")
+    if expected_value.startswith("custody147:"):
+        validate_custody147_mode(expected_value, mode)
     tag = "axiom-race-" + uuid4().hex
     first_name, second_name = tag + "-first", tag + "-second"
     command = [
@@ -446,9 +585,15 @@ def main() -> int:
                     phase_query = custody145_probe_query(
                         expected_value, holder_pid, contender_pid
                     )
+                if phase_query is None:
+                    phase_query = custody147_probe_query(
+                        expected_value, holder_pid, contender_pid
+                    )
                 if phase_query is not None:
                     validator = (
-                        validate_custody145_phase
+                        validate_custody147_phase
+                        if expected_value.startswith("custody147:")
+                        else validate_custody145_phase
                         if expected_value.startswith("custody145:")
                         else validate_review141_phase
                     )
