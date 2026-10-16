@@ -2,6 +2,7 @@ import { PageHeader, Card, CardHeader, CardTitle, CardDescription, CardContent }
 import { requireTenantContext } from '@/lib/tenant-context';
 import { MfaEnrolment } from './mfa-enrolment';
 import { RecoveryBeneficiary, RecoveryConsole, type OwnRecovery } from './recovery-panels';
+import { DelegationManager, OwnerRecoveryPanel } from './delegation-panels';
 import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
@@ -132,7 +133,21 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
       )}
 
       {isPlatformFounder && !ownRecovery && initialStatus.enrolled && (
-        <RecoveryConsole key={`${ctx.userId}:recovery`} tenantId={ctx.tenantId} />
+        <>
+          <RecoveryConsole key={`${ctx.userId}:recovery`} tenantId={ctx.tenantId} />
+          <DelegationManager
+            key={`${ctx.userId}:${ctx.tenantId}:delegations`}
+            tenantId={ctx.tenantId}
+            tenantName={ctx.tenantName}
+          />
+        </>
+      )}
+
+      {!isPlatformFounder && ctx.role === 'owner' && !ownRecovery && initialStatus.enrolled && (
+        <OwnerRecoveryPanel
+          key={`${ctx.userId}:${ctx.tenantId}:owner-recovery`}
+          tenantId={ctx.tenantId}
+        />
       )}
     </div>
   );

@@ -155,7 +155,7 @@ test('a founder recovers another founder who lost their authenticator', async ({
   await expect(consolePanel.getByRole('status')).toContainText('15 minutes');
 
   // The subject enrols a new authenticator on the bound session.
-  await panel.getByRole('button', { name: 'Check whether the founder has confirmed' }).click();
+  await panel.getByRole('button', { name: 'Check for confirmation' }).click();
   await panel.getByRole('button', { name: 'Set up new authenticator' }).click();
   const grouped = await panel.getByTestId('recovery-setup-key').innerText();
   const newSecret = grouped.replace(/\s+/g, '');
@@ -175,4 +175,93 @@ test('a founder recovers another founder who lost their authenticator', async ({
   await expect(newSubject).toHaveURL(/\/dashboard/);
 
   for (const page of [oldSubject, founder, newSubject]) await page.context().close();
+});
+
+test('a founder delegates recovery and an owner recovers an approver in their tenant', async ({
+  browser,
+}) => {
+  test.setTimeout(420_000);
+  const founderAccount = await createMfaAccount('delegating-founder', {
+    withFactor: true,
+    isInternal: true,
+    role: 'founder',
+  });
+  const ownerAccount = await createMfaAccount('delegated-owner', {
+    withFactor: true,
+    role: 'owner',
+  });
+  const member = await createMfaAccount('recovered-approver', {
+    withFactor: true,
+    role: 'approver',
+  });
+  await designateFounder(founderAccount.id);
+
+  // The founder delegates approver recovery in tenant A to the owner.
+  const founder = await freshContextPage(browser);
+  await signInAs(founder, founderAccount.email, founderAccount.password);
+  await selectTenant(founder, 'a');
+  await satisfyLoginMfaWithSecret(founder, founderAccount.totpSecret!);
+  await founder.goto('/settings/security', { waitUntil: 'domcontentloaded' });
+  const manager = founder.getByTestId('mfa-recovery-delegations');
+  await manager.getByRole('button', { name: 'Manage owner delegations' }).click();
+  await manager.getByLabel('Owner', { exact: true }).selectOption(ownerAccount.id);
+  await manager.getByLabel('Why this owner').fill('Owner handles approver lockouts in e2e');
+  await manager
+    .getByLabel('Your authenticator code')
+    .fill(await freshTotpCode(founder, founderAccount.totpSecret!));
+  await manager.getByRole('button', { name: 'Delegate' }).click();
+  await expect(manager.getByRole('status')).toContainText('Delegation issued');
+
+  // The owner opens the case for the approver.
+  const owner = await freshContextPage(browser);
+  await signInAs(owner, ownerAccount.email, ownerAccount.password);
+  await selectTenant(owner, 'a');
+  await satisfyLoginMfaWithSecret(owner, ownerAccount.totpSecret!);
+  await owner.goto('/settings/security', { waitUntil: 'domcontentloaded' });
+  const panel = owner.getByTestId('mfa-owner-recovery');
+  await panel.getByRole('button', { name: 'Check my recovery delegation' }).click();
+  await panel.getByLabel('Member to recover').selectOption(member.id);
+  await panel
+    .getByLabel('How you verified their identity')
+    .fill('Verified in person at the office');
+  await panel
+    .getByLabel('Your authenticator code')
+    .first()
+    .fill(await freshTotpCode(owner, ownerAccount.totpSecret!));
+  await panel.getByRole('button', { name: 'Open recovery' }).click();
+  await expect(panel.getByRole('status')).toContainText('signed out');
+
+  // The approver signs in afresh and binds.
+  const subject = await freshContextPage(browser);
+  await signInAs(subject, member.email, member.password);
+  await selectTenant(subject, 'a');
+  await subject.goto('/dashboard', { waitUntil: 'domcontentloaded' });
+  await expect(subject).toHaveURL(/\/settings\/security\?recovery=1/);
+  const beneficiary = subject.getByTestId('mfa-recovery-beneficiary');
+  await beneficiary.getByRole('button', { name: 'Bind this sign-in' }).click();
+  const fingerprint = (await beneficiary.getByTestId('session-fingerprint').innerText()).trim();
+
+  // The owner confirms the same fingerprint; the approver enrols.
+  await panel.getByRole('button', { name: 'Refresh' }).first().click();
+  const card = panel.getByTestId('mfa-owner-recovery-case').filter({ hasText: member.email });
+  await expect(card).toContainText(fingerprint);
+  await card
+    .getByLabel('Your authenticator code')
+    .fill(await freshTotpCode(owner, ownerAccount.totpSecret!));
+  await card.getByRole('button', { name: 'Codes match — confirm' }).click();
+  await expect(panel.getByRole('status')).toContainText('15 minutes');
+
+  await beneficiary
+    .getByRole('button', { name: 'Check for confirmation' })
+    .click();
+  await beneficiary.getByRole('button', { name: 'Set up new authenticator' }).click();
+  const newSecret = (await beneficiary.getByTestId('recovery-setup-key').innerText()).replace(
+    /\s+/g,
+    '',
+  );
+  await beneficiary.getByLabel('Code from the new authenticator').fill(generateTotp(newSecret));
+  await beneficiary.getByRole('button', { name: 'Complete recovery' }).click();
+  await expect(beneficiary.getByTestId('recovery-code-list')).toBeVisible();
+
+  for (const page of [founder, owner, subject]) await page.context().close();
 });

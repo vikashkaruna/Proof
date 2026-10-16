@@ -48,6 +48,10 @@ vi.mock('./recovery-panels', () => ({
   RecoveryBeneficiary: (props: unknown) => <pre>{'BENEFICIARY ' + JSON.stringify(props)}</pre>,
   RecoveryConsole: () => <pre>CONSOLE</pre>,
 }));
+vi.mock('./delegation-panels', () => ({
+  DelegationManager: () => <pre>DELEGATIONS</pre>,
+  OwnerRecoveryPanel: () => <pre>OWNER-RECOVERY</pre>,
+}));
 beforeEach(() => {
   state.rows = [];
   state.error = null;
@@ -94,6 +98,27 @@ it('offers the recovery console only to an enrolled platform founder', async () 
   expect(
     renderToStaticMarkup(await SecuritySettingsPage({ searchParams: Promise.resolve({}) })),
   ).not.toContain('CONSOLE');
+});
+
+it('offers owner recovery only to an enrolled, non-founder owner; delegation management only to founders', async () => {
+  state.rows = [activeTotp];
+  state.founder = false;
+  const owner = renderToStaticMarkup(
+    await SecuritySettingsPage({ searchParams: Promise.resolve({}) }),
+  );
+  expect(owner).toContain('OWNER-RECOVERY');
+  expect(owner).not.toContain('DELEGATIONS');
+  state.founder = true;
+  const founder = renderToStaticMarkup(
+    await SecuritySettingsPage({ searchParams: Promise.resolve({}) }),
+  );
+  expect(founder).toContain('DELEGATIONS');
+  expect(founder).not.toContain('OWNER-RECOVERY');
+  state.founder = false;
+  state.rows = [];
+  expect(
+    renderToStaticMarkup(await SecuritySettingsPage({ searchParams: Promise.resolve({}) })),
+  ).not.toContain('OWNER-RECOVERY');
 });
 
 it('refuses to render when recovery state is unreadable', async () => {

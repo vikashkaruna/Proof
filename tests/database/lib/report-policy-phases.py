@@ -99,6 +99,10 @@ def plan(root: Path = ROOT) -> dict:
         versions[-1] < 152 or "founder-mfa-recovery.test.sql" in files,
         "recovery152_suite_required",
     )
+    need(
+        versions[-1] < 154 or "mfa-recovery-delegation.test.sql" in files,
+        "delegation154_suite_required",
+    )
     return {
         "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),
