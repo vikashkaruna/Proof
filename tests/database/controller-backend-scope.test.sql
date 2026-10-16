@@ -20,6 +20,9 @@ select pg_temp.reject('delete from public.assessment_dispatch_jobs');
 select pg_temp.reject('select controller_security.confirm_workload_assessment(pg_temp.id(1),pg_temp.id(9))');
 select pg_temp.reject('select public.confirm_workload_assessment(pg_temp.id(2),pg_temp.id(9))');
 select pg_temp.reject('select public.claim_assessment_dispatch(pg_temp.id(2),pg_temp.id(9))');
+select pg_temp.reject('select public.claim_local_assessment_dispatch(pg_temp.id(2),pg_temp.id(9),pg_temp.id(9),repeat(''a'',64),repeat(''b'',64))');
+select pg_temp.ok(not has_function_privilege(current_user,'public.enqueue_local_public_control_assessment_dispatch(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz,text,bytea,bytea,bytea,uuid,text,text,uuid,bigint,text,uuid,text,text)'::regprocedure,'EXECUTE'),'controller cannot create local authority');
+select pg_temp.ok(not has_function_privilege('axiom_local_custody_verifier','public.claim_local_assessment_dispatch(uuid,uuid,uuid,text,text)'::regprocedure,'EXECUTE'),'key custody verifier cannot claim local dispatch');
 select pg_temp.reject('select public.reserve_assessment_schedules(''test'')');
 select pg_temp.reject('select public.reserve_assessment_schedules(''test'',pg_temp.id(2))');
 select pg_temp.reject('select public.acknowledge_assessment_schedule(pg_temp.id(2),pg_temp.id(9),pg_temp.id(9),''test'',''test'',pg_temp.id(9))');
@@ -32,6 +35,9 @@ select pg_temp.ok(public.reserve_assessment_schedules('test',pg_temp.id(1))->'jo
 -- by negative tests for only a few administrative functions.
 select pg_temp.ok(not exists(select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
  where n.nspname='public' and p.prosecdef and has_function_privilege(current_user,p.oid,'EXECUTE')
+ -- Only this exact new overload is authorized; future same-name overloads
+ -- remain inside the exhaustive refusal gate.
+ and p.oid<>'public.claim_local_assessment_dispatch(uuid,uuid,uuid,text,text)'::regprocedure
  and p.proname not in ('has_tenant_role','current_assessment_controller_tenant','read_workload_task','start_workload_assessment',
  'complete_workload_assessment','confirm_workload_assessment','claim_assessment_dispatch','reserve_assessment_schedules','acknowledge_assessment_schedule')),'no additional definer authority');
 reset role;
