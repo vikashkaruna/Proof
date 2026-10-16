@@ -42,8 +42,10 @@ update public.engagements set library_version='local147-other' where id=local147
 select local147_fixture.ok(local147_fixture.enqueue(324)?'error','changed engagement library cannot bypass pinned questionnaire source');
 rollback to library_changed;
 do $$begin
- begin update public.controls set assessment_questions='[]' where library_version='0.1.1' and id='DPDPA-GOV-001';raise exception 'published questionnaire mutable';exception when insufficient_privilege then null;end;
- begin update public.control_libraries set control_count=45 where version='0.1.1';raise exception 'published catalogue mutable';exception when insufficient_privilege then null;end;
+ begin update public.controls set assessment_questions='[]' where library_version='0.1.1' and id='DPDPA-GOV-001';raise exception 'published questionnaire mutable';
+ exception when sqlstate 'P0001' then if sqlerrm is distinct from 'Controls are immutable; publish a new library version instead.' then raise;end if;end;
+ begin update public.control_libraries set control_count=45 where version='0.1.1';raise exception 'published catalogue mutable';
+ exception when insufficient_privilege then if sqlerrm is distinct from 'Published library source is immutable' then raise;end if;end;
 end$$;
 
 select local147_fixture.ok(local147_fixture.claim(301,jsonb_build_object('policySha256',repeat('f',64)))->>'error'='local_dispatch_unavailable','wrong claim policy does not spend delivery');
@@ -89,7 +91,7 @@ savepoint actor_retired;
 update public.tenant_users set role='viewer' where tenant_id=local147_fixture.id(31) and user_id=local147_fixture.id(3);
 select local147_fixture.ok(local147_fixture.claim(302)?'error','accepted job retains live actor gate');
 rollback to actor_retired;
-select public.revoke_workload_task(local147_fixture.id(31),local147_fixture.id(3),(select (v->>'run_id')::uuid from local147_saved where n=302),local147_fixture.id(321));
+select local147_fixture.ok(public.revoke_workload_task(local147_fixture.id(31),local147_fixture.id(3),(select (v->>'run_id')::uuid from local147_saved where n=302),local147_fixture.id(321))='{"revoked":true}'::jsonb,'actual task revocation recorded');
 select local147_fixture.ok(local147_fixture.claim(302)?'error','task revocation blocks accepted grant');
 select local147_fixture.ok((select count(*)=0 from public.assessment_dispatch_jobs j left join public.assessment_local_custody_authorizations g on g.job_id=j.id where j.tenant_id=local147_fixture.id(31) and g.job_id is null),'no job without atomic grant');
 select local147_fixture.ok((select count(*)=0 from public.verify_ledger(local147_fixture.id(31))),'append-only ledger chain valid');
