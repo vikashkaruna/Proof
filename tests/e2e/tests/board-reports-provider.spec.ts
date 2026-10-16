@@ -1,4 +1,11 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { registeredWebsiteSourceInBrowser } from '../fixtures/public-asset-workflow';
+import {
+  registeredBrowserRequested,
+  readOwnedRegisteredBrowser,
+  verifyRegisteredBrowserServer,
+} from '../../../scripts/lib/acceptance-public-asset-browser';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -20,7 +27,10 @@ import {
   reportAcceptanceRequested,
   readPublicReportBrowserHandoff,
 } from '../../../scripts/lib/acceptance-public-control-reports';
-import { BoardReportContentV3Schema } from '../../../packages/report-kit/src/board-report';
+import {
+  BoardReportContentV3Schema,
+  BoardReportContentV4Schema,
+} from '../../../packages/report-kit/src/board-report';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
 import { unzipSync } from 'fflate';
 
@@ -481,6 +491,23 @@ test.describe('real-provider board report lifecycle', () => {
     browser,
   }) => {
     test.setTimeout(300_000);
+    if (registeredBrowserRequested()) {
+      const owned = readOwnedRegisteredBrowser(repoRoot);
+      await verifyRegisteredBrowserServer(owned.config);
+      await registeredWebsiteSourceInBrowser(page, owned.config, owned.directory);
+      await expect
+        .poll(
+          () =>
+            existsSync(
+              join(
+                repoRoot,
+                '.axiom-runtime/review/all-agent-acceptance/public-report-browser-handoff.private.json',
+              ),
+            ),
+          { timeout: 90000, message: 'Original controller must finalize before report handoff' },
+        )
+        .toBe(true);
+    }
     const sourceHandoff = reportAcceptanceRequested()
       ? readPublicReportBrowserHandoff(repoRoot)
       : undefined;
@@ -530,8 +557,29 @@ test.describe('real-provider board report lifecycle', () => {
         assessment_result_digest: assessment.resultDigest,
       });
       if (sourceHandoff) {
-        const document = BoardReportContentV3Schema.parse(JSON.parse(row.content_text));
-        expect(document.schema_version).toBe(3);
+        const document = (
+          sourceHandoff.source.asset ? BoardReportContentV4Schema : BoardReportContentV3Schema
+        ).parse(JSON.parse(row.content_text));
+        expect(document.schema_version).toBe(sourceHandoff.source.asset ? 4 : 3);
+        if (sourceHandoff.source.asset) {
+          expect('asset_scope' in document).toBe(true);
+          if (!('asset_scope' in document))
+            throw new Error('Registered asset report downgrade refused');
+          expect(document.asset_scope.estate.id).toBe(sourceHandoff.source.estateId);
+          expect(document.asset_scope.system.id).toBe(sourceHandoff.source.systemId);
+          expect(document.asset_scope.target.id).toBe(sourceHandoff.source.asset.targetId);
+          expect(document.asset_scope.association.id).toBe(
+            sourceHandoff.source.asset.associationId,
+          );
+          expect(document.asset_scope.target.sha256).toBe(sourceHandoff.source.asset.targetSha256);
+          expect(document.asset_scope.association.sha256).toBe(
+            sourceHandoff.source.asset.associationSha256,
+          );
+          expect(document.asset_scope.target.url).toBe('https://fixture.axiomproof.ai/');
+          expect(document.asset_scope.ownership_verified).toBe(false);
+          expect(document.asset_scope.connector_access_granted).toBe(false);
+          expect(document.asset_scope.review_required).toBe(true);
+        }
         expect(document.public_review_appendix.reviewId).toBe(sourceHandoff.source.reviewId);
         expect(document.public_review_appendix.controls).toHaveLength(46);
         expect(document.public_review_appendix.declarationsVerified).toBe(false);
@@ -564,6 +612,20 @@ test.describe('real-provider board report lifecycle', () => {
         ).toBeVisible();
         await review.getByText('Exact recorded content', { exact: true }).click();
         await expect(review.locator('pre')).toContainText(sourceHandoff.source.reviewId);
+        if (sourceHandoff.source.asset) {
+          await expect(review.locator('pre')).toContainText('human-declared asset scope');
+          await expect(review.locator('pre')).toContainText(
+            'Synthetic controller acceptance estate',
+          );
+          await expect(review.locator('pre')).toContainText('Synthetic public website inventory');
+          await expect(review.locator('pre')).toContainText('fixture.axiomproof.ai');
+          await expect(review.locator('pre')).toContainText('does not verify website ownership');
+          await expect(review.locator('pre')).toContainText('unknown');
+          await expect(review.locator('pre')).toContainText('privacy_notice');
+          await expect(review.locator('pre')).toContainText('processor_disclosure');
+          await expect(review.locator('pre')).toContainText('consent_ui');
+        }
+
         await review
           .getByRole('checkbox', { name: 'I reviewed the exact content and SHA-256 shown above.' })
           .check();
@@ -640,6 +702,21 @@ test.describe('real-provider board report lifecycle', () => {
       );
       expect(privatePdf.status()).toBe(200);
       const downloadedPdf = Buffer.from(await privatePdf.body());
+      if (sourceHandoff?.source.asset) {
+        const pdfFile = join(localFixture().directory, 'registered-source-board.private.pdf');
+        const textFile = join(localFixture().directory, 'registered-source-board.private.txt');
+        await writeFile(pdfFile, downloadedPdf, { mode: 0o600 });
+        await execFileAsync('pdftotext', [pdfFile, textFile], { timeout: 10000 });
+        const text = await import('node:fs/promises').then((fs) => fs.readFile(textFile, 'utf8'));
+        expect(text).toMatch(/human.declared asset scope/i);
+        expect(text).toContain('Synthetic controller acceptance estate');
+        expect(text).toContain('Synthetic public website inventory');
+        expect(text).toContain('fixture.axiomproof.ai');
+        expect(text).toMatch(/does not verify website ownership/i);
+        expect(text).toMatch(/unknown/i);
+        expect(text).toContain('DPDPA-GOV-001');
+      }
+
       expect(sha(downloadedPdf)).toBe(pdfVersion.content_hash);
       if (process.env.AXIOM_COLD_PDF_ACCEPTANCE === 'true') {
         expect(downloadedPdf.length).toBe(pdfVersion.byte_size);

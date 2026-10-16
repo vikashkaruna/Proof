@@ -10,6 +10,11 @@ import type { PersonaState } from './personas';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
+import {
+  registeredBrowserRequested,
+  readOwnedRegisteredBrowser,
+  registeredBrowserLaunchPaths,
+} from '../../scripts/lib/acceptance-public-asset-browser';
 import { HARNESS_MFA_KEY } from './personas';
 import { mintLocalPostgrestRoleKey } from '../../packages/supabase/src/local-proof-writer-key';
 
@@ -41,6 +46,10 @@ function personaState(): PersonaState | null {
   }
 }
 
+const registered = registeredBrowserRequested() ? readOwnedRegisteredBrowser(repoRoot) : null;
+if (registered && acceptanceTarget)
+  throw new Error('Registered fixture cannot use deployed target');
+const ownedLaunchers = registered ? registeredBrowserLaunchPaths(registered.directory) : null;
 const state = personaState();
 if (state) assertPersonaTarget(state);
 
@@ -95,6 +104,11 @@ if (bffHumanWriterKey) process.env.SUPABASE_HUMAN_ACTION_WRITER_KEY = bffHumanWr
 const BFF_PORT = process.env.AXIOM_E2E_BFF_PORT ?? '4000';
 if (!/^\d{4,5}$/.test(BFF_PORT) || Number(BFF_PORT) < 1024 || Number(BFF_PORT) > 65535)
   throw new Error('AXIOM_E2E_BFF_PORT must be an unprivileged TCP port');
+if (
+  registered &&
+  (localWebPort !== 3301 || BFF_PORT !== '4400' || process.env.AXIOM_E2E_BROWSER_CHANNEL)
+)
+  throw new Error('Registered fixture requires owned ports 3301/4400 and hash-bound Chromium');
 const MARKETING_PORT = process.env.AXIOM_E2E_MARKETING_PORT ?? '3000';
 if (
   !/^\d{4,5}$/.test(MARKETING_PORT) ||
@@ -120,7 +134,7 @@ const webEnv = {
   NEXT_PUBLIC_SUPABASE_ANON_KEY: state?.anonKey ?? '',
   // Where the browser-to-BFF bridge forwards to. Without a BFF the approval
   // journey stops at "Could not start verification" and proves nothing.
-  BFF_PUBLIC_URL: `http://localhost:${BFF_PORT}`,
+  BFF_PUBLIC_URL: registered?.config.bffOrigin ?? `http://localhost:${BFF_PORT}`,
 };
 
 const bffEnv = {
@@ -190,6 +204,9 @@ export default defineConfig({
   workers: acceptanceTarget || process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: {
+    ...(ownedLaunchers
+      ? { launchOptions: { executablePath: ownedLaunchers.chromiumExecutable } }
+      : {}),
     channel: process.env.AXIOM_E2E_BROWSER_CHANNEL === 'chrome' ? 'chrome' : undefined,
     baseURL: webOrigin,
     // No storageState: each journey establishes its own session by signing in,
@@ -209,36 +226,46 @@ export default defineConfig({
           // the same production runtime as the release container. Next dev's
           // first-route Fast Refresh can replace an in-flight server-action
           // redirect or a newly mounted invitation form under concurrency.
-          command: `pnpm --filter @axiom/web build && pnpm --filter @axiom/web exec next start --port ${localWebPort}`,
+          command:
+            ownedLaunchers?.nextCommand ??
+            `pnpm --filter @axiom/web build && pnpm --filter @axiom/web exec next start --port ${localWebPort}`,
           port: localWebPort,
           cwd: repoRoot,
           env: webEnv,
           reuseExistingServer: false,
           timeout: 120_000,
         },
-        {
-          // The BFF. Every authorisation the product makes is decided here,
-          // so an approval journey that does not reach it is only testing a
-          // page.
-          // Local-only scoped metadata fixture; real Auth/MFA/middleware remain.
-          // Its producer always refuses actual requests. Deployed servers do not use it.
-          command: 'pnpm exec tsx tests/e2e/local-bff.ts',
-          port: Number(BFF_PORT),
-          cwd: repoRoot,
-          env: bffEnv,
-          reuseExistingServer: false,
-          timeout: 120_000,
-        },
-        {
-          // Public-surface specs need the marketing site too. Serve its built
-          // runtime to avoid first-route compiler failures while the persona
-          // journeys run concurrently.
-          command: `pnpm --filter @axiom/marketing build && pnpm --filter @axiom/marketing exec next start --port ${MARKETING_PORT}`,
-          port: Number(MARKETING_PORT),
-          cwd: repoRoot,
-          env: webEnv,
-          reuseExistingServer: false,
-          timeout: 120_000,
-        },
+        ...(registered
+          ? []
+          : [
+              {
+                // The BFF. Every authorisation the product makes is decided here,
+                // so an approval journey that does not reach it is only testing a
+                // page.
+                // Local-only scoped metadata fixture; real Auth/MFA/middleware remain.
+                // Its producer always refuses actual requests. Deployed servers do not use it.
+                command: 'pnpm exec tsx tests/e2e/local-bff.ts',
+                port: Number(BFF_PORT),
+                cwd: repoRoot,
+                env: bffEnv,
+                reuseExistingServer: false,
+                timeout: 120_000,
+              },
+            ]),
+        ...(registered
+          ? []
+          : [
+              {
+                // Public-surface specs need the marketing site too. Serve its built
+                // runtime to avoid first-route compiler failures while the persona
+                // journeys run concurrently.
+                command: `pnpm --filter @axiom/marketing build && pnpm --filter @axiom/marketing exec next start --port ${MARKETING_PORT}`,
+                port: Number(MARKETING_PORT),
+                cwd: repoRoot,
+                env: webEnv,
+                reuseExistingServer: false,
+                timeout: 120_000,
+              },
+            ]),
       ],
 });

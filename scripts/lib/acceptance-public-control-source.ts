@@ -13,9 +13,13 @@ import {
   AssessmentSnapshotSchema,
   publicControlAssessmentV2Schema,
   publicControlReviewSetRowSchema,
+  publicControlReviewSetAnyRowSchema,
+  publicControlReviewSetAnySnapshotSchema,
   publicControlReviewSetSnapshotSchema,
   publicControlReviewSetRequestSchema,
 } from '../../packages/types/src/index.js';
+import type { RegisteredBrowserSubmission } from './acceptance-public-asset-browser.js';
+import { registeredBrowserRequested } from './acceptance-public-asset-browser.js';
 import { canonicalJson } from '../../packages/ledger/src/canonicalise.js';
 import { checkPublicWebsiteEvidenceV2 } from '../../services/bff/src/connectors/public-website.js';
 
@@ -32,11 +36,29 @@ export const acceptancePublicWebsiteCapture: typeof checkPublicWebsiteEvidenceV2
         status: 200,
         contentType: 'text/html',
         body: Buffer.from(
-          '<!doctype html><html><body><h1>Synthetic organisation</h1><a href="/privacy">Privacy policy</a><p>Privacy policy: we collect contact data to answer enquiries. Contact our grievance officer for access, correction and erasure.</p></body></html>',
+          registeredBrowserRequested()
+            ? registeredPage(url.pathname)
+            : '<!doctype html><html><body><h1>Synthetic organisation</h1><a href="/privacy">Privacy policy</a><p>Privacy policy: we collect contact data to answer enquiries. Contact our grievance officer for access, correction and erasure.</p></body></html>',
         ),
       };
     },
   });
+
+function registeredPage(path: string) {
+  const page = {
+    '/': '<h1>Synthetic organisation</h1><a href="/privacy">Privacy policy</a><a href="/contact">Contact</a><a href="/terms">Terms</a><a href="/consent">Consent choices</a><p>Privacy notice for contact enquiries.</p>',
+    '/privacy':
+      '<h1>Privacy notice</h1><p>We collect contact data for the purpose of answering enquiries. You may request access, correction and erasure. Contact our grievance officer for complaints. Personal data is retained only for the stated purpose.</p>',
+    '/contact':
+      '<h1>Contact enquiries</h1><p>Before collecting contact information, this collection notice explains the purpose of answering your enquiry.</p><form><label>Name<input autocomplete="name"></label><label>Email<input autocomplete="email" type="email"></label><label>Message<textarea name="message"></textarea></label></form>',
+    '/terms':
+      '<h1>Terms of service</h1><p>Our service providers process personal data for the stated purpose. Personal data is retained for that purpose. You may request correction and erasure.</p>',
+    '/consent':
+      '<h1>Consent controls — demo only</h1><p>Withdraw consent at any time.</p><form><label><input type="checkbox" checked required>I agree to analytics cookies</label></form>',
+  }[path];
+  assert(page, 'synthetic public page refused');
+  return '<!doctype html><html><body>' + page + '</body></html>';
+}
 
 type Request = (path: string, expected: number, options?: RequestInit) => Promise<Response>;
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
@@ -66,6 +88,11 @@ export async function verifyPublicControlSourceThroughController(deps: {
   execute: (jobId: string) => Promise<void>;
   launchCount: () => number;
   onPhase: (phase: string) => void;
+  browserSubmit?: (scope: {
+    estateId: string;
+    systemId: string;
+    engagementId: string;
+  }) => Promise<RegisteredBrowserSubmission>;
 }) {
   z.uuid().parse(deps.tenantId);
   z.uuid().parse(deps.actorId);
@@ -191,6 +218,13 @@ export async function verifyPublicControlSourceThroughController(deps: {
     assert.equal(receipt.data?.[0]?.actor_type, 'human');
     if (action === 'engagement.created') assert.equal(String(receipt.data?.[0]?.id), saved.receipt);
   }
+  if (deps.browserSubmit)
+    return verifyRegisteredSource(deps, {
+      estateId,
+      systemId: system.id,
+      engagementId,
+      intakeReceipt: saved.receipt,
+    });
   deps.onPhase('capture');
   const captured = z
     .object({ data: z.object({ id: z.uuid() }) })
@@ -431,6 +465,229 @@ export async function verifyPublicControlSourceThroughController(deps: {
     requestedReceipt: source.requested_receipt,
     network: 'synthetic-dns-and-page-bytes',
     kms: 'fixture-only-no-cloud-iam-proof',
+  };
+}
+
+async function verifyRegisteredSource(
+  deps: Parameters<typeof verifyPublicControlSourceThroughController>[0],
+  scope: { estateId: string; systemId: string; engagementId: string; intakeReceipt: string },
+) {
+  assert(deps.browserSubmit);
+  deps.onPhase('browser-register-capture-review-request');
+  const submitted = await deps.browserSubmit(scope);
+  assert.equal(submitted.tenantId, deps.tenantId);
+  assert.equal(submitted.actorId, deps.actorId);
+  assert.equal(submitted.engagementId, scope.engagementId);
+  const head = z
+    .object({
+      data: z.object({
+        review: publicControlReviewSetAnyRowSchema.safeExtend({
+          snapshot: publicControlReviewSetAnySnapshotSchema,
+        }),
+      }),
+    })
+    .parse(
+      await (
+        await deps.request(
+          `/v1/public-control-review-sets/current?engagementId=${scope.engagementId}&checkId=${submitted.checkId}`,
+          200,
+          { headers: deps.headers },
+        )
+      ).json(),
+    ).data.review;
+  assert.equal(head.id, submitted.reviewId);
+  assert.equal(head.request_sha256, submitted.reviewRequestSha256);
+  assert.equal(head.snapshot_sha256, submitted.reviewSnapshotSha256);
+  assert.equal(head.snapshot.version, 2);
+  assert.equal(head.snapshot.request.version, 2);
+  if (head.snapshot.request.version !== 2) throw new Error('registered review downgrade refused');
+  assert.equal(head.snapshot.request.associationRef.associationId, submitted.associationId);
+  assert.equal(head.snapshot.request.associationRef.associationSha256, submitted.associationSha256);
+  assert.equal(head.snapshot.request.associationRef.targetId, submitted.targetId);
+  assert.equal(head.snapshot.request.associationRef.targetSha256, submitted.targetSha256);
+  assert.equal(head.snapshot.normalizedAnswers['DPDPA-GOV-001']?.Q1, true);
+  const observations = await deps.db
+    .from('public_source_observations')
+    .select(
+      'id,tenant_id,engagement_id,binding_id,actor_id,agent,output_utf8,output_sha256,completion_receipt,dispatch_id',
+    )
+    .eq('tenant_id', deps.tenantId)
+    .eq('binding_id', submitted.bindingId);
+  assert.equal(observations.error, null);
+  const observed = z
+    .array(
+      z.object({
+        id: z.uuid(),
+        tenant_id: z.uuid(),
+        engagement_id: z.uuid(),
+        binding_id: z.uuid(),
+        actor_id: z.uuid(),
+        agent: z.enum(['drishti', 'vibhaag']),
+        output_utf8: z.string(),
+        output_sha256: digest,
+        completion_receipt: z.coerce.string(),
+        dispatch_id: z.uuid(),
+      }),
+    )
+    .length(2)
+    .parse(observations.data);
+  assert.deepEqual(
+    new Set(observed.map((o) => o.id)),
+    new Set([submitted.drishtiObservationId, submitted.vibhaagObservationId]),
+  );
+  for (const observation of observed) {
+    assert.equal(observation.actor_id, deps.actorId);
+    assert.equal(observation.engagement_id, scope.engagementId);
+    assert.equal(
+      createHash('sha256').update(observation.output_utf8).digest('hex'),
+      observation.output_sha256,
+    );
+    const claim = await deps.db
+      .from('public_source_dispatch_claims')
+      .select('dispatch_id')
+      .eq('tenant_id', deps.tenantId)
+      .eq('dispatch_id', observation.dispatch_id)
+      .single();
+    assert.equal(claim.error, null);
+    assert.equal(claim.data?.dispatch_id, observation.dispatch_id);
+    const receipt = await deps.db
+      .from('audit_ledger')
+      .select('actor_type,actor_id,action_type,output_hash')
+      .eq('tenant_id', deps.tenantId)
+      .eq('id', observation.completion_receipt)
+      .single();
+    assert.equal(receipt.error, null);
+    assert.equal(receipt.data?.actor_type, 'agent');
+    assert.equal(receipt.data?.actor_id, observation.agent);
+    assert.equal(receipt.data?.action_type, 'agent.completed');
+    assert.equal(receipt.data?.output_hash, observation.output_sha256);
+  }
+  const before = deps.launchCount();
+  const accepted = z
+    .object({ jobId: z.uuid(), runId: z.uuid(), status: z.literal('unconfirmed') })
+    .parse(
+      await (
+        await deps.request(`/v1/assessment/jobs/${submitted.jobId}`, 200, { headers: deps.headers })
+      ).json(),
+    );
+  assert.equal(accepted.jobId, submitted.jobId);
+  assert.equal(accepted.runId, submitted.runId);
+  // No controller starts merely by navigating or receiving the human request.
+  const packets = await deps.db
+    .from('workload_assessment_packets')
+    .select('run_id')
+    .eq('run_id', submitted.runId);
+  assert.equal(packets.error, null);
+  assert.deepEqual(packets.data, []);
+  deps.onPhase('browser-source-real-controller-finalize');
+  await deps.execute(submitted.jobId);
+  assert.equal(deps.launchCount(), before + 1);
+  const terminal = z
+    .object({
+      status: z.literal('finalization_recorded'),
+      finalization: z.object({ resultDigest: digest }),
+    })
+    .parse(
+      await (
+        await deps.request(`/v1/assessment/jobs/${submitted.jobId}`, 200, { headers: deps.headers })
+      ).json(),
+    );
+  const snapshot = AssessmentSnapshotSchema.parse(
+    await (
+      await deps.request(`/v1/assessment?engagementId=${scope.engagementId}`, 200, {
+        headers: deps.headers,
+      })
+    ).json(),
+  );
+  assert.equal(snapshot.provenance?.runId, submitted.runId);
+  assert.equal(snapshot.controls.length, 46);
+  assert.equal(
+    snapshot.controls.reduce((n, c) => n + (c.answerCounts?.callerAffirmed ?? 0), 0),
+    1,
+  );
+  assert.equal(
+    snapshot.controls.reduce((n, c) => n + (c.answerCounts?.unknown ?? 0), 0),
+    64,
+  );
+  const rows = z
+    .array(sourceRow)
+    .length(1)
+    .parse(
+      JSON.parse(
+        guardedParitySql(
+          `select coalesce(json_agg(s),'[]'::json)::text from public.public_control_assessment_sources s where tenant_id='${deps.tenantId}' and job_id='${submitted.jobId}';`,
+          'postgres',
+        ).trim(),
+      ),
+    );
+  const source = rows[0]!;
+  assert.equal(source.actor_id, deps.actorId);
+  assert.equal(source.estate_id, scope.estateId);
+  assert.equal(source.engagement_id, scope.engagementId);
+  assert.equal(source.run_id, submitted.runId);
+  assert.equal(source.review_id, head.id);
+  assert.equal(source.request_sha256, head.request_sha256);
+  assert.equal(source.snapshot_sha256, head.snapshot_sha256);
+  assert.equal(source.review_receipt, head.receipt_id);
+  assert.equal(source.capture_receipt, head.snapshot.captureReceipt);
+  assert.equal(createHash('sha256').update(source.input_text).digest('hex'), source.input_sha256);
+  assert.deepEqual(
+    z.object({ answers: z.unknown() }).parse(JSON.parse(source.input_text)).answers,
+    head.snapshot.normalizedAnswers,
+  );
+  const replay = AssessmentRequestReceiptSchema.parse(
+    await (
+      await deps.request('/v1/assessment/jobs', 202, {
+        method: 'POST',
+        headers: {
+          ...deps.headers,
+          'content-type': 'application/json',
+          'idempotency-key': submitted.jobId,
+        },
+        body: submitted.requestText,
+      })
+    ).json(),
+  );
+  assert.equal(replay.jobId, submitted.jobId);
+  assert.equal(replay.runId, submitted.runId);
+  assert.equal(deps.launchCount(), before + 1);
+  const chain = await deps.db.rpc('verify_ledger', {
+    p_tenant_id: deps.tenantId,
+    p_from_sequence: 1,
+  });
+  assert.equal(chain.error, null);
+  assert.deepEqual(chain.data, []);
+  assert(terminal.finalization.resultDigest);
+  return {
+    kind: 'isolated-reviewed-public-source-real-controller',
+    ...scope,
+    jobId: submitted.jobId,
+    runId: submitted.runId,
+    reviewId: head.id,
+    inputSha256: source.input_sha256,
+    captureReceipt: source.capture_receipt,
+    reviewReceipt: source.review_receipt,
+    requestedReceipt: source.requested_receipt,
+    network: 'synthetic-dns-and-page-bytes',
+    kms: 'fixture-only-no-cloud-iam-proof',
+    publicSourceAgents: {
+      bindingId: submitted.bindingId,
+      drishtiObservationId: submitted.drishtiObservationId,
+      vibhaagObservationId: submitted.vibhaagObservationId,
+      verifiedRetainedOutputs: observed.map((o) => ({
+        agent: o.agent,
+        observationId: o.id,
+        outputSha256: o.output_sha256,
+        completionReceipt: o.completion_receipt,
+      })),
+    },
+    asset: {
+      targetId: submitted.targetId,
+      targetSha256: submitted.targetSha256,
+      associationId: submitted.associationId,
+      associationSha256: submitted.associationSha256,
+      checkId: submitted.checkId,
+    },
   };
 }
 

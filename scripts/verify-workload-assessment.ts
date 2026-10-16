@@ -1,8 +1,19 @@
 import {
+  registeredBrowserRequested,
+  registeredBrowserDirectory,
+  writeRegisteredBrowserFile,
+  waitForRegisteredSubmission,
+  prepareRegisteredBrowserLaunchers,
+  cleanupRegisteredBrowserGroups,
+  readRegisteredBrowserFile,
+} from './lib/acceptance-public-asset-browser.js';
+import { HARNESS_MFA_KEY } from '../tests/e2e/personas.js';
+import {
   reportAcceptanceRequested,
   clearPublicReportBrowserHandoff,
   verifyPublicControlReports,
   writePublicReportBrowserHandoff,
+  ownedReportProvider,
 } from './lib/acceptance-public-control-reports.js';
 import {
   acceptancePublicWebsiteCapture,
@@ -41,7 +52,7 @@ import {
 } from 'node:crypto';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
-import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, writeFileSync, openSync, closeSync } from 'node:fs';
 import { mkdtemp, realpath, chmod, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createRemoteAssessmentServer } from '../services/bff/src/workloads/assessment-remote.js';
@@ -84,8 +95,37 @@ const outcomes: Record<string, boolean> = {};
 let finalizedHttpProof: Record<string, unknown> | undefined;
 let publicReportProof: Awaited<ReturnType<typeof verifyPublicControlReports>> | undefined;
 let httpFailure: ReturnType<typeof acceptanceHttpFailure> | undefined;
+const ownedBrowserChildren = new Set<ReturnType<typeof spawn>>();
+async function stopOwnedBrowserChildren() {
+  for (const child of ownedBrowserChildren) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
+    child.kill('SIGINT');
+    await Promise.race([
+      once(child, 'exit').catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await once(child, 'exit').catch(() => undefined);
+    }
+  }
+  if (registeredBrowserRequested()) {
+    const directory = registeredBrowserDirectory(process.cwd());
+    try {
+      const config = readRegisteredBrowserFile(directory, 'config');
+      cleanupRegisteredBrowserGroups(process.cwd(), directory, config);
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+    }
+  }
+  ownedBrowserChildren.clear();
+}
 async function main() {
   const withPublicReports = reportAcceptanceRequested();
+  const withRegisteredBrowser = registeredBrowserRequested();
+  const browserNonce = randomBytes(16).toString('hex');
+  let registeredBrowserProcess: ReturnType<typeof spawn> | undefined;
+  let registeredBrowserCompletion: Promise<void> | undefined;
   if (withPublicReports) clearPublicReportBrowserHandoff();
   const input = z
     .object({
@@ -146,9 +186,12 @@ async function main() {
   const actorId = created.user!.id;
   check(await db.from('users').insert({ id: actorId, email: created.user!.email }));
   check(
-    await db
-      .from('tenants')
-      .insert({ id: tenantId, slug: `worker-${tenantId}`, name: 'Synthetic isolated assessment' }),
+    await db.from('tenants').insert({
+      id: tenantId,
+      slug: `worker-${tenantId}`,
+      name: 'Synthetic isolated assessment',
+      ...(withRegisteredBrowser ? { is_demo: true } : {}),
+    }),
   );
   check(
     await db.from('tenant_users').insert({ tenant_id: tenantId, user_id: actorId, role: 'owner' }),
@@ -960,7 +1003,10 @@ except Exception as error:
       ? { SUPABASE_STATUTORY_PROOF_WRITER_KEY: roleKey('statutory_proof_writer') }
       : {}),
     APPROVAL_SIGNING_KEY: randomBytes(32).toString('hex'),
-    AXIOM_MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
+    // Only this explicitly guarded disposable browser fixture shares the existing persona ring.
+    AXIOM_MFA_ENCRYPTION_KEY: withRegisteredBrowser
+      ? HARNESS_MFA_KEY
+      : randomBytes(32).toString('hex'),
     AGENT_RUNTIME_INTERNAL_TOKEN: randomBytes(32).toString('hex'),
     AGENT_RUNTIME_URL: 'http://unused-runtime.invalid',
     MODEL_GATEWAY_API_KEY: randomBytes(32).toString('hex'),
@@ -968,6 +1014,86 @@ except Exception as error:
     AXIOM_REPORT_EMAIL_MODE: 'disabled',
     LOG_LEVEL: 'error',
   });
+  if (withRegisteredBrowser) {
+    phase = 'normal-auth-public-source-real-runtime-start';
+    const directory = registeredBrowserDirectory(process.cwd());
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const provider = ownedReportProvider();
+    const reservation = createServer();
+    reservation.listen(0, '127.0.0.1');
+    await once(reservation, 'listening');
+    const reserved = reservation.address();
+    assert(reserved && typeof reserved === 'object');
+    await new Promise<void>((resolve, reject) =>
+      reservation.close((error) => (error ? reject(error) : resolve())),
+    );
+    process.env.AGENT_RUNTIME_URL = `http://127.0.0.1:${reserved.port}`;
+    const log = openSync(join(directory, 'agent-runtime.private.log'), 'wx', 0o600);
+    let runtime: ReturnType<typeof spawn>;
+    try {
+      runtime = spawn(
+        join(process.cwd(), 'services/agent-runtime/.venv/bin/python'),
+        [
+          '-m',
+          'uvicorn',
+          'axiom.app:app',
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(reserved.port),
+          '--no-access-log',
+        ],
+        {
+          cwd: directory,
+          env: {
+            PATH: process.env.PATH,
+            PYTHONPATH: join(process.cwd(), 'services/agent-runtime/src'),
+            // Test environment permits loopback; configured scoped writer still uses real SQL.
+            ENVIRONMENT: 'test',
+            LOG_LEVEL: 'error',
+            AWS_EC2_METADATA_DISABLED: 'true',
+            SUPABASE_URL: url.origin,
+            SUPABASE_ANON_KEY: status.PUBLISHABLE_KEY ?? status.ANON_KEY!,
+            SUPABASE_SERVICE_KEY: status.SERVICE_ROLE_KEY!,
+            SUPABASE_AGENT_LEDGER_WRITER_KEY: roleKey('agent_ledger_writer'),
+            AGENT_RUNTIME_INTERNAL_TOKEN: process.env.AGENT_RUNTIME_INTERNAL_TOKEN,
+            APPROVAL_SIGNING_KEY: process.env.APPROVAL_SIGNING_KEY,
+            MODEL_GATEWAY_API_KEY: process.env.MODEL_GATEWAY_API_KEY,
+            MODEL_GATEWAY_URL: 'http://127.0.0.1:1',
+            FEATURE_CONTINUOUS_SCHEDULER: 'false',
+            AXIOM_REGION: 'ap-south-1',
+            AXIOM_STORAGE_ENDPOINT: provider.endpoint,
+            AXIOM_STORAGE_ACCESS_KEY_ID: provider.accessKeyId,
+            AXIOM_STORAGE_SECRET_ACCESS_KEY: provider.secretAccessKey,
+            AXIOM_EVIDENCE_BUCKET: provider.bucket,
+          },
+          stdio: ['ignore', log, log],
+        },
+      );
+      ownedBrowserChildren.add(runtime);
+      runtime.on('error', () => undefined);
+    } finally {
+      closeSync(log);
+    }
+    const until = Date.now() + 15000;
+    let healthy = false;
+    while (Date.now() < until && runtime.exitCode === null && runtime.signalCode === null) {
+      try {
+        const response = await fetch(process.env.AGENT_RUNTIME_URL + '/health', {
+          redirect: 'error',
+          signal: AbortSignal.timeout(500),
+        });
+        healthy =
+          response.ok &&
+          z.object({ status: z.literal('ok') }).safeParse(await response.json()).success;
+        if (healthy) break;
+      } catch {
+        /* Readiness only; never retry any agent invocation. */
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert(healthy, 'owned deterministic agent runtime unavailable');
+  }
   await seedAcceptanceLibrary(
     url.origin,
     status.PUBLISHABLE_KEY ?? status.ANON_KEY!,
@@ -1039,6 +1165,7 @@ except Exception as error:
   // the complete mounted app.fetch middleware chain, with no injected Auth state.
   let httpOrigin = '';
   const httpServer = createServer(async (incoming, outgoing) => {
+    if (withRegisteredBrowser) outgoing.setHeader('X-Axiom-Owned-Fixture', browserNonce);
     try {
       const chunks: Buffer[] = [];
       let bytes = 0;
@@ -1070,7 +1197,7 @@ except Exception as error:
   });
   httpServer.requestTimeout = 30000;
   httpServer.headersTimeout = 10000;
-  httpServer.listen(0, '127.0.0.1');
+  httpServer.listen(withRegisteredBrowser ? 4400 : 0, '127.0.0.1');
   await once(httpServer, 'listening');
   const address = httpServer.address();
   assert(address && typeof address === 'object');
@@ -1458,6 +1585,93 @@ except Exception as error:
       onPhase: (value) => {
         phase = `normal-auth-public-source-${value}`;
       },
+      ...(withRegisteredBrowser
+        ? {
+            browserSubmit: async (scope: {
+              estateId: string;
+              systemId: string;
+              engagementId: string;
+            }) => {
+              const directory = registeredBrowserDirectory(process.cwd());
+              const demo = await db.from('tenants').select('is_demo').eq('id', tenantId).single();
+              assert.equal(demo.error, null);
+              assert.equal(demo.data?.is_demo, true);
+              const config = {
+                version: 1 as const,
+                kind: 'owned-demo-registered-website-browser' as const,
+                nonce: browserNonce,
+                codeSha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+                databaseId: selectedParity.databaseId,
+                projectId: selectedParity.projectId,
+                apiOrigin: 'http://127.0.0.1:56321' as const,
+                bffOrigin: 'http://127.0.0.1:4400' as const,
+                tenantId,
+                tenantSlug: `worker-${tenantId}`,
+                actorId,
+                ...scope,
+                isDemo: true as const,
+                publicUrl: 'https://fixture.axiomproof.ai/' as const,
+                email: created.user!.email!,
+                password: ownerPassword,
+                loginSecret: factor.secret,
+              };
+              writeRegisteredBrowserFile(directory, 'config', config);
+              prepareRegisteredBrowserLaunchers(process.cwd(), directory, config);
+              const browserLog = openSync(join(directory, 'browser.private.log'), 'wx', 0o600);
+              try {
+                registeredBrowserProcess = spawn(
+                  'pnpm',
+                  [
+                    '--filter',
+                    '@axiom/e2e',
+                    'exec',
+                    'playwright',
+                    'test',
+                    'tests/board-reports-provider.spec.ts',
+                    '--grep',
+                    'finalized source, released board PDF, and source-bound Pramaan dossier use exact retained versions$',
+                    '--workers=1',
+                    '--retries=0',
+                    '--reporter=line,json',
+                    '--trace=off',
+                  ],
+                  {
+                    env: {
+                      ...process.env,
+                      AXIOM_EVIDENCE_STORAGE_ACCEPTANCE: 'true',
+                      AXIOM_E2E_WEB_PORT: '3301',
+                      AXIOM_E2E_BFF_PORT: '4400',
+                      AXIOM_E2E_MARKETING_PORT: '3300',
+                      PLAYWRIGHT_JSON_OUTPUT_FILE: join(directory, 'browser-results.private.json'),
+                    },
+                    stdio: ['ignore', browserLog, browserLog],
+                  },
+                );
+                ownedBrowserChildren.add(registeredBrowserProcess);
+              } finally {
+                closeSync(browserLog);
+              }
+              registeredBrowserCompletion = new Promise<void>((resolve, reject) => {
+                registeredBrowserProcess!.once('error', () =>
+                  reject(new Error('registered browser launch refused')),
+                );
+                registeredBrowserProcess!.once('exit', (code) =>
+                  code === 0
+                    ? resolve()
+                    : reject(new Error('registered browser acceptance failed')),
+                );
+              });
+              // Attach a handler immediately while the source phase is still waiting.
+              void registeredBrowserCompletion.catch(() => undefined);
+              return waitForRegisteredSubmission(directory, config, {
+                deadline: Date.now() + 180000,
+                signal: AbortSignal.timeout(180000),
+                browserAlive: () =>
+                  registeredBrowserProcess?.exitCode === null && !registeredBrowserProcess.killed,
+              });
+            },
+          }
+        : {}),
     });
     outcomes['normal-auth-real-capture-human-review-source-controller-finalization'] = true;
     if (withPublicReports) {
@@ -1476,8 +1690,17 @@ except Exception as error:
         },
       });
       outcomes[
-        'normal-auth-reviewed-source-board3-auditor3-mfa-human-review-exact-provider-release-download'
+        withRegisteredBrowser
+          ? 'normal-auth-reviewed-source-board4-auditor4-mfa-human-review-exact-provider-release-download'
+          : 'normal-auth-reviewed-source-board3-auditor3-mfa-human-review-exact-provider-release-download'
       ] = true;
+      if (withRegisteredBrowser) {
+        writePublicReportBrowserHandoff(publicReportProof);
+        assert(registeredBrowserCompletion);
+        await registeredBrowserCompletion;
+        outcomes['normal-auth-registered-browser-source3-board4-auditor4-lost-response-recovery'] =
+          true;
+      }
     }
 
     finalizedHttpProof = {
@@ -1514,6 +1737,8 @@ except Exception as error:
     };
   } finally {
     try {
+      if (registeredBrowserProcess && registeredBrowserProcess.exitCode === null)
+        registeredBrowserProcess.kill('SIGINT');
       httpServer.closeAllConnections?.();
       await new Promise<void>((resolve, reject) =>
         httpServer.close((error) => (error ? reject(error) : resolve())),
@@ -2387,7 +2612,7 @@ print('parent-death-clean')`;
 
   if (withPublicReports) {
     assert(publicReportProof);
-    writePublicReportBrowserHandoff(publicReportProof);
+    if (!withRegisteredBrowser) writePublicReportBrowserHandoff(publicReportProof);
   }
   mkdirSync('.axiom-runtime/workload-assessment', { recursive: true, mode: 0o700 });
   writeFileSync(
@@ -2408,29 +2633,40 @@ print('parent-death-clean')`;
   );
   process.stdout.write(JSON.stringify({ passed: true, outcomes }) + '\n');
 }
-main().catch((error: unknown) => {
-  const entrypoint =
-    error instanceof Error &&
-    /^Controller entrypoint fixture refused at ([a-z-]{1,40})$/.exec(error.message);
-  if (entrypoint) phase = `vm-entrypoint-${entrypoint[1]}`;
-  if (phase.startsWith('normal-auth-public-source-')) {
-    mkdirSync('.axiom-runtime/review/all-agent-acceptance', { recursive: true, mode: 0o700 });
-    writeFileSync(
-      `.axiom-runtime/review/all-agent-acceptance/public-source-failure-${Date.now()}.private.json`,
-      JSON.stringify({ phase, ...publicControlAcceptanceFailure(error), accepted: false }) + '\n',
-      { mode: 0o600 },
-    );
-  }
-  if (httpFailure) {
-    const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-    const directory = '.axiom-runtime/review/all-agent-acceptance';
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    writeFileSync(
-      `${directory}/actual-http-failure-${revision.slice(0, 12)}-${Date.now()}.private.json`,
-      JSON.stringify({ revision, phase, ...httpFailure, accepted: false }, null, 2) + '\n',
-      { mode: 0o600 },
-    );
-  }
-  process.stderr.write(`Workload assessment failed at ${phase}. Private output withheld.\n`);
-  process.exitCode = 1;
-});
+main()
+  .catch((error: unknown) => {
+    const entrypoint =
+      error instanceof Error &&
+      /^Controller entrypoint fixture refused at ([a-z-]{1,40})$/.exec(error.message);
+    if (entrypoint) phase = `vm-entrypoint-${entrypoint[1]}`;
+    if (phase.startsWith('normal-auth-public-source-')) {
+      mkdirSync('.axiom-runtime/review/all-agent-acceptance', { recursive: true, mode: 0o700 });
+      writeFileSync(
+        `.axiom-runtime/review/all-agent-acceptance/public-source-failure-${Date.now()}.private.json`,
+        JSON.stringify({ phase, ...publicControlAcceptanceFailure(error), accepted: false }) + '\n',
+        { mode: 0o600 },
+      );
+    }
+    if (httpFailure) {
+      const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const directory = '.axiom-runtime/review/all-agent-acceptance';
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+      writeFileSync(
+        `${directory}/actual-http-failure-${revision.slice(0, 12)}-${Date.now()}.private.json`,
+        JSON.stringify({ revision, phase, ...httpFailure, accepted: false }, null, 2) + '\n',
+        { mode: 0o600 },
+      );
+    }
+    process.stderr.write(`Workload assessment failed at ${phase}. Private output withheld.\n`);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    try {
+      await stopOwnedBrowserChildren();
+    } catch {
+      process.stderr.write(
+        'Workload assessment failed at owned-browser-cleanup. Private output withheld.\n',
+      );
+      process.exitCode = 1;
+    }
+  });

@@ -16,13 +16,20 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { EvidenceVault } from '../../packages/evidence/src/index.js';
 import { generateTotp } from '../../packages/mfa/src/index.js';
-import { BoardReportContentV3Schema } from '../../packages/report-kit/src/board-report.js';
+import {
+  BoardReportContentV3Schema,
+  BoardReportContentV4Schema,
+} from '../../packages/report-kit/src/board-report.js';
 import {
   AuditorAssessmentPackV3Schema,
+  AuditorAssessmentPackV4Schema,
   FrozenAuditorSourceSchema,
 } from '../../packages/report-kit/src/auditor-source.js';
 import { FrozenBoardSourceSchema } from '../../packages/report-kit/src/board-source.js';
-import { verifyFrozenHumanControlReview } from '../../packages/report-kit/src/public-control-provenance.js';
+import {
+  verifyFrozenHumanControlReview,
+  verifyFrozenHumanControlReviewWithAsset,
+} from '../../packages/report-kit/src/public-control-provenance.js';
 import { parseCatalogueJson } from '../../packages/control-library/src/index.js';
 
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -165,6 +172,36 @@ const sourceProofSchema = z.object({
   captureReceipt: receipt,
   reviewReceipt: receipt,
   requestedReceipt: receipt,
+  publicSourceAgents: z
+    .object({
+      bindingId: uuid,
+      drishtiObservationId: uuid,
+      vibhaagObservationId: uuid,
+      verifiedRetainedOutputs: z
+        .array(
+          z
+            .object({
+              agent: z.enum(['drishti', 'vibhaag']),
+              observationId: uuid,
+              outputSha256: digest,
+              completionReceipt: receipt,
+            })
+            .strict(),
+        )
+        .length(2),
+    })
+    .strict()
+    .optional(),
+  asset: z
+    .object({
+      targetId: uuid,
+      targetSha256: digest,
+      associationId: uuid,
+      associationSha256: digest,
+      checkId: uuid,
+    })
+    .strict()
+    .optional(),
 });
 const artifact = z.object({
   artifact_kind: z.string(),
@@ -413,8 +450,8 @@ export async function verifyPublicControlReports(deps: {
         kind === 'board'
           ? FrozenBoardSourceSchema.parse(parseCatalogueJson(frozen.source_text, 4194304))
           : FrozenAuditorSourceSchema.parse(parseCatalogueJson(frozen.source_text, 4194304));
-      assert.equal(parsed.schema_version, 2);
-      assert(parsed.schema_version === 2);
+      assert.equal(parsed.schema_version, source.asset ? 3 : 2);
+      assert(parsed.schema_version === 2 || parsed.schema_version === 3);
       assert.equal(parsed.result_sha256, resultDigest);
       const h = parsed.human_control_review;
       assert.equal(h.review.id, source.reviewId);
@@ -423,19 +460,39 @@ export async function verifyPublicControlReports(deps: {
       assert.equal(h.capture.capture_receipt.id, source.captureReceipt);
       assert.equal(h.review.receipt.id, source.reviewReceipt);
       assert.equal(h.requested_receipt.id, source.requestedReceipt);
-      const appendix = verifyFrozenHumanControlReview(h, {
+      const scope = {
         tenantId: deps.tenantId,
         engagementId: source.engagementId,
         assessmentRunId: source.runId,
         libraryVersion: parsed.library_version,
         controlsText: parsed.controls_text,
         resultText: parsed.result_text,
-      });
+      };
+      const verified = source.asset ? verifyFrozenHumanControlReviewWithAsset(h, scope) : undefined;
+      const appendix = verified?.public_review_appendix ?? verifyFrozenHumanControlReview(h, scope);
       const content =
         kind === 'board'
-          ? BoardReportContentV3Schema.parse(JSON.parse(row.content_text))
-          : AuditorAssessmentPackV3Schema.parse(JSON.parse(row.content_text));
-      assert.equal(content.schema_version, 3);
+          ? (source.asset ? BoardReportContentV4Schema : BoardReportContentV3Schema).parse(
+              JSON.parse(row.content_text),
+            )
+          : (source.asset ? AuditorAssessmentPackV4Schema : AuditorAssessmentPackV3Schema).parse(
+              JSON.parse(row.content_text),
+            );
+      assert.equal(content.schema_version, source.asset ? 4 : 3);
+      if (source.asset) {
+        assert(verified);
+        assert('asset_scope' in content);
+        assert.deepEqual(content.asset_scope, verified.asset_scope);
+        assert.equal(verified.asset_scope.target.id, source.asset.targetId);
+        assert.equal(verified.asset_scope.association.id, source.asset.associationId);
+        assert.equal(verified.asset_scope.target.sha256, source.asset.targetSha256);
+        assert.equal(verified.asset_scope.association.sha256, source.asset.associationSha256);
+        assert.equal(verified.asset_scope.estate.id, source.estateId);
+        assert.equal(verified.asset_scope.system.id, source.systemId);
+        assert.equal(verified.asset_scope.ownership_verified, false);
+        assert.equal(verified.asset_scope.connector_access_granted, false);
+        assert.equal(verified.asset_scope.review_required, true);
+      }
       assert.deepEqual(content.public_review_appendix, appendix);
       assert.equal(appendix.controls.length, 46);
       assert.equal(appendix.declarationsVerified, false);
