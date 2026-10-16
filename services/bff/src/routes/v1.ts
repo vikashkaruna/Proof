@@ -22,6 +22,7 @@ import { catalogueReferenceRoutes } from './catalogue-references.js';
 import { publicWebsiteControlReviewRoutes } from './public-website-control-review.js';
 import { publicControlReviewSetRoutes } from './public-control-review-sets.js';
 import { publicWebsiteCheckRoutes } from './public-website-checks.js';
+import { publicWebsiteAssetRoutes } from './public-website-assets.js';
 import { publicSourceBindingRoutes } from './public-source-bindings.js';
 import { publicSourceAgentRoutes } from './public-source-agents.js';
 import { publicSourceReadRoutes } from './public-source-reads.js';
@@ -259,6 +260,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', connectorRoutes());
   app.route('/', catalogueReferenceRoutes());
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
+  app.route('/', publicWebsiteAssetRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', publicWebsiteControlReviewRoutes());
   app.route('/', publicControlReviewSetRoutes());
   app.route('/', publicSourceBindingRoutes());

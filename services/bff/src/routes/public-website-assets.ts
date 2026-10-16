@@ -29,7 +29,7 @@ type Rpc = (
   args: Record<string, unknown>,
   signal: AbortSignal,
 ) => Promise<{ data: unknown; error: unknown }>;
-/** UNMOUNTED core: UI and downstream provenance must be integrated/reviewed before mounting. */
+/** Registered website operations retain independent role, scope and durable provenance gates. */
 export function publicWebsiteAssetRoutes(
   deps: { read?: Rpc; write?: Rpc; capture?: typeof checkPublicWebsiteEvidenceV2 } = {},
 ) {

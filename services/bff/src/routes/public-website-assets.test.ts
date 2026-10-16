@@ -11,6 +11,13 @@ import {
 import type { Variables } from '../types.js';
 import { assetSha256 } from '../services/public-website-assets.js';
 import { publicWebsiteAssetRoutes } from './public-website-assets.js';
+vi.hoisted(() => {
+  process.env.NODE_ENV = 'test';
+  process.env.SUPABASE_URL = 'https://local.supabase.co';
+  process.env.SUPABASE_ANON_KEY = 'a'.repeat(40);
+  process.env.SUPABASE_SERVICE_KEY = 'b'.repeat(40);
+  process.env.APPROVAL_SIGNING_KEY = 'k'.repeat(48);
+});
 const defaults = vi.hoisted(() => ({ rpc: vi.fn() }));
 vi.mock('@axiom/supabase', () => ({
   createSupabaseAdmin: () => ({
@@ -631,4 +638,65 @@ it('lists explicit scoped selection pages with current read capability and refus
   expect((await t.app.request(url + '&targetId=' + id)).status).toBe(400);
   expect(t.read).not.toHaveBeenCalled();
   expect(t.write).not.toHaveBeenCalled();
+});
+
+it('mounts durable asset operations in actual v1 with role and expected-actor gates', async () => {
+  const { v1Routes } = await import('./v1.js');
+  const build = (role: UserRole) => {
+    const app = new Hono<{ Variables: Variables }>();
+    app.use('*', async (c, next) => {
+      c.set('tenantId', tenant);
+      c.set('user', { id: actor } as never);
+      c.set('role', role);
+      await next();
+    });
+    app.route(
+      '/v1',
+      v1Routes({
+        approvalEngine: {} as never,
+        killSwitch: {} as never,
+        ledger: {} as never,
+        mfa: {} as never,
+        realtime: {} as never,
+      }),
+    );
+    return app;
+  };
+  defaults.rpc.mockReset();
+  defaults.rpc.mockResolvedValue({ data: { state: 'not_found' }, error: null });
+  const owner = build(UserRole.OWNER);
+  const recovered = await owner.request(`/v1/public-website-assets/operations/${key}`);
+  expect(recovered.status).toBe(200);
+  expect(recovered.headers.get('cache-control')).toBe('private, no-store');
+  expect(await recovered.json()).toEqual({ data: { state: 'not_found' } });
+  expect(defaults.rpc).toHaveBeenCalledWith(
+    'read_public_website_asset_operation',
+    {
+      p_tenant_id: tenant,
+      p_actor_id: actor,
+      p_operation_key: key,
+    },
+    expect.any(AbortSignal),
+  );
+  defaults.rpc.mockClear();
+  const submit = (app: Hono<{ Variables: Variables }>, expected = actor) =>
+    app.request('/v1/public-website-assets/operations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Expected-Actor-Id': expected },
+      body: JSON.stringify(request),
+    });
+  expect((await submit(build(UserRole.VIEWER))).status).toBe(403);
+  expect((await submit(owner, id)).status).toBe(409);
+  expect(defaults.rpc).not.toHaveBeenCalled();
+  defaults.rpc.mockResolvedValue({ data: receipt(), error: null });
+  expect((await submit(owner)).status).toBe(201);
+  expect(defaults.rpc).toHaveBeenCalledWith(
+    'record_public_website_asset_operation',
+    {
+      p_tenant_id: tenant,
+      p_actor_id: actor,
+      p_request_text: encodePublicWebsiteAssetRequest(request),
+    },
+    expect.any(AbortSignal),
+  );
 });
