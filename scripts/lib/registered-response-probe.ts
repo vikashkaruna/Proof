@@ -46,6 +46,17 @@ export const registeredResponseProbeSchema = z
     stage: z.enum(['response-json', 'schema-parse']),
     errorClass: z.enum(['ZodError', 'SyntaxError', 'TypeError', 'Error', 'other']),
     mediaType: z.enum(['json', 'html', 'other', 'absent']),
+    bodyReadFailure: z
+      .enum([
+        'json-syntax',
+        'context-closed',
+        'response-body-unavailable',
+        'request-failed',
+        'aborted',
+        'unknown',
+        'not-applicable',
+      ])
+      .optional(),
     scope: z
       .object({
         tenantMatches: z.boolean(),
@@ -99,6 +110,24 @@ export function registeredResponseScope(
           headers['idempotency-key'] === body.operationKey,
   };
 }
+/** Message inspection only selects a finite category; no message content is retained. */
+function bodyReadFailure(error: unknown): NonNullable<RegisteredResponseProbe['bodyReadFailure']> {
+  if (error instanceof SyntaxError) return 'json-syntax';
+  if (!(error instanceof Error)) return 'unknown';
+  const message = error.message;
+  if (/target page, context or browser has been closed|target closed|session closed/i.test(message))
+    return 'context-closed';
+  if (
+    /no resource with given identifier|no data found for resource|response body is unavailable|request was redirected/i.test(
+      message,
+    )
+  )
+    return 'response-body-unavailable';
+  if (/aborted|aborterror|err_aborted/i.test(message)) return 'aborted';
+  if (/failed to fetch|networkerror|err_connection|request failed|load failed/i.test(message))
+    return 'request-failed';
+  return 'unknown';
+}
 /** Run the original decode callback unchanged, and always rethrow its SAME error.
  * Diagnostic persistence failure must never replace or suppress that error. */
 export async function probeRegisteredResponse<T>(
@@ -125,6 +154,7 @@ export async function probeRegisteredResponse<T>(
           version: 1,
           phase,
           stage,
+          bodyReadFailure: stage === 'response-json' ? bodyReadFailure(error) : 'not-applicable',
           errorClass:
             error instanceof z.ZodError
               ? 'ZodError'

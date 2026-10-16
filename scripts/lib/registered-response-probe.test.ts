@@ -169,3 +169,64 @@ test('request matching exposes only equality bits for exact body/header scope', 
 test('strict schema rejects extra raw properties and unapproved issue paths/codes', () => {
   assert.equal(registeredResponseProbeSchema.safeParse({ rawBody: canary }).success, false);
 });
+
+test('body-read failures use finite categories without retaining private message suffixes', async () => {
+  const cases = [
+    [new SyntaxError(canary), 'json-syntax'],
+    [new Error(`Target page, context or browser has been closed ${canary}`), 'context-closed'],
+    [
+      new Error(`Protocol error: No resource with given identifier found ${canary}`),
+      'response-body-unavailable',
+    ],
+    [new Error(`net::ERR_ABORTED ${canary}`), 'aborted'],
+    [new TypeError(`Failed to fetch ${canary}`), 'request-failed'],
+    [new Error(canary), 'unknown'],
+    [canary, 'unknown'],
+  ] as const;
+  for (const [original, category] of cases) {
+    let captured: RegisteredResponseProbe | undefined;
+    await assert.rejects(
+      probeRegisteredResponse(
+        {
+          json: async () => {
+            throw original;
+          },
+          headers: () => ({ 'content-type': 'application/json' }),
+        },
+        'target-submit',
+        scope,
+        (value) => value,
+        (probe) => {
+          captured = probe;
+        },
+      ),
+      (error) => error === original,
+    );
+    assert.equal(captured?.bodyReadFailure, category);
+    assert(!JSON.stringify(captured).includes(canary));
+  }
+});
+
+test('decoder failures are never relabelled as transport errors and raw categories are refused', async () => {
+  const original = new Error(`Failed to fetch ${canary}`);
+  let captured: RegisteredResponseProbe | undefined;
+  await assert.rejects(
+    probeRegisteredResponse(
+      response({ data: {} }),
+      'saved-targets',
+      scope,
+      () => {
+        throw original;
+      },
+      (probe) => {
+        captured = probe;
+      },
+    ),
+    (error) => error === original,
+  );
+  assert.equal(captured?.bodyReadFailure, 'not-applicable');
+  assert.equal(
+    registeredResponseProbeSchema.safeParse({ ...captured, bodyReadFailure: canary }).success,
+    false,
+  );
+});
