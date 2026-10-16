@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
+import { canonicalJson } from '@axiom/ledger';
 import { expect, it, vi } from 'vitest';
 import {
   UserRole,
   encodePublicWebsiteAssetRequest,
   PUBLIC_WEBSITE_ASSET_REQUEST_CODEC,
+  PUBLIC_WEBSITE_ASSET_CANCELLATION_CODEC,
   PUBLIC_WEBSITE_ASSET_SNAPSHOT_CODEC,
 } from '@axiom/types';
 import type { Variables } from '../types.js';
@@ -324,6 +326,25 @@ it('validates target and budget before a bounded fresh capture, then atomically 
   expect((await t.send(captureRequest)).status).toBe(200);
   expect(t.capture).not.toHaveBeenCalled();
   expect(t.write).not.toHaveBeenCalled();
+  // A cancellation committed during the trusted fetch fences the atomic writer.
+  t.read
+    .mockResolvedValueOnce({ data: { state: 'not_found' }, error: null })
+    .mockResolvedValueOnce({
+      data: { snapshotText: target.snapshotText, snapshotSha256: target.snapshotSha256 },
+      error: null,
+    })
+    .mockResolvedValueOnce({ data: { allowed: true, retry_after: 1 }, error: null });
+  t.write.mockResolvedValue({ data: cancelledReceipt(requestText), error: null });
+  const cancelled = await t.send(captureRequest);
+  expect(cancelled.status).toBe(200);
+  expect(await cancelled.json()).toMatchObject({ data: { state: 'cancelled' } });
+  expect(t.capture).toHaveBeenCalledTimes(1);
+  t.capture.mockClear();
+  t.write.mockClear();
+  t.read.mockResolvedValueOnce({ data: cancelledReceipt(requestText), error: null });
+  expect((await t.send(captureRequest)).status).toBe(200);
+  expect(t.capture).not.toHaveBeenCalled();
+  expect(t.write).not.toHaveBeenCalled();
 });
 it('rejects escaped duplicate request keys before any transport', async () => {
   const t = setup();
@@ -439,6 +460,175 @@ it('rejects invalid UTF8 bytes rather than recording replacement characters', as
     body,
   });
   expect(response.status).toBe(400);
+  expect(t.read).not.toHaveBeenCalled();
+  expect(t.write).not.toHaveBeenCalled();
+});
+
+function cancelledReceipt(
+  requestText = encodePublicWebsiteAssetRequest(request),
+  reason = 'Abandon mistaken request',
+) {
+  const cancellationText = canonicalJson({
+    version: 1,
+    id,
+    tenantId: tenant,
+    actorId: actor,
+    operationKey: key,
+    requestSha256: assetSha256(requestText),
+    reason,
+    confirmed: true,
+  });
+  return {
+    state: 'cancelled',
+    tenantId: tenant,
+    actorId: actor,
+    operationKey: key,
+    requestCodec: PUBLIC_WEBSITE_ASSET_REQUEST_CODEC,
+    requestText,
+    requestSha256: assetSha256(requestText),
+    cancellationCodec: PUBLIC_WEBSITE_ASSET_CANCELLATION_CODEC,
+    cancellationText,
+    cancellationSha256: assetSha256(cancellationText),
+    receipt: { id: '12', entryHash: 'd'.repeat(64) },
+    replayed: false,
+  };
+}
+function cancel(
+  t: ReturnType<typeof setup>,
+  body: unknown = {
+    requestText: encodePublicWebsiteAssetRequest(request),
+    reason: 'Abandon mistaken request',
+    confirmed: true,
+  },
+  expected: string | undefined = actor,
+  pathKey = key,
+) {
+  return t.app.request(`/v1/public-website-assets/operations/${pathKey}/cancel`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(expected ? { 'X-Expected-Actor-Id': expected } : {}),
+    },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+it('returns cancellation as a distinct positive outcome on write and read, not as a captured association', async () => {
+  const t = setup();
+  t.write.mockResolvedValue({ data: cancelledReceipt(), error: null });
+  const res = await t.send();
+  expect(res.status).toBe(200);
+  expect(await res.json()).toMatchObject({ data: { state: 'cancelled' } });
+  t.read.mockResolvedValue({ data: cancelledReceipt(), error: null });
+  expect((await t.app.request(`/v1/public-website-assets/operations/${key}`)).status).toBe(200);
+  expect(t.capture).not.toHaveBeenCalled();
+});
+it('cancels exact actor-owned intent via narrow writer and verifies original reason', async () => {
+  const t = setup();
+  t.write.mockResolvedValue({ data: cancelledReceipt(), error: null });
+  expect((await cancel(t)).status).toBe(201);
+  expect(t.write).toHaveBeenCalledWith(
+    'cancel_public_website_asset_operation',
+    expect.objectContaining({
+      p_tenant_id: tenant,
+      p_actor_id: actor,
+      p_reason: 'Abandon mistaken request',
+      p_request_text: encodePublicWebsiteAssetRequest(request),
+      p_confirmed: true,
+    }),
+    expect.any(AbortSignal),
+  );
+  t.write.mockResolvedValue({
+    data: cancelledReceipt(undefined, 'Different internally consistent reason'),
+    error: null,
+  });
+  expect((await cancel(t)).status).toBe(503);
+});
+it('refuses cancellation role, actor, malformed body/path and decoded duplicate before any writer', async () => {
+  const t = setup();
+  for (const [body, expected, path] of [
+    [
+      { requestText: encodePublicWebsiteAssetRequest(request), reason: 'why', confirmed: false },
+      actor,
+      key,
+    ],
+    [
+      { requestText: encodePublicWebsiteAssetRequest(request), reason: 'why', confirmed: true },
+      id,
+      key,
+    ],
+    [
+      { requestText: encodePublicWebsiteAssetRequest(request), reason: 'why', confirmed: true },
+      actor,
+      id,
+    ],
+    ['{"confirmed":true,"confir\\u006ded":false}', actor, key],
+  ] as const) {
+    expect((await cancel(t, body, expected, path)).status).not.toBe(201);
+  }
+  expect(t.write).not.toHaveBeenCalled();
+  expect(t.read).not.toHaveBeenCalled();
+  const viewer = setup(UserRole.VIEWER);
+  expect((await cancel(viewer)).status).toBe(403);
+  expect(viewer.write).not.toHaveBeenCalled();
+});
+it('supports escaped canonical retained request within separate64KiB cancellation bound without weakening ordinary16KiB operation bound', async () => {
+  const t = setup(),
+    reason = '\u0001'.repeat(2000),
+    requestText = encodePublicWebsiteAssetRequest({
+      version: 1,
+      kind: 'withdraw',
+      operationKey: key,
+      confirmed: true,
+      subjectType: 'target',
+      subjectId: id,
+      expectedSubjectSha256: 'a'.repeat(64),
+      reason,
+    });
+  expect(Buffer.byteLength(requestText)).toBeLessThanOrEqual(16384);
+  const body = JSON.stringify({ requestText, reason, confirmed: true });
+  expect(Buffer.byteLength(body)).toBeGreaterThan(16384);
+  t.write.mockResolvedValue({ data: cancelledReceipt(requestText, reason), error: null });
+  expect((await cancel(t, body)).status).toBe(201);
+  t.write.mockClear();
+  expect((await cancel(t, body + ' '.repeat(65537))).status).toBe(413);
+  expect(t.write).not.toHaveBeenCalled();
+  const ordinary = await t.app.request('/v1/public-website-assets/operations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Expected-Actor-Id': actor },
+    body: JSON.stringify(request) + ' '.repeat(16385),
+  });
+  expect(ordinary.status).toBe(413);
+  expect(t.write).not.toHaveBeenCalled();
+});
+it('lists explicit scoped selection pages with current read capability and refuses forged page scope', async () => {
+  const t = setup(UserRole.VIEWER),
+    page = {
+      kind: 'targets',
+      tenantId: tenant,
+      actorId: actor,
+      estateId: id,
+      systemId: key,
+      rows: [],
+      nextCursor: null,
+    };
+  t.read.mockResolvedValue({ data: page, error: null });
+  const url = `/v1/public-website-assets/selection?kind=targets&estateId=${id}&systemId=${key}`;
+  expect((await t.app.request(url)).status).toBe(200);
+  expect(t.read).toHaveBeenCalledWith(
+    'list_public_website_asset_selection',
+    expect.objectContaining({
+      p_tenant_id: tenant,
+      p_actor_id: actor,
+      p_estate_id: id,
+      p_system_id: key,
+      p_after: null,
+    }),
+    expect.any(AbortSignal),
+  );
+  t.read.mockResolvedValue({ data: { ...page, tenantId: id }, error: null });
+  expect((await t.app.request(url)).status).toBe(503);
+  t.read.mockClear();
+  expect((await t.app.request(url + '&targetId=' + id)).status).toBe(400);
   expect(t.read).not.toHaveBeenCalled();
   expect(t.write).not.toHaveBeenCalled();
 });

@@ -80,3 +80,39 @@ grep -q 'current target required' "$result_dir/associate-withdrawn"
 race_run "$(associate 5)" "$(withdraw 5)" "$result_dir/associate-before-withdraw" "$result_dir/withdraw-after-associate"
 [ "$(sql -c "select count(*) from public.public_website_asset_associations where tenant_id='$(id 15)'")" = 1 ]
 echo 'Public website assets: observed-lock archive/update/withdrawal races preserve immutable accepted history and refuse stale association.'
+
+#140: cancellation and both sanctioned writers share the139 serialization point.
+# Reuse synthetic retained payload bytes only, never a target request or real account.
+sql <<'SQL'
+create function pg_temp.id(n integer) returns uuid language sql immutable as $$select ('99139999-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
+insert into public.tenants(id,slug,name) select pg_temp.id(10+n),'asset-race-'||n,'Cancellation race '||n from generate_series(6,9)n;
+insert into public.tenant_users(tenant_id,user_id,role) select pg_temp.id(10+n),pg_temp.id(1),'owner' from generate_series(6,9)n;
+insert into public.estates(id,tenant_id,slug,name) select pg_temp.id(20+n),pg_temp.id(10+n),'race','Cancellation race' from generate_series(6,9)n;
+insert into public.estate_systems(id,tenant_id,estate_id,name,system_kind) select pg_temp.id(30+n),pg_temp.id(10+n),pg_temp.id(20+n),'Site','application' from generate_series(6,9)n;
+do $$declare n integer;txt text;begin for n in 8..9 loop
+ txt:=controller_security.canonical_questionnaire_json(jsonb_build_object('version',1,'kind','register_target','operationKey',pg_temp.id(40+n),'confirmed',true,'estateId',pg_temp.id(20+n),'systemId',pg_temp.id(30+n),'expectedEstateVersion',1,'expectedSystemVersion',1,'url','https://public.org/'));
+ set local role human_action_writer;perform public.record_public_website_asset_operation(pg_temp.id(10+n),pg_temp.id(1),txt);reset role;
+ end loop;end$$;
+SQL
+new_request() { local n="$1"; if [ "$n" -lt 8 ]; then
+ sql -c "select controller_security.canonical_questionnaire_json(jsonb_build_object('version',1,'kind','register_target','operationKey','$(id $((80+n)))','confirmed',true,'estateId','$(id $((20+n)))','systemId','$(id $((30+n)))','expectedEstateVersion',1,'expectedSystemVersion',1,'url','https://public.org/'))"
+ else sql -c "select controller_security.canonical_questionnaire_json(jsonb_build_object('version',1,'kind','capture','operationKey','$(id $((80+n)))','confirmed',true,'targetId',id,'expectedTargetSha256',snapshot_sha256)) from public.public_website_targets where tenant_id='$(id $((10+n)))'"; fi; }
+write_new() { local n="$1" request; request=$(new_request "$n"); if [ "$n" -lt 8 ]; then
+ printf "set role human_action_writer; select public.record_public_website_asset_operation('%s','%s','%s')" "$(id $((10+n)))" "$actor" "$request"
+ else sql -c "select format('set role human_action_writer; select public.record_targeted_public_website_capture(%L,%L,%L,%L,%L::jsonb,%L,%L,%L,%L::jsonb)', '$(id $((10+n)))','$actor',\$req\$$request\$req\$,'https://public.org/',c.result::text,p.codec,p.payload_text,p.payload_sha256,p.page_sources::text) from public.public_website_checks c join public.public_website_control_evidence p on p.check_id=c.id where c.tenant_id='$(id 12)' limit 1"; fi; }
+cancel_new() { local n="$1";printf "set role human_action_writer; select public.cancel_public_website_asset_operation('%s','%s','%s','Abandon synthetic uncertain intent',true)" "$(id $((10+n)))" "$actor" "$(new_request "$n")"; }
+race_run "$(cancel_new 6)" "$(write_new 6)" "$result_dir/cancel-before-ordinary" "$result_dir/ordinary-after-cancel"
+grep -q '"state": "cancelled"' "$result_dir/ordinary-after-cancel"
+[ "$(sql -c "select count(*) from public.public_website_asset_operations where tenant_id='$(id 16)'")" = 0 ]
+race_run "$(write_new 7)" "$(cancel_new 7)" "$result_dir/ordinary-before-cancel" "$result_dir/cancel-after-ordinary"
+grep -q '"state": "recorded"' "$result_dir/cancel-after-ordinary"
+[ "$(sql -c "select count(*) from public.public_website_asset_cancellations where tenant_id='$(id 17)'")" = 0 ]
+race_run "$(cancel_new 8)" "$(write_new 8)" "$result_dir/cancel-before-capture" "$result_dir/capture-after-cancel"
+grep -q '"state": "cancelled"' "$result_dir/capture-after-cancel"
+[ "$(sql -c "select (select count(*) from public.public_website_checks where tenant_id='$(id 18)')+(select count(*) from public.public_website_control_evidence where tenant_id='$(id 18)')+(select count(*) from public.public_website_asset_associations where tenant_id='$(id 18)')")" = 0 ]
+[ "$(sql -c "select count(*) from public.audit_ledger where tenant_id='$(id 18)'")" = 2 ]
+race_run "$(write_new 9)" "$(cancel_new 9)" "$result_dir/capture-before-cancel" "$result_dir/cancel-after-capture"
+grep -q '"state": "recorded"' "$result_dir/cancel-after-capture"
+[ "$(sql -c "select count(*) from public.public_website_asset_cancellations where tenant_id='$(id 19)'")" = 0 ]
+[ "$(sql -c "select count(*) from public.public_website_asset_associations where tenant_id='$(id 19)'")" = 1 ]
+echo 'Public website assets: four observed-lock cancellation/ordinary/targeted-capture orderings passed; no cancelled capture side effects.'

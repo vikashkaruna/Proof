@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest';
+import { canonicalJson } from '@axiom/ledger';
 import {
   encodePublicWebsiteAssetRequest,
   PUBLIC_WEBSITE_ASSET_REQUEST_CODEC,
+  PUBLIC_WEBSITE_ASSET_CANCELLATION_CODEC,
   PUBLIC_WEBSITE_ASSET_SNAPSHOT_CODEC,
 } from '@axiom/types';
 import {
   assetSha256,
   verifyWebsiteAssetOperation,
+  verifyWebsiteAssetOutcome,
+  verifyWebsiteAssetSelection,
   verifyWebsiteCaptureTarget,
 } from './public-website-assets.js';
 export const tenant = '11111111-1111-4111-8111-111111111111',
@@ -217,4 +221,130 @@ it('binds existing capture references and withdrawal reason rather than acceptin
       ),
     ).toThrow();
   }
+});
+
+it('verifies cancelled canonical bytes, exact reason and all actor/scope/hash commitments', () => {
+  const requestText = fixture().requestText,
+    reason = 'Abandon';
+  const cancellationText = canonicalJson({
+    version: 1,
+    id,
+    tenantId: tenant,
+    actorId: actor,
+    operationKey: key,
+    requestSha256: assetSha256(requestText),
+    reason,
+    confirmed: true,
+  });
+  const value = {
+    state: 'cancelled',
+    tenantId: tenant,
+    actorId: actor,
+    operationKey: key,
+    requestCodec: PUBLIC_WEBSITE_ASSET_REQUEST_CODEC,
+    requestText,
+    requestSha256: assetSha256(requestText),
+    cancellationCodec: PUBLIC_WEBSITE_ASSET_CANCELLATION_CODEC,
+    cancellationText,
+    cancellationSha256: assetSha256(cancellationText),
+    receipt: { id: '12', entryHash: 'c'.repeat(64) },
+    replayed: false,
+  };
+  const scope = {
+    tenantId: tenant,
+    actorId: actor,
+    operationKey: key,
+    requestText,
+    cancellationReason: reason,
+  };
+  expect(verifyWebsiteAssetOutcome(value, scope)).toEqual(value);
+  for (const change of [
+    { tenantId: id },
+    { actorId: id },
+    { operationKey: id },
+    { requestSha256: 'f'.repeat(64) },
+    { cancellationSha256: 'f'.repeat(64) },
+    { cancellationText: cancellationText + ' ' },
+    { state: 'not_found' },
+    { requestText: encodePublicWebsiteAssetRequest({ ...request, operationKey: id }) },
+  ])
+    expect(() => verifyWebsiteAssetOutcome({ ...value, ...change }, scope)).toThrow();
+  expect(() =>
+    verifyWebsiteAssetOutcome(value, { ...scope, cancellationReason: 'other' }),
+  ).toThrow();
+  const changed = canonicalJson({ ...JSON.parse(cancellationText), tenantId: id });
+  expect(() =>
+    verifyWebsiteAssetOutcome(
+      { ...value, cancellationText: changed, cancellationSha256: assetSha256(changed) },
+      scope,
+    ),
+  ).toThrow();
+});
+it('selection target pages bind actual snapshot digest, parent and explicit cursor', () => {
+  const row = fixture(),
+    value = {
+      kind: 'targets',
+      tenantId: tenant,
+      actorId: actor,
+      estateId: id,
+      systemId: key,
+      rows: [
+        {
+          id,
+          snapshotText: row.snapshotText,
+          snapshotSha256: row.snapshotSha256,
+          withdrawn: false,
+          inventoryCurrent: true,
+        },
+      ],
+      nextCursor: null,
+    },
+    scope = { tenantId: tenant, actorId: actor },
+    selection = { kind: 'targets' as const, estateId: id, systemId: key, after: null };
+  expect(verifyWebsiteAssetSelection(value, scope, selection)).toEqual(value);
+  for (const change of [
+    { actorId: id },
+    { estateId: key },
+    { nextCursor: id },
+    { rows: [...value.rows, ...value.rows] },
+    { rows: [{ ...value.rows[0], snapshotSha256: 'f'.repeat(64) }] },
+  ])
+    expect(() => verifyWebsiteAssetSelection({ ...value, ...change }, scope, selection)).toThrow();
+  expect(() => verifyWebsiteAssetSelection(value, scope, { ...selection, after: id })).toThrow();
+});
+it('selection captures refuse other tenant and kind/context substitution', () => {
+  const value = {
+      kind: 'captures',
+      tenantId: tenant,
+      actorId: actor,
+      targetId: id,
+      rows: [
+        {
+          tenantId: tenant,
+          checkId: key,
+          payloadSha256: 'a'.repeat(64),
+          captureReceipt: { id: '11', entryHash: 'b'.repeat(64) },
+          requestedUrl: 'https://example.com/',
+          finalUrl: 'https://example.com/',
+          checkedAt: '2026-10-16T00:00:00Z',
+        },
+      ],
+      nextCursor: null,
+    },
+    scope = { tenantId: tenant, actorId: actor },
+    selection = { kind: 'captures' as const, targetId: id, after: null };
+  expect(verifyWebsiteAssetSelection(value, scope, selection)).toEqual(value);
+  expect(() =>
+    verifyWebsiteAssetSelection(
+      { ...value, rows: [{ ...value.rows[0], tenantId: id }] },
+      scope,
+      selection,
+    ),
+  ).toThrow();
+  expect(() =>
+    verifyWebsiteAssetSelection(value, scope, { ...selection, targetId: key }),
+  ).toThrow();
+  expect(() =>
+    verifyWebsiteAssetSelection(value, scope, { kind: 'associations', targetId: id, after: null }),
+  ).toThrow();
 });

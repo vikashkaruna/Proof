@@ -1,8 +1,13 @@
+import { canonicalJson } from '@axiom/ledger';
+import { parseCatalogueJson } from '@axiom/control-library';
 import { createHash } from 'node:crypto';
 import {
   parsePublicWebsiteAssetRequestText,
   parsePublicWebsiteAssetSnapshotText,
   publicWebsiteAssetOperationSchema,
+  publicWebsiteAssetSelectionPageSchema,
+  publicWebsiteAssetResolutionSchema,
+  publicWebsiteAssetCancellationSnapshotSchema,
   publicWebsiteTargetSnapshotSchema,
   type PublicWebsiteAssetRequest,
 } from '@axiom/types';
@@ -89,4 +94,95 @@ export function verifyWebsiteCaptureTarget(
   )
     throw Error('website_asset_target_refused');
   return snapshot;
+}
+
+/** Positive cancellation is a distinct outcome; it never means a capture ran. */
+export function verifyWebsiteAssetOutcome(
+  value: unknown,
+  scope: AssetScope & { operationKey: string; requestText?: string; cancellationReason?: string },
+) {
+  const parsed = publicWebsiteAssetResolutionSchema.parse(value);
+  if (parsed.state === 'not_found') throw Error('website_asset_receipt_missing');
+  if (parsed.state === 'recorded') return verifyWebsiteAssetOperation(parsed, scope);
+  const request = parsePublicWebsiteAssetRequestText(parsed.requestText);
+  const snapshot = publicWebsiteAssetCancellationSnapshotSchema.parse(
+    parseCatalogueJson(parsed.cancellationText, 16384),
+  );
+  if (
+    parsed.tenantId !== scope.tenantId.toLowerCase() ||
+    parsed.actorId !== scope.actorId.toLowerCase() ||
+    parsed.operationKey !== scope.operationKey.toLowerCase() ||
+    request.operationKey !== parsed.operationKey ||
+    parsed.requestSha256 !== assetSha256(parsed.requestText) ||
+    parsed.cancellationSha256 !== assetSha256(parsed.cancellationText) ||
+    canonicalJson(snapshot) !== parsed.cancellationText ||
+    snapshot.tenantId !== parsed.tenantId ||
+    snapshot.actorId !== parsed.actorId ||
+    snapshot.operationKey !== parsed.operationKey ||
+    snapshot.requestSha256 !== parsed.requestSha256 ||
+    (scope.requestText !== undefined && scope.requestText !== parsed.requestText) ||
+    (scope.cancellationReason !== undefined && snapshot.reason !== scope.cancellationReason)
+  )
+    throw Error('website_asset_cancellation_refused');
+  return parsed;
+}
+
+/** Current read authority is provided by the narrow SQL selector, not by this pure decoder. */
+export function verifyWebsiteAssetSelection(
+  value: unknown,
+  scope: AssetScope,
+  selection: import('@axiom/types').PublicWebsiteAssetSelection,
+) {
+  const page = publicWebsiteAssetSelectionPageSchema.parse(value);
+  if (
+    page.tenantId !== scope.tenantId.toLowerCase() ||
+    page.actorId !== scope.actorId.toLowerCase() ||
+    page.kind !== selection.kind
+  )
+    throw Error('website_asset_selection_refused');
+  if (page.kind === 'targets' && selection.kind === 'targets') {
+    if (page.estateId !== selection.estateId || page.systemId !== selection.systemId)
+      throw Error('website_asset_selection_refused');
+    for (const row of page.rows) {
+      const s = parsePublicWebsiteAssetSnapshotText(row.snapshotText);
+      if (
+        s.kind !== 'target' ||
+        s.id !== row.id ||
+        s.tenantId !== page.tenantId ||
+        s.estateId !== page.estateId ||
+        s.systemId !== page.systemId ||
+        assetSha256(row.snapshotText) !== row.snapshotSha256
+      )
+        throw Error('website_asset_selection_refused');
+    }
+  } else if (page.kind === 'associations' && selection.kind === 'associations') {
+    if (page.targetId !== selection.targetId) throw Error('website_asset_selection_refused');
+    for (const row of page.rows) {
+      const o = verifyWebsiteAssetOperation(row.operation, {
+        tenantId: page.tenantId,
+        actorId: row.operation.actorId,
+        operationKey: row.operation.operationKey,
+      });
+      const s = parsePublicWebsiteAssetSnapshotText(row.snapshotText);
+      if (
+        s.kind !== 'association' ||
+        s.id !== row.id ||
+        s.targetId !== page.targetId ||
+        o.snapshotText !== row.snapshotText ||
+        o.snapshotSha256 !== row.snapshotSha256
+      )
+        throw Error('website_asset_selection_refused');
+    }
+  } else if (page.kind === 'captures' && selection.kind === 'captures') {
+    if (page.targetId !== selection.targetId || page.rows.some((r) => r.tenantId !== page.tenantId))
+      throw Error('website_asset_selection_refused');
+  } else throw Error('website_asset_selection_refused');
+  const ids = page.rows.map((r) => ('id' in r ? r.id : r.checkId));
+  if (
+    new Set(ids).size !== ids.length ||
+    ids.some((id, i) => id <= (selection.after ?? '') || (i > 0 && id <= ids[i - 1]!)) ||
+    (page.nextCursor !== null && (ids.length !== 50 || page.nextCursor !== ids.at(-1)))
+  )
+    throw Error('website_asset_selection_refused');
+  return page;
 }
