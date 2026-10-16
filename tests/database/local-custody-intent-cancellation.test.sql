@@ -2,7 +2,13 @@
 begin;
 -- The ordinary SQL harness has minimal auth.users only. This transaction-scoped
 -- schema stand-in is created ONLY when absent; real GoTrue acceptance is separate.
-create table if not exists auth.sessions(id uuid primary key,user_id uuid not null references auth.users(id),not_after timestamptz);
+do $fixture149_auth$declare prior text:=current_user;begin
+ if to_regclass('auth.sessions') is null then
+  set local role postgres;
+  create table auth.sessions(id uuid primary key,user_id uuid not null references auth.users(id),not_after timestamptz);
+  execute format('set local role %I',prior);
+ end if;
+end $fixture149_auth$;
 create function pg_temp.id(n int) returns uuid language sql immutable as $$select ('99143000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 create function pg_temp.ok(v boolean,m text) returns void language plpgsql as $$begin if v is distinct from true then raise exception 'ASSERTION: %',m;end if;end$$;
 insert into auth.users(id,email) select pg_temp.id(n),'custody-'||n||'@example.invalid' from generate_series(1,5)n;

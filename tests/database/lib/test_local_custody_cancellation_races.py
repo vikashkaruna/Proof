@@ -35,6 +35,23 @@ class CancellationRaces(unittest.TestCase):
         self.assertIs(RACES.Runner.owned, RACES.BASE.Runner.owned)
         self.assertIs(RACES.Runner.cleanup, RACES.BASE.Runner.cleanup)
 
+    def test_absent_auth_standin_uses_reviewed_postgres_owner_setup(self):
+        root = HERE.parents[2]
+        reviewed = (
+            root / "tests/database/local-custody-credential-issuance.test.sql"
+        ).read_text()
+        start = reviewed.index("do $fixture145_auth$")
+        end = reviewed.index("end $fixture145_auth$;", start) + len(
+            "end $fixture145_auth$;"
+        )
+        expected = reviewed[start:end].replace("fixture145_auth", "fixture149_auth")
+        text = RACES.setup(root)
+        self.assertIn(expected, text)
+        self.assertEqual(text.count("create table auth.sessions("), 1)
+        self.assertNotIn("create table if not exists auth.sessions", text.lower())
+        self.assertNotIn("alter table auth.sessions", text.lower())
+        self.assertNotIn("grant select on auth.sessions", text.lower())
+
     def test_fixture_namespace_before_writer_and_committed_once(self):
         text = RACES.setup(HERE.parents[2])
         self.assertIn(
