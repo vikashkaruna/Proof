@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   encodeLocalCustodyPolicy,
+  encodeLocalCustodyCancellation,
   parseLocalCustodyPolicyText,
   encodeLocalCustodyEvent,
   localCustodyEventRequestSchema,
@@ -113,4 +114,92 @@ describe('strict local custody policy bytes', () => {
       false,
     );
   });
+});
+it('cancellation retains exact original bytes under distinct key and rejects ambiguous/oversized intent', () => {
+  const original = encodeLocalCustodyEvent({
+    version: 1,
+    operationKey: policyId,
+    transition: 'request',
+    policyText: encodeLocalCustodyPolicy(value),
+    policySha256: 'a'.repeat(64),
+    previousEventId: null,
+    nextReviewDueAt: null,
+    reason: 'Request',
+    confirmed: true,
+  });
+  const c = {
+    version: 1,
+    operationKey: operator,
+    originalRequestText: original,
+    reason: 'Abandon stale intent',
+    confirmed: true,
+  };
+  expect(JSON.parse(encodeLocalCustodyCancellation(c))).toEqual(c);
+  for (const changed of [
+    { operationKey: policyId },
+    { operationKey: null },
+    { confirmed: false },
+    { reason: ' ' },
+    { originalRequestText: original + ' ' },
+    { originalRequestText: JSON.stringify({ ...JSON.parse(original), operationKey: null }) },
+  ])
+    expect(() => encodeLocalCustodyCancellation({ ...c, ...changed })).toThrow();
+  expect(encodeLocalCustodyCancellation({ ...c, reason: '😀'.repeat(1500) })).toContain('😀');
+  expect(() => encodeLocalCustodyCancellation({ ...c, reason: '😀'.repeat(2001) })).toThrow();
+});
+it('every schema-maximum escaped/UTF8 original remains cancellable inside the unchanged64KiB envelope', () => {
+  const refs = Array.from(
+    { length: 10 },
+    (_, i) =>
+      `axiom-local-dispatch://${tenant}/11111111-1111-4111-8111-${String(i).padStart(12, '0')}/versions/999999999`,
+  );
+  const chars = ['\u0001', '"', '\\', '😀', 'ह'];
+  const sizes: number[] = [];
+  for (const policyChar of chars) {
+    const policyText = encodeLocalCustodyPolicy({
+      ...value,
+      reason: policyChar.repeat(2000),
+      keyPolicy: { primary: refs[0], readable: refs },
+      servicePrincipals: {
+        producer: `spiffe://${'a'.repeat(255)}/service/assessment-dispatch-producer`,
+        controller: `spiffe://${'a'.repeat(255)}/controller/assessment`,
+      },
+      validity: { kind: 'until_revoked', reviewDueAt: Number.MAX_SAFE_INTEGER },
+      acceptedLimitations: [
+        'regional_custody_unavailable',
+        'hardware_backing_unverified',
+        'disaster_recovery_unverified',
+        'physical_custody_operator_managed',
+      ],
+    });
+    for (const eventChar of chars) {
+      const originalRequestText = encodeLocalCustodyEvent({
+        version: 1,
+        operationKey: policyId,
+        transition: 'review',
+        policyText,
+        policySha256: 'a'.repeat(64),
+        previousEventId: tenant,
+        nextReviewDueAt: Number.MAX_SAFE_INTEGER,
+        reason: eventChar.repeat(2000),
+        confirmed: true,
+      });
+      for (const cancellationChar of chars) {
+        const resolution = {
+          version: 1,
+          operationKey: operator,
+          originalRequestText,
+          reason: cancellationChar.repeat(2000),
+          confirmed: true,
+        };
+        encodeLocalCustodyCancellation(resolution);
+        const bytes = new TextEncoder().encode(
+          JSON.stringify({ resolution, challengeId: tenant, code: '\u0001'.repeat(256) }),
+        ).length;
+        sizes.push(bytes);
+        expect(bytes).toBeLessThanOrEqual(65536);
+      }
+    }
+  }
+  expect(Math.max(...sizes)).toBeGreaterThan(40000);
 });

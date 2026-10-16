@@ -1,3 +1,4 @@
+import { localCustodyPolicyRoutes } from './local-custody-policy.js';
 import { engagementIntakeRoutes } from './engagement-intake.js';
 import { monitoringOutcomeRoutes } from './monitoring-outcomes.js';
 import { loadMonitoringOutcomes } from '../services/monitoring-outcomes.js';
@@ -260,6 +261,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', connectorRoutes());
   app.route('/', catalogueReferenceRoutes());
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
+  app.route('/', localCustodyPolicyRoutes({ mfa: deps.mfa }));
   app.route('/', publicWebsiteAssetRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', publicWebsiteControlReviewRoutes());
   app.route('/', publicControlReviewSetRoutes());

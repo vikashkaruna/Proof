@@ -50,6 +50,14 @@ export default async function SettingsPage() {
         </section>
       )}
 
+      <section aria-label="Local custody policies">
+        <h2>Local dispatch-key custody</h2>
+        <p>
+          Review tenant-scoped owner requests, founder approvals, nominated operator activation and
+          periodic reminders.
+        </p>
+        <Link href="/settings/local-custody">Manage local custody policies</Link>
+      </section>
       {/* 2 Main Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Account Card */}

@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {
+  localCustodyCancellationSchema,
+  localCustodyCancellationReceiptSchema,
+  encodeLocalCustodyCancellation,
   localCustodyPolicySchema,
+  localCustodyContextSchema,
   localCustodyEventRequestSchema,
   LOCAL_CUSTODY_MAX_BYTES,
   parseLocalCustodyPolicyText,
@@ -354,4 +358,114 @@ export function createLocalCustodyKeyAuthority(
     },
   };
   return Object.freeze(authority);
+}
+
+/** A current context is read-only guidance; each transition still runs SQL preflight/MFA. */
+export function verifyLocalCustodyContext(
+  value: unknown,
+  expected: { tenantId: string; actorId: string; policyId: string | null; historyPage: boolean },
+) {
+  const result = localCustodyContextSchema.parse(value);
+  if (
+    result.tenantId !== expected.tenantId ||
+    result.actorId !== expected.actorId ||
+    result.selectedPolicyId !== expected.policyId
+  )
+    throw new DispatchRefused();
+  if (new Set(result.rows.map((x) => x.policyId)).size !== result.rows.length)
+    throw new DispatchRefused();
+  for (const row of result.rows) {
+    const p = verifyLocalCustodyPolicy(row.policyText, row.policySha256);
+    if (
+      p.tenantId !== expected.tenantId ||
+      p.policyId !== row.policyId ||
+      p.keyPolicySha256 !== row.keyPolicySha256 ||
+      new Set(row.actions).size !== row.actions.length
+    )
+      throw new DispatchRefused();
+  }
+  if (expected.policyId === null) {
+    if (result.history.length || result.nextHistoryCursor !== null) throw new DispatchRefused();
+  } else {
+    if (
+      result.rows.length !== 1 ||
+      result.rows[0]!.policyId !== expected.policyId ||
+      result.nextCursor !== null
+    )
+      throw new DispatchRefused();
+    for (const event of result.history) {
+      verifyLocalCustodyReceipt(event, {
+        tenantId: expected.tenantId,
+        actorId: event.actorId,
+        requestText: event.requestText,
+      });
+      if (
+        event.policyId !== expected.policyId ||
+        event.policySha256 !== result.rows[0]!.policySha256
+      )
+        throw new DispatchRefused();
+    }
+    if (new Set(result.history.map((e) => e.eventId)).size !== result.history.length)
+      throw new DispatchRefused();
+    if (!expected.historyPage) {
+      const latest = result.history[0],
+        head = result.rows[0]!.head;
+      const state =
+        latest?.transition === 'request'
+          ? 'requested'
+          : latest?.transition === 'approve'
+            ? 'approved'
+            : latest?.transition === 'revoke'
+              ? 'revoked'
+              : 'active';
+      if (
+        !latest ||
+        latest.eventId !== head.eventId ||
+        latest.activationEpoch !== head.activationEpoch ||
+        latest.reviewDueAt !== head.reviewDueAt ||
+        head.state !== state
+      )
+        throw new DispatchRefused();
+    }
+    if (
+      result.nextHistoryCursor !== null &&
+      (result.history.length !== 20 ||
+        result.history.at(-1)?.receipt.id !== result.nextHistoryCursor)
+    )
+      throw new DispatchRefused();
+  }
+  return result;
+}
+
+export function verifyLocalCustodyCancellation(
+  value: unknown,
+  expected: {
+    tenantId: string;
+    actorId: string;
+    originalRequestText: string;
+    cancellationText?: string;
+  },
+) {
+  const row = localCustodyCancellationReceiptSchema.parse(value);
+  const c = localCustodyCancellationSchema.parse(JSON.parse(row.cancellationText));
+  const original = localCustodyEventRequestSchema.parse(JSON.parse(expected.originalRequestText));
+  const policy = verifyLocalCustodyPolicy(original.policyText, original.policySha256);
+  if (
+    policy.tenantId !== expected.tenantId ||
+    encodeLocalCustodyEvent(original) !== expected.originalRequestText ||
+    row.tenantId !== expected.tenantId ||
+    row.actorId !== expected.actorId ||
+    row.originalRequestText !== expected.originalRequestText ||
+    c.originalRequestText !== expected.originalRequestText ||
+    row.originalOperationKey !== original.operationKey ||
+    row.operationKey !== c.operationKey ||
+    encodeLocalCustodyCancellation(c) !== row.cancellationText ||
+    (expected.cancellationText !== undefined &&
+      row.cancellationText !== expected.cancellationText) ||
+    row.originalRequestSha256 !==
+      createHash('sha256').update(expected.originalRequestText).digest('hex') ||
+    row.cancellationSha256 !== createHash('sha256').update(row.cancellationText).digest('hex')
+  )
+    throw new DispatchRefused();
+  return row;
 }

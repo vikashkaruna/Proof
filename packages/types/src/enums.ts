@@ -278,6 +278,7 @@ export const LedgerActionType = {
   LOCAL_CUSTODY_POLICY_ACTIVATED: 'custody.local_policy_activated',
   LOCAL_CUSTODY_POLICY_REVOKED: 'custody.local_policy_revoked',
   LOCAL_CUSTODY_POLICY_REVIEWED: 'custody.local_policy_reviewed',
+  LOCAL_CUSTODY_POLICY_INTENT_CANCELLED: 'custody.local_policy_intent_cancelled',
   LOCAL_CUSTODY_CREDENTIAL_ISSUED: 'custody.local_credential_issued',
   LOCAL_CUSTODY_CREDENTIAL_REVOKED: 'custody.local_credential_revoked',
   WORKLOAD_DISPATCH_POLICY_PUBLISHED: 'workload.dispatch_policy_published',

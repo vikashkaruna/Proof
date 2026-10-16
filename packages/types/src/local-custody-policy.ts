@@ -181,3 +181,58 @@ export const localCustodyEventReceiptSchema = z
     replayed: z.boolean(),
   })
   .strict();
+
+/** A separate immutable resolution intent; it never replaces the original. */
+export const localCustodyCancellationSchema = z
+  .object({
+    version: z.literal(1),
+    operationKey: id,
+    originalRequestText: z.string().max(32768),
+    reason: safe,
+    confirmed: z.literal(true),
+  })
+  .strict()
+  .superRefine((v, ctx) => {
+    try {
+      const original = localCustodyEventRequestSchema.parse(JSON.parse(v.originalRequestText));
+      if (
+        encodeLocalCustodyEvent(original) !== v.originalRequestText ||
+        original.operationKey === v.operationKey
+      )
+        throw Error();
+    } catch {
+      ctx.addIssue({ code: 'custom', message: 'Exact distinct original operation required' });
+    }
+  });
+export type LocalCustodyCancellation = z.infer<typeof localCustodyCancellationSchema>;
+export function encodeLocalCustodyCancellation(value: unknown): string {
+  const text = canonicalLocalCustody(localCustodyCancellationSchema.parse(value));
+  // The complete HTTP envelope is checked separately against the unchanged64KiB limit.
+  if (new TextEncoder().encode(text).byteLength > 65000)
+    throw Error('Custody cancellation exceeds its bound');
+  return text;
+}
+export const localCustodyCancellationReceiptSchema = z
+  .object({
+    state: z.literal('cancelled'),
+    tenantId: id,
+    actorId: id,
+    operationKey: id,
+    originalOperationKey: id,
+    originalRequestText: z.string().max(32768),
+    originalRequestSha256: sha,
+    cancellationText: z.string().max(65000),
+    cancellationSha256: sha,
+    cancellationId: id,
+    receipt: z
+      .object({
+        id: z
+          .string()
+          .regex(/^[1-9][0-9]{0,18}$/)
+          .refine((v) => BigInt(v) <= 9223372036854775807n),
+        entryHash: sha,
+      })
+      .strict(),
+    replayed: z.boolean(),
+  })
+  .strict();
