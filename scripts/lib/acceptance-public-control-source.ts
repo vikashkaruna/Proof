@@ -468,6 +468,43 @@ export async function verifyPublicControlSourceThroughController(deps: {
   };
 }
 
+export function verifyPublicSourceCompletionReceipt(
+  input: unknown,
+  expected: {
+    agent: 'drishti' | 'vibhaag';
+    engagementId: string;
+    runId: string;
+    correlationId: string;
+    requestHash: string;
+    outputHash: string;
+  },
+) {
+  const receipt = z
+    .object({
+      actor_type: z.literal('agent'),
+      actor_id: z.enum(['drishti', 'vibhaag']),
+      action_type: z.enum(['discovery.started', 'classification.started']),
+      result: z.literal('success'),
+      target_ref: z.uuid(),
+      correlation_id: z.uuid(),
+      input_hash: digest,
+      output_hash: digest,
+      detail: z.object({ phase: z.literal('completed'), run_id: z.uuid(), request_hash: digest }),
+    })
+    .parse(input);
+  assert.equal(receipt.actor_id, expected.agent);
+  assert.equal(
+    receipt.action_type,
+    expected.agent === 'drishti' ? 'discovery.started' : 'classification.started',
+  );
+  assert.equal(receipt.target_ref, expected.engagementId);
+  assert.equal(receipt.correlation_id, expected.correlationId);
+  assert.equal(receipt.input_hash, expected.requestHash);
+  assert.equal(receipt.output_hash, expected.outputHash);
+  assert.equal(receipt.detail.run_id, expected.runId);
+  assert.equal(receipt.detail.request_hash, expected.requestHash);
+}
+
 async function verifyRegisteredSource(
   deps: Parameters<typeof verifyPublicControlSourceThroughController>[0],
   scope: { estateId: string; systemId: string; engagementId: string; intakeReceipt: string },
@@ -475,9 +512,11 @@ async function verifyRegisteredSource(
   assert(deps.browserSubmit);
   deps.onPhase('browser-register-capture-review-request');
   const submitted = await deps.browserSubmit(scope);
+  deps.onPhase('browser-source-submission-verified');
   assert.equal(submitted.tenantId, deps.tenantId);
   assert.equal(submitted.actorId, deps.actorId);
   assert.equal(submitted.engagementId, scope.engagementId);
+  deps.onPhase('browser-source-current-review');
   const head = z
     .object({
       data: z.object({
@@ -506,10 +545,11 @@ async function verifyRegisteredSource(
   assert.equal(head.snapshot.request.associationRef.targetId, submitted.targetId);
   assert.equal(head.snapshot.request.associationRef.targetSha256, submitted.targetSha256);
   assert.equal(head.snapshot.normalizedAnswers['DPDPA-GOV-001']?.Q1, true);
+  deps.onPhase('browser-source-observations');
   const observations = await deps.db
     .from('public_source_observations')
     .select(
-      'id,tenant_id,engagement_id,binding_id,actor_id,agent,output_utf8,output_sha256,completion_receipt,dispatch_id',
+      'id,tenant_id,engagement_id,binding_id,actor_id,agent,output_utf8,output_sha256,completion_receipt,dispatch_id,run_id',
     )
     .eq('tenant_id', deps.tenantId)
     .eq('binding_id', submitted.bindingId);
@@ -527,6 +567,7 @@ async function verifyRegisteredSource(
         output_sha256: digest,
         completion_receipt: z.coerce.string(),
         dispatch_id: z.uuid(),
+        run_id: z.uuid(),
       }),
     )
     .length(2)
@@ -542,26 +583,54 @@ async function verifyRegisteredSource(
       createHash('sha256').update(observation.output_utf8).digest('hex'),
       observation.output_sha256,
     );
+    deps.onPhase('browser-source-dispatch-claim');
     const claim = await deps.db
       .from('public_source_dispatch_claims')
-      .select('dispatch_id')
+      .select(
+        'dispatch_id,run_id,engagement_id,binding_id,actor_id,agent,correlation_id,request_hash',
+      )
       .eq('tenant_id', deps.tenantId)
       .eq('dispatch_id', observation.dispatch_id)
       .single();
     assert.equal(claim.error, null);
-    assert.equal(claim.data?.dispatch_id, observation.dispatch_id);
+    const claimed = z
+      .object({
+        dispatch_id: z.uuid(),
+        run_id: z.uuid(),
+        engagement_id: z.uuid(),
+        binding_id: z.uuid(),
+        actor_id: z.uuid(),
+        agent: z.enum(['drishti', 'vibhaag']),
+        correlation_id: z.uuid(),
+        request_hash: digest,
+      })
+      .parse(claim.data);
+    assert.equal(claimed.dispatch_id, observation.dispatch_id);
+    assert.equal(claimed.run_id, observation.run_id);
+    assert.equal(claimed.engagement_id, scope.engagementId);
+    assert.equal(claimed.binding_id, submitted.bindingId);
+    assert.equal(claimed.actor_id, deps.actorId);
+    assert.equal(claimed.agent, observation.agent);
+    deps.onPhase('browser-source-completion-receipt');
     const receipt = await deps.db
       .from('audit_ledger')
-      .select('actor_type,actor_id,action_type,output_hash')
+      .select(
+        'actor_type,actor_id,action_type,result,target_ref,correlation_id,input_hash,output_hash,detail',
+      )
       .eq('tenant_id', deps.tenantId)
       .eq('id', observation.completion_receipt)
       .single();
     assert.equal(receipt.error, null);
-    assert.equal(receipt.data?.actor_type, 'agent');
-    assert.equal(receipt.data?.actor_id, observation.agent);
-    assert.equal(receipt.data?.action_type, 'agent.completed');
-    assert.equal(receipt.data?.output_hash, observation.output_sha256);
+    verifyPublicSourceCompletionReceipt(receipt.data, {
+      agent: observation.agent,
+      engagementId: scope.engagementId,
+      runId: observation.run_id,
+      correlationId: claimed.correlation_id,
+      requestHash: claimed.request_hash,
+      outputHash: observation.output_sha256,
+    });
   }
+  deps.onPhase('browser-source-accepted-job-status');
   const before = deps.launchCount();
   const accepted = z
     .object({ jobId: z.uuid(), runId: z.uuid(), status: z.literal('unconfirmed') })
