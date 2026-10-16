@@ -123,6 +123,7 @@ echo '  ✓ GoTrue created its enums in auth, not public'
 
 # Explicit privileged role bootstrap only for this owned disposable fixture.
 python3 tests/database/lib/preprovision-local-custody-verifier.py --container "$DB" --image "$PG_IMAGE"
+python3 tests/database/lib/preprovision-local-custody-issuer.py --container "$DB" --image "$PG_IMAGE"
 
 # ─── Our series, over GoTrue's schema ────────────────────────────────
 python3 scripts/migrate-database.py --dsn "$HOST_DSN" >/dev/null

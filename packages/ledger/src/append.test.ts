@@ -286,3 +286,69 @@ describe('LedgerClient actor routing', () => {
     expect(generic.rpc).not.toHaveBeenCalled();
   });
 });
+
+describe('local custody credential history reads', () => {
+  it.each([
+    LedgerActionType.LOCAL_CUSTODY_CREDENTIAL_ISSUED,
+    LedgerActionType.LOCAL_CUSTODY_CREDENTIAL_REVOKED,
+  ])(
+    'preserves %s system rows and exact proofs through a tenant-scoped read only',
+    async (actionType) => {
+      const calls: Array<[string, unknown[]]> = [];
+      const rows = [
+        {
+          id: '145',
+          tenant_id: 'tenant-a',
+          actor_type: 'system',
+          actor_id: 'axiom-local-custody-issuer',
+          action_type: actionType,
+          input_hash: 'a'.repeat(64),
+          output_hash: 'b'.repeat(64),
+          entry_hash: 'c'.repeat(64),
+          approval_token_id: null,
+          approver_id: null,
+        },
+      ];
+      const query = {
+        select: (...args: unknown[]) => {
+          calls.push(['select', args]);
+          return query;
+        },
+        eq: (...args: unknown[]) => {
+          calls.push(['eq', args]);
+          return query;
+        },
+        order: (...args: unknown[]) => {
+          calls.push(['order', args]);
+          return query;
+        },
+        limit: (...args: unknown[]) => {
+          calls.push(['limit', args]);
+          return query;
+        },
+        then: (resolve: (value: { data: typeof rows; error: null }) => unknown) =>
+          Promise.resolve({ data: rows, error: null }).then(resolve),
+      };
+      const rpc = vi.fn();
+      const ledger = new LedgerClient({
+        from: (table: string) => {
+          expect(table).toBe('audit_ledger');
+          return query;
+        },
+        rpc,
+      } as unknown as SupabaseClient);
+      expect(
+        await ledger.query({
+          tenantId: 'tenant-a',
+          actorType: ActorType.SYSTEM,
+          actorId: 'axiom-local-custody-issuer',
+          actionType,
+        }),
+      ).toEqual(rows);
+      expect(calls).toContainEqual(['eq', ['tenant_id', 'tenant-a']]);
+      expect(calls).toContainEqual(['eq', ['actor_type', 'system']]);
+      expect(calls).toContainEqual(['eq', ['action_type', actionType]]);
+      expect(rpc).not.toHaveBeenCalled();
+    },
+  );
+});

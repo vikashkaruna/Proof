@@ -237,3 +237,85 @@ it('preserves the authentication gate instead of converting its refusal into a s
   state.tenantError = new Error('NEXT_REDIRECT:/login');
   await expect(GET(request(''))).rejects.toThrow('NEXT_REDIRECT:/login');
 });
+
+it.each(['custody.local_credential_issued', 'custody.local_credential_revoked'])(
+  'reads and exports exact %s system provenance without human or storage authority claims',
+  async (action) => {
+    const credentialId = '22222222-2222-4222-8222-222222222222';
+    const detail = {
+      credential_id: credentialId,
+      policy_id: '33333333-3333-4333-8333-333333333333',
+      configuration_sha256: 'e'.repeat(64),
+    };
+    state.records = [
+      {
+        ...entry,
+        actor_id: 'axiom-local-custody-issuer',
+        actor_type: 'system',
+        action_type: action,
+        target_ref: credentialId,
+        correlation_id: credentialId,
+        input_hash: 'c'.repeat(64),
+        output_hash: 'd'.repeat(64),
+        approval_token_id: null,
+        approver_id: null,
+        detail,
+      },
+    ];
+    state.tenantLookup = { id: 'tenant-a', name: 'Alpha', slug: 'alpha' };
+    const read = await GET(request(`?agent=system&action=${action}`));
+    expect(read.status).toBe(200);
+    expect((await read.json()).entries).toEqual([
+      expect.objectContaining({
+        type: action,
+        actor: 'axiom-local-custody-issuer',
+        actorType: 'system',
+        target: credentialId,
+        fullCorr: credentialId,
+        fullEntryHash: entry.entry_hash,
+        fullPrevHash: entry.prev_entry_hash,
+        detail,
+        actorStyle: 'bg-slate-100 text-slate-600',
+      }),
+    ]);
+    expect(state.calls).toContainEqual(['audit_ledger', 'eq:tenant_id', 'tenant-a']);
+    expect(state.calls).toContainEqual(['audit_ledger', 'eq:actor_type', 'system']);
+    const exported = await GET(request(`?export=true&agent=system&action=${action}`));
+    expect(exported.status).toBe(200);
+    expect(exported.headers.get('cache-control')).toBe('no-store');
+    const bundle = await exported.json();
+    expect(bundle.records).toEqual([
+      expect.objectContaining({
+        actor: {
+          id: 'axiom-local-custody-issuer',
+          type: 'system',
+          agent_version: null,
+          model_id: null,
+        },
+        action: { type: action, target_ref: credentialId, result: 'success' },
+        cryptography: {
+          prev_hash: entry.prev_entry_hash,
+          entry_hash: entry.entry_hash,
+          input_hash: 'c'.repeat(64),
+          output_hash: 'd'.repeat(64),
+          prompt_hash: null,
+        },
+        governance: {
+          correlation_id: credentialId,
+          approval_token_id: null,
+          approver_id: null,
+          pre_state_ref: null,
+          post_state_ref: null,
+        },
+        detail,
+      }),
+    ]);
+    expect(bundle.export_metadata.chain_integrity).toMatchObject({
+      status: 'intact',
+      verified: true,
+    });
+    expect(JSON.stringify(bundle)).not.toMatch(
+      /accessToken|secretAccessKey|signingKey|custody\.report|evidence\.sealed/,
+    );
+  },
+);

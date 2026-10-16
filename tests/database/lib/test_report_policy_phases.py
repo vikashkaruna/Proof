@@ -28,10 +28,43 @@ class PolicyPhases(unittest.TestCase):
         plan = PHASES.plan()
         self.assertEqual(plan["historical143"], list(PHASES.HISTORICAL))
         self.assertEqual(len(plan["all"]), len(set(plan["all"])))
-        self.assertEqual(
-            sorted(plan["historical143"] + plan["current144"]), plan["all"]
+        self.assertEqual(sorted(plan["historical143"] + plan["current"]), plan["all"])
+        self.assertIn(PHASES.CURRENT, plan["current"])
+        self.assertEqual(plan["currentVersion"], 145)
+        self.assertIn("local-custody-credential-issuance.test.sql", plan["current"])
+        self.assertIn(
+            "local-custody-credential-issuance-demo.test.sql", plan["current"]
         )
-        self.assertIn(PHASES.CURRENT, plan["current144"])
+
+    def test_latest_phase_refuses_missing145_suite_or_noncanonical_migration_inventory(
+        self,
+    ):
+        root = self.directory()
+        (root / "tests/database").mkdir(parents=True)
+        (root / "infra/supabase/migrations").mkdir(parents=True)
+        for source in (PHASES.ROOT / "tests/database").glob("*.test.sql"):
+            (root / "tests/database" / source.name).write_text(
+                "-- offline inventory only"
+            )
+        for source in (PHASES.ROOT / "infra/supabase/migrations").glob("*.sql"):
+            (root / "infra/supabase/migrations" / source.name).write_text(
+                "-- offline inventory only"
+            )
+        self.assertEqual(PHASES.plan(root)["currentVersion"], 145)
+        missing = (
+            root / "tests/database/local-custody-credential-issuance-demo.test.sql"
+        )
+        missing.unlink()
+        with self.assertRaisesRegex(ValueError, "issuer145_suites_required"):
+            PHASES.plan(root)
+        missing.write_text("-- restored inventory only")
+        (root / "infra/supabase/migrations/0132_unpublished.sql").write_text(
+            "-- must not fabricate history"
+        )
+        with self.assertRaisesRegex(
+            ValueError, "canonical_latest145_migrations_required"
+        ):
+            PHASES.plan(root)
 
     def test_preparation_copies_only143_historical_migrations(self):
         p = self.directory()
@@ -48,10 +81,11 @@ class PolicyPhases(unittest.TestCase):
         PHASES.prepare(p)
         plan = PHASES.plan()
         rows = [f"143|{n}" for n in plan["historical143"]] + [
-            f"144|{n}" for n in plan["current144"]
+            f"{plan['currentVersion']}|{n}" for n in plan["current"]
         ]
         for wrong in [
             rows[:-1],
+            [r.replace("145|", "144|") for r in rows],
             rows + rows[:1],
             [r.replace("143|", "144|") for r in rows],
         ]:

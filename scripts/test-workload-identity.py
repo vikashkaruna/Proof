@@ -252,6 +252,104 @@ def run_owned_verifier(args: list[str], data: str | None, timeout: int) -> subpr
             child.communicate()
 
 
+class IsolatedCommandFailure(RuntimeError):
+    """Only the public exit code is retained; no command/output/private input."""
+
+    def __init__(self, returncode: int):
+        super().__init__("isolated command failed")
+        self.returncode = returncode
+
+
+def prepare_spire_release(archive: Path, temp: Path, arch: str) -> None:
+    """Original pinned release gates, with bounded allowlisted diagnostics only."""
+    phase = "archive_state"
+    try:
+        if not archive.exists():
+            download = temp / "download.tar.gz"
+            phase = "download"
+            run(
+                [
+                    "curl",
+                    "--fail",
+                    "--silent",
+                    "--show-error",
+                    "--location",
+                    "--proto",
+                    "=https",
+                    "--tlsv1.2",
+                    "--retry",
+                    "2",
+                    "--max-time",
+                    "180",
+                    f"https://github.com/spiffe/spire/releases/download/v{VERSION}/{archive.name}",
+                    "--output",
+                    str(download),
+                ],
+                timeout=190,
+            )
+            phase = "download_checksum"
+            if hashlib.sha256(download.read_bytes()).hexdigest() != HASHES[arch]:
+                raise RuntimeError("release checksum mismatch")
+            phase = "archive_publish"
+            download.replace(archive)
+        phase = "archive_checksum"
+        if hashlib.sha256(archive.read_bytes()).hexdigest() != HASHES[arch]:
+            raise RuntimeError("release checksum mismatch")
+        phase = "archive_open"
+        with tarfile.open(archive) as source:
+            # Extract only the two reviewed executable members, not archive scripts/config.
+            for executable in ["spire-server", "spire-agent"]:
+                phase = "member_select"
+                member = source.getmember(f"spire-{VERSION}/bin/{executable}")
+                if not member.isfile():
+                    raise RuntimeError("invalid release member")
+                phase = "member_read"
+                stream = source.extractfile(member)
+                if stream is None:
+                    raise RuntimeError("missing executable")
+                dest = temp / executable
+                content = stream.read()
+                phase = "executable_write"
+                dest.write_bytes(content)
+                phase = "executable_mode"
+                dest.chmod(0o755)
+    except Exception as error:
+        # Exception text/args and subprocess output can contain credentials.
+        if isinstance(error, IsolatedCommandFailure):
+            kind = "command_exit"
+        elif isinstance(error, subprocess.TimeoutExpired):
+            kind = "timeout"
+        elif isinstance(error, OSError):
+            kind = "io"
+        elif isinstance(error, tarfile.TarError):
+            kind = "archive_format"
+        elif isinstance(error, KeyError):
+            kind = "missing_member"
+        elif isinstance(error, RuntimeError):
+            kind = "validation"
+        else:
+            kind = "unexpected"
+        code = error.returncode if isinstance(error, IsolatedCommandFailure) else None
+        if type(code) is not int or not -255 <= code <= 255:
+            code = None
+        print(
+            "Workload release setup failure: "
+            + json.dumps(
+                {
+                    "phase": phase,
+                    "commandId": "spire-release-download"
+                    if phase == "download"
+                    else "none",
+                    "errorKind": kind,
+                    "exitCode": code,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        raise
+
+
 def run(
     args: list[str], *, data: str | None = None, required: bool = True, timeout: int = 60
 ) -> subprocess.CompletedProcess[str]:
@@ -265,7 +363,7 @@ def run(
     if required and result.returncode:
         report_public_image_startup(args, result.stderr)
         # Never relay command arguments, stderr or stdout containing identity material.
-        raise RuntimeError("isolated command failed")
+        raise IsolatedCommandFailure(result.returncode)
     return result
 
 
@@ -297,45 +395,7 @@ def main() -> None:
             raise RuntimeError("unsupported Docker architecture")
         archive = state / f"spire-{VERSION}-linux-{arch}-musl.tar.gz"
         print("Workload identity acceptance: verified release setup.", flush=True)
-        if not archive.exists():
-            download = temp / "download.tar.gz"
-            run(
-                [
-                    "curl",
-                    "--fail",
-                    "--silent",
-                    "--show-error",
-                    "--location",
-                    "--proto",
-                    "=https",
-                    "--tlsv1.2",
-                    "--retry",
-                    "2",
-                    "--max-time",
-                    "180",
-                    f"https://github.com/spiffe/spire/releases/download/v{VERSION}/{archive.name}",
-                    "--output",
-                    str(download),
-                ],
-                timeout=190,
-            )
-            if hashlib.sha256(download.read_bytes()).hexdigest() != HASHES[arch]:
-                raise RuntimeError("release checksum mismatch")
-            download.replace(archive)
-        if hashlib.sha256(archive.read_bytes()).hexdigest() != HASHES[arch]:
-            raise RuntimeError("release checksum mismatch")
-        with tarfile.open(archive) as source:
-            # Extract only the two reviewed executable members, not archive scripts/config.
-            for executable in ["spire-server", "spire-agent"]:
-                member = source.getmember(f"spire-{VERSION}/bin/{executable}")
-                if not member.isfile():
-                    raise RuntimeError("invalid release member")
-                stream = source.extractfile(member)
-                if stream is None:
-                    raise RuntimeError("missing executable")
-                dest = temp / executable
-                dest.write_bytes(stream.read())
-                dest.chmod(0o755)
+        prepare_spire_release(archive, temp, arch)
         print("Workload identity acceptance: starting isolated issuer.", flush=True)
         server = """server {
  bind_address = "127.0.0.1"

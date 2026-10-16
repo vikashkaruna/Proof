@@ -112,6 +112,106 @@ def validate_review141_phase(value: object) -> dict:
     return value
 
 
+def custody145_probe_query(contract: str, holder: int, contender: int) -> str | None:
+    """Exact advisory witness; no caller SQL/URLs/credentials in the projection."""
+    if not contract.startswith("custody145:"):
+        return None
+    parsed = re.fullmatch(
+        r"custody145:(tenant|credential):([a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})",
+        contract,
+    )
+    if parsed is None or any(
+        type(pid) is not int or not 0 < pid < 2**31 for pid in (holder, contender)
+    ):
+        raise BarrierFailure("Invalid custody145 phase contract")
+    phase, identity = parsed.groups()
+    key = (
+        f"hashtextextended('{identity}',47)"
+        if phase == "tenant"
+        else f"hashtextextended('axiom.local-custody.issue.{identity}',0)"
+    )
+    match = f"locktype='advisory' and classid=(({key} >> 32) & 4294967295)::oid and objid=({key} & 4294967295)::oid and objsubid=1"
+    held = f"exists(select 1 from pg_locks where pid={holder} and granted and {match})"
+    waiting = f"exists(select 1 from pg_locks where pid={contender} and not granted and {match})"
+    return f"select jsonb_build_object('phase','{phase}','holder',{holder},'contender',{contender},'blocked_by_holder',{holder}=any(pg_blocking_pids({contender})),'holder_phase',({held}),'contender_phase',({waiting}),'locks',(select coalesce(jsonb_agg(jsonb_build_object('pid',pid,'locktype',locktype,'relation',relation::text,'classid',classid::text,'objid',objid::text,'objsubid',objsubid,'mode',mode,'granted',granted,'transactionid',transactionid::text)),'[]'::jsonb) from pg_locks where pid in ({holder},{contender})))"
+
+
+def validate_custody145_phase(value: object) -> dict:
+    fields = {
+        "phase",
+        "holder",
+        "contender",
+        "blocked_by_holder",
+        "holder_phase",
+        "contender_phase",
+        "locks",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != fields
+        or value.get("phase") not in {"tenant", "credential"}
+    ):
+        raise BarrierFailure("Custody145 phase metadata refused")
+    if any(
+        value.get(key) is not True
+        for key in ("blocked_by_holder", "holder_phase", "contender_phase")
+    ):
+        raise BarrierFailure("Custody145 exact advisory contention not established")
+    if (
+        any(
+            type(value.get(key)) is not int or not 0 < value[key] < 2**31
+            for key in ("holder", "contender")
+        )
+        or value["holder"] == value["contender"]
+        or not isinstance(value["locks"], list)
+    ):
+        raise BarrierFailure("Custody145 process metadata refused")
+    lock_fields = {
+        "pid",
+        "locktype",
+        "relation",
+        "classid",
+        "objid",
+        "objsubid",
+        "mode",
+        "granted",
+        "transactionid",
+    }
+    for lock in value["locks"]:
+        if (
+            not isinstance(lock, dict)
+            or set(lock) != lock_fields
+            or lock.get("pid") not in {value["holder"], value["contender"]}
+            or any(
+                isinstance(v, str) and not re.fullmatch(r"[A-Za-z0-9_]*", v)
+                for v in lock.values()
+            )
+        ):
+            raise BarrierFailure("Custody145 unsafe lock metadata refused")
+    held = [
+        lock
+        for lock in value["locks"]
+        if lock["pid"] == value["holder"]
+        and lock["locktype"] == "advisory"
+        and lock["granted"] is True
+    ]
+    waiting = [
+        lock
+        for lock in value["locks"]
+        if lock["pid"] == value["contender"]
+        and lock["locktype"] == "advisory"
+        and lock["granted"] is False
+    ]
+    if not any(
+        all(owner[k] == waiter[k] for k in ("classid", "objid", "objsubid"))
+        and owner["objsubid"] == 1
+        for owner in held
+        for waiter in waiting
+    ):
+        raise BarrierFailure("Custody145 exact holder/waiter lock rows missing")
+    return value
+
+
 def kill_client(client: subprocess.Popen[bytes]) -> None:
     if client.poll() is None:
         # start_new_session=True below makes this exactly our client's group.
@@ -154,6 +254,10 @@ def main() -> int:
         review141_probe_query(expected_value, 1, 2)
         if mode != "blocked":
             raise BarrierFailure("Review141 proof requires blocked mode")
+    if expected_value.startswith("custody145:"):
+        custody145_probe_query(expected_value, 1, 2)
+        if mode not in {"blocked", "expires"}:
+            raise BarrierFailure("Custody145 proof requires actual blocked mode")
     tag = "axiom-race-" + uuid4().hex
     first_name, second_name = tag + "-first", tag + "-second"
     command = [
@@ -338,10 +442,17 @@ def main() -> int:
                 phase_query = review141_probe_query(
                     expected_value, holder_pid, contender_pid
                 )
-                if phase_query is not None:
-                    phase_proof = validate_review141_phase(
-                        json.loads(probe(phase_query))
+                if phase_query is None:
+                    phase_query = custody145_probe_query(
+                        expected_value, holder_pid, contender_pid
                     )
+                if phase_query is not None:
+                    validator = (
+                        validate_custody145_phase
+                        if expected_value.startswith("custody145:")
+                        else validate_review141_phase
+                    )
+                    phase_proof = validator(json.loads(probe(phase_query)))
                     proof_path = Path(first_path + ".lock-proof.json")
                     proof_path.write_text(
                         json.dumps(phase_proof, sort_keys=True) + "\n"
