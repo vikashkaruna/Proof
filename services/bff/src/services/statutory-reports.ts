@@ -9,8 +9,14 @@
  * (W8 / FR-8 / BR-10 / Revision 106).
  */
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
+import { canonicalJson } from '@axiom/ledger';
+import { createHash, randomUUID } from 'node:crypto';
 import {
+  buildCoverageFirstReport,
+  renderCoverageFirstDraft,
+  renderReviewedCoverageFirstReport,
+  CoverageFirstDocumentV5Schema,
+  parseCoverageFirstJson,
   BoardReportContentSchema,
   renderBoardReportHtml,
   AuditorPackContentV1Schema,
@@ -171,7 +177,9 @@ export class StatutoryReportService {
     if (!frozen.success) throw new EvidenceError('assessment_source_incomplete', 409);
     let content;
     try {
-      content = buildAuditorAssessmentPack({
+      const coverage = JSON.parse(frozen.data.source_text).schema_version === 4;
+      if (coverage && JSON.parse(frozen.data.source_text).report_kind !== 'auditor') throw Error();
+      content = (coverage ? buildCoverageFirstReport : buildAuditorAssessmentPack)({
         sourceText: frozen.data.source_text,
         sourceSha256: frozen.data.source_sha256,
         requestId,
@@ -191,7 +199,19 @@ export class StatutoryReportService {
         p_actor_id: actorId,
         p_request_id: requestId,
         p_content_text: JSON.stringify(content),
-        p_html_text: renderAuditorAssessmentPackHtml(content),
+        p_html_text:
+          content.schema_version === 5
+            ? renderCoverageFirstDraft({
+                sourceText: frozen.data.source_text,
+                sourceSha256: frozen.data.source_sha256,
+                requestId,
+                tenantId,
+                engagementId: requestRow.data.engagement_id,
+                assessmentRunId: requestRow.data.assessment_run_id,
+                title: requestRow.data.title,
+                generatedAt: content.generated_at,
+              })
+            : renderAuditorAssessmentPackHtml(content),
         p_correlation_id: correlationId,
       },
       signal,
@@ -275,6 +295,8 @@ export class StatutoryReportService {
     validatedContent: unknown;
     html: string;
   } {
+    if (rawContent.schema_version === 5)
+      throw new EvidenceError('source_bound_workflow_required', 409);
     switch (kind) {
       case 'board': {
         const validatedContent = BoardReportContentSchema.parse(rawContent);
@@ -324,7 +346,9 @@ export class StatutoryReportService {
   async getReportHtml(tenantId: string, actorId: string, reportId: string, signal?: AbortSignal) {
     const repQuery = this.db
       .from('reports')
-      .select('id, title, kind, content_text, content, status, created_by')
+      .select(
+        'id, title, kind, engagement_id, content_text, content_sha256, content, status, created_by',
+      )
       .eq('tenant_id', tenantId)
       .eq('id', reportId);
 
@@ -352,8 +376,10 @@ export class StatutoryReportService {
         title: string;
         kind: StatutoryReportKind;
         content_text?: string;
+        content_sha256?: string;
         content?: Record<string, unknown>;
         status: string;
+        engagement_id: string;
         created_by: string | null;
       } | null;
       error: unknown;
@@ -376,6 +402,105 @@ export class StatutoryReportService {
       throw new EvidenceError('source_bound_workflow_required', 409);
     }
     const raw = report.content_text ? JSON.parse(report.content_text) : report.content;
+    if ((raw as Record<string, unknown>)?.schema_version === 5) {
+      if (report.status === 'published') throw new EvidenceError('retained_pdf_required', 409);
+      if (report.kind !== 'board' && report.kind !== 'auditor')
+        throw new EvidenceError('source_bound_workflow_required', 409);
+      try {
+        if (
+          !report.content_text ||
+          createHash('sha256').update(report.content_text, 'utf8').digest('hex') !==
+            report.content_sha256
+        )
+          throw Error();
+        const document = CoverageFirstDocumentV5Schema.parse(
+          parseCoverageFirstJson(report.content_text, 4 * 1024 * 1024),
+        );
+        const requestQuery = this.db
+          .from(report.kind === 'board' ? 'board_report_requests' : 'statutory_report_requests')
+          .select('id,engagement_id,assessment_run_id,title')
+          .eq('tenant_id', tenantId)
+          .eq('id', document.request_id)
+          .eq('report_id', report.id);
+        const bound = await (
+          signal ? requestQuery.abortSignal(signal) : requestQuery
+        ).maybeSingle();
+        const request = z
+          .object({
+            id: z.uuid(),
+            engagement_id: z.uuid(),
+            assessment_run_id: z.uuid(),
+            title: z.string(),
+          })
+          .safeParse(bound.data);
+        if (
+          bound.error ||
+          !request.success ||
+          request.data.engagement_id !== document.engagement_id ||
+          request.data.assessment_run_id !== document.assessment_run_id ||
+          request.data.title !== document.title
+        )
+          throw Error();
+        const sourceQuery = this.db
+          .from(report.kind === 'board' ? 'board_request_sources' : 'statutory_request_sources')
+          .select('source_text,source_sha256')
+          .eq('tenant_id', tenantId)
+          .eq('request_id', document.request_id);
+        const stored = await (signal ? sourceQuery.abortSignal(signal) : sourceQuery).maybeSingle();
+        if (
+          stored.error ||
+          !stored.data ||
+          document.tenant_id !== tenantId ||
+          document.engagement_id !== report.engagement_id ||
+          document.title !== report.title ||
+          document.kind !== (report.kind === 'board' ? 'board_report' : 'auditor_pack')
+        )
+          throw Error();
+        const source = z
+          .object({ source_text: z.string(), source_sha256: z.string() })
+          .parse(stored.data);
+        if (JSON.parse(source.source_text).report_kind !== report.kind) throw Error();
+        const input = {
+          requestId: document.request_id,
+          tenantId,
+          engagementId: document.engagement_id,
+          assessmentRunId: document.assessment_run_id,
+          title: report.title,
+          sourceText: source.source_text,
+          sourceSha256: source.source_sha256,
+          generatedAt: document.generated_at,
+        };
+        if (canonicalJson(document) !== canonicalJson(buildCoverageFirstReport(input)))
+          throw Error();
+        let html = renderCoverageFirstDraft(input);
+        if (report.status === 'approved') {
+          const reviewQuery = this.db
+            .from('report_reviews')
+            .select('review_text,review_sha256')
+            .eq('tenant_id', tenantId)
+            .eq('report_id', report.id);
+          const result = await (
+            signal ? reviewQuery.abortSignal(signal) : reviewQuery
+          ).maybeSingle();
+          if (result.error) throw Error();
+          const review = z
+            .object({ review_text: z.string(), review_sha256: z.string() })
+            .parse(result.data);
+          const { generatedAt: _generatedAt, ...reviewedInput } = input;
+          html = renderReviewedCoverageFirstReport({
+            ...reviewedInput,
+            reportId: report.id,
+            documentText: report.content_text,
+            documentSha256: report.content_sha256!,
+            reviewText: review.review_text,
+            reviewSha256: review.review_sha256,
+          });
+        }
+        return { title: report.title, kind: report.kind, html };
+      } catch {
+        throw new EvidenceError('assessment_source_conflict', 409);
+      }
+    }
     if (
       report.kind === 'auditor' &&
       ((raw as Record<string, unknown>)?.schema_version === 2 ||

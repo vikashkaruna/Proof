@@ -5,6 +5,11 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
+import {
+  buildCoverageFirstReport,
+  renderCoverageFirstDraft,
+  verifyCoverageFirstSource,
+} from '@axiom/report-kit';
 import { parseCatalogueJson } from '@axiom/control-library';
 import { FrozenBoardSourceSchema } from '@axiom/report-kit/board-source';
 import {
@@ -201,6 +206,67 @@ export class BoardReportService {
       frozenJson = JSON.parse(snapshot.data.source_text);
     } catch {
       throw new EvidenceError('assessment_source_incomplete', 409);
+    }
+    if ((frozenJson as { schema_version?: unknown })?.schema_version === 4) {
+      let content;
+      const input = {
+        requestId,
+        tenantId,
+        engagementId: requestRow.engagement_id,
+        assessmentRunId: requestRow.assessment_run_id,
+        title: requestRow.title,
+        sourceText: snapshot.data.source_text,
+        sourceSha256: snapshot.data.source_sha256,
+        generatedAt: new Date().toISOString(),
+      };
+      try {
+        const { source } = verifyCoverageFirstSource(input.sourceText, input.sourceSha256, {
+          requestId,
+          tenantId,
+          engagementId: input.engagementId,
+          assessmentRunId: input.assessmentRunId,
+        });
+        if (
+          source.library_version !== requestRow.library_version ||
+          source.controls_sha256 !== snapshot.data.controls_sha256 ||
+          source.result_sha256 !== snapshot.data.result_sha256 ||
+          source.controls_sha256 !== requestRow.library_digest ||
+          source.result_sha256 !== requestRow.assessment_result_digest ||
+          JSON.parse(input.sourceText).report_kind !== 'board'
+        )
+          throw Error();
+        content = buildCoverageFirstReport(input);
+      } catch {
+        throw new EvidenceError('assessment_source_conflict', 409);
+      }
+      await this.assertLiveFounder(tenantId, actorId, signal);
+      const result = await this.rpc(
+        'record_board_report_draft',
+        {
+          p_tenant_id: tenantId,
+          p_actor_id: actorId,
+          p_request_id: requestId,
+          p_content_text: JSON.stringify(content),
+          p_html_text: renderCoverageFirstDraft(input),
+          p_correlation_id: correlationId,
+        },
+        signal,
+      );
+      if (result.error) {
+        if (result.error === 'founder_authority_required')
+          throw new EvidenceError('forbidden', 403);
+        if (result.error === 'request_not_found') throw new EvidenceError('request_not_found', 404);
+        if (result.error === 'assessment_not_finalized')
+          throw new EvidenceError('assessment_not_finalized', 409);
+        throw new EvidenceError('invalid_request', 400);
+      }
+      return {
+        reportId: String(result.reportId),
+        requestId,
+        status: 'draft',
+        contentHash: result.contentHash,
+        replayed: result.replayed,
+      };
     }
     const frozen = z
       .object({

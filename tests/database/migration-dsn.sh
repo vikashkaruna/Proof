@@ -21,6 +21,8 @@ docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image" >/dev/null
 # it without ever putting it in argv. Published on loopback only.
 db_password='dsn-test-p@ss word'
 docker run --rm -d --name "$container" -p 127.0.0.1:0:5432 \
+  --label com.axiom.fixture=database-policy-test --label com.axiom.fixture.project=axiom-db-tests \
+  --label "com.axiom.owner-worktree=$(pwd -P)" \
   -e POSTGRES_PASSWORD="$db_password" "$image" >/dev/null
 for _ in $(seq 1 60); do
   docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 && break
@@ -39,6 +41,9 @@ base="postgresql://postgres:${encoded}@127.0.0.1:${port}/axiom_dsn_test"
 # `require`, which is the point of the next assertion.
 dsn="${base}?sslmode=disable"
 PGPASSWORD="$db_password" psql -w "$dsn" -v ON_ERROR_STOP=1 -q -f tests/database/bootstrap.sql
+
+# Explicit privileged role bootstrap only for this owned disposable fixture.
+python3 tests/database/lib/preprovision-local-custody-verifier.py --container "$container" --image "$image"
 
 # ─── TLS is required unless the caller opts out ──────────────────────
 # A deployed database is reached over a network the runner does not own, so

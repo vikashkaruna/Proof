@@ -1,11 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
+import { publicReportFixture } from '../../packages/report-kit/src/public-control-provenance.test-helper.js';
+import { assetReportFixture } from '../../packages/report-kit/src/public-control-report-v4.test-helper.js';
+import {
+  encodeCoverageFirstSource,
+  coverageFirstPolicy,
+} from '../../packages/report-kit/src/coverage-first-source.js';
+import { buildCoverageFirstReport } from '../../packages/report-kit/src/coverage-first-report.js';
+import { canonicalJson } from '../../packages/ledger/src/index.js';
+const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 import {
   reportAcceptanceRequested,
   reportAcceptanceCodeSha256,
   validateReportProvider,
   publicReportBrowserHandoffSchema,
+  verifyCoverageFirstAcceptanceReport,
 } from './acceptance-public-control-reports.js';
 
 function fixture() {
@@ -146,7 +156,13 @@ test('browser handoff is strict, bounded and cannot carry authentication materia
     requestedReceipt: '3',
   };
   const value = {
-    version: 1,
+    version: 2,
+    presentation: {
+      sourceVersion: 4,
+      documentVersion: 5,
+      metrics: 'withheld',
+      policySha256: sha(canonicalJson(coverageFirstPolicy())),
+    },
     kind: 'owned-reviewed-public-source-reports',
     tenantId: id,
     tenantSlug: `worker-${id}`,
@@ -157,6 +173,7 @@ test('browser handoff is strict, bounded and cannot carry authentication materia
       requestId: id,
       reportId: id,
       sourceSha256: hash,
+      retainedSourceSha256: hash,
       contentSha256: hash,
       pdfSha256: hash,
     })),
@@ -192,6 +209,11 @@ test('browser handoff is strict, bounded and cannot carry authentication materia
     { ...value, token: 'synthetic-secret' },
     { ...value, source: { ...source, password: 'synthetic-secret' } },
     { ...value, mode: 'production' },
+    { ...value, version: 1 },
+    { ...value, presentation: { ...value.presentation, documentVersion: 4 } },
+    { ...value, presentation: { ...value.presentation, sourceVersion: 3 } },
+    { ...value, presentation: { ...value.presentation, metrics: 'published' } },
+    { ...value, presentation: { ...value.presentation, policySha256: 'f'.repeat(64) } },
     { ...value, reports: [] },
     { ...value, source: { ...source, reviewId: 'invalid' } },
     { ...value, source: { ...source, captureReceipt: 'synthetic-secret' } },
@@ -212,3 +234,147 @@ test('browser source commitment uses explicit repository root independent of Pla
     process.chdir(root);
   }
 });
+
+function coverageFixture(kind: 'board' | 'auditor', asset: boolean) {
+  const fixture = asset ? assetReportFixture(kind) : publicReportFixture(kind);
+  if (!asset) {
+    const estate = randomUUID();
+    const human = fixture.human;
+    const request = { ...JSON.parse(human.review.request_text), expectedEstateId: estate };
+    const snapshot = { ...JSON.parse(human.review.snapshot_text), estateId: estate, request };
+    human.estate_id = estate;
+    human.review.request_text = canonicalJson(request);
+    human.review.request_sha256 = sha(human.review.request_text);
+    human.review.snapshot_text = canonicalJson(snapshot);
+    human.review.snapshot_sha256 = sha(human.review.snapshot_text);
+    fixture.source.human_control_review = human;
+    fixture.input.sourceText = JSON.stringify(fixture.source);
+    fixture.input.sourceSha256 = sha(fixture.input.sourceText);
+  }
+  const frozen = encodeCoverageFirstSource(
+    kind,
+    fixture.input.sourceText,
+    fixture.input.sourceSha256,
+  );
+  const document = buildCoverageFirstReport({
+    ...fixture.input,
+    sourceText: frozen.text,
+    sourceSha256: frozen.sha256,
+  });
+  const original = JSON.parse(fixture.input.sourceText);
+  const h = original.human_control_review;
+  const source = {
+    estateId: h.estate_id,
+    systemId: asset ? document.asset_scope!.system.id : randomUUID(),
+    engagementId: original.engagement_id,
+    jobId: h.job_id,
+    runId: original.assessment_run_id,
+    reviewId: h.review.id,
+    inputSha256: h.worker_input.sha256,
+    captureReceipt: h.capture.capture_receipt.id,
+    reviewReceipt: h.review.receipt.id,
+    requestedReceipt: h.requested_receipt.id,
+    ...(asset
+      ? {
+          asset: {
+            targetId: document.asset_scope!.target.id,
+            targetSha256: document.asset_scope!.target.sha256,
+            associationId: document.asset_scope!.association.id,
+            associationSha256: document.asset_scope!.association.sha256,
+            checkId: h.capture.check_id,
+          },
+        }
+      : {}),
+  };
+  const text = JSON.stringify(document);
+  return {
+    input: {
+      kind,
+      title: document.title,
+      tenantId: document.tenant_id,
+      requestId: document.request_id,
+      source,
+      resultDigest: original.result_sha256,
+      sourceText: frozen.text,
+      sourceSha256: frozen.sha256,
+      contentText: text,
+      contentSha256: sha(text),
+    },
+    document,
+    original,
+    frozen,
+    fixture,
+  };
+}
+for (const kind of ['board', 'auditor'] as const)
+  for (const asset of [false, true]) {
+    test(`NEW ${kind} acceptance requires source4/doc5 (asset=${asset}) while preserving opaque original bytes`, () => {
+      const f = coverageFixture(kind, asset);
+      const actual = verifyCoverageFirstAcceptanceReport(f.input);
+      assert.equal(actual.parsed.schema_version, asset ? 3 : 2);
+      assert.equal(actual.content.schema_version, 5);
+      assert.equal(actual.content.metrics.state, 'withheld');
+      assert.equal(actual.retainedSourceSha256, f.fixture.input.sourceSha256);
+      assert.equal(JSON.parse(f.frozen.text).retained_source.text, f.fixture.input.sourceText);
+      assert.equal(actual.content.provenance.reviewId, f.input.source.reviewId);
+      assert.equal(JSON.parse(actual.parsed.result_text).posture_score, 30);
+      assert.equal(JSON.parse(actual.parsed.result_text).estimated_exposure_inr, 12345);
+      for (const change of [
+        'source-downgrade',
+        'source-hash',
+        'document-hash',
+        'inner-hash',
+        'policy',
+        'estate',
+        'document-downgrade',
+        'tenant',
+        'request',
+        'result',
+        'title',
+        'job',
+        'review',
+        'capture',
+        'withheld',
+        'unknown-graft',
+        'duplicate',
+      ] as const) {
+        const input = structuredClone(f.input);
+        if (change === 'source-downgrade') {
+          input.sourceText = f.fixture.input.sourceText;
+          input.sourceSha256 = sha(input.sourceText);
+        }
+        if (change === 'document-downgrade')
+          input.contentText = JSON.stringify({ ...f.document, schema_version: 4 });
+        if (change === 'source-hash') input.sourceSha256 = 'f'.repeat(64);
+        if (change === 'inner-hash' || change === 'policy') {
+          const wrapper = JSON.parse(input.sourceText);
+          if (change === 'inner-hash') wrapper.retained_source.sha256 = 'f'.repeat(64);
+          else wrapper.presentation_policy.metrics = 'published';
+          input.sourceText = canonicalJson(wrapper);
+          input.sourceSha256 = sha(input.sourceText);
+        }
+        if (change === 'estate') input.source.estateId = randomUUID();
+        if (change === 'tenant') input.tenantId = randomUUID();
+        if (change === 'request') input.requestId = randomUUID();
+        if (change === 'result') input.resultDigest = 'f'.repeat(64);
+        if (change === 'title') input.title += ' graft';
+        if (change === 'job') input.source.jobId = randomUUID();
+        if (change === 'review') input.source.reviewId = randomUUID();
+        if (change === 'capture') input.source.captureReceipt = '999';
+        if (change === 'withheld')
+          input.contentText = JSON.stringify({ ...f.document, metrics: { state: 'published' } });
+        if (change === 'unknown-graft') {
+          const d = structuredClone(f.document);
+          d.controls[0]!.questions[0]!.state = 'human_no_unverified';
+          input.contentText = JSON.stringify(d);
+        }
+        if (change === 'duplicate')
+          input.contentText = input.contentText.replace(
+            '"schema_version":5',
+            '"schema_version":5,"schema_version":5',
+          );
+        input.contentSha256 = change === 'document-hash' ? 'f'.repeat(64) : sha(input.contentText);
+        assert.throws(() => verifyCoverageFirstAcceptanceReport(input), change);
+      }
+    });
+  }

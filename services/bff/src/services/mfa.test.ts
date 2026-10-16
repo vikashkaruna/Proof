@@ -648,3 +648,156 @@ describe('atomic activation and recovery set', () => {
     ).toMatchObject({ ok: false });
   });
 });
+
+describe('local custody dedicated step-up', () => {
+  const binding = 'e'.repeat(64);
+  const issue = () =>
+    mfa.issueChallenge({
+      userId: USER,
+      tenantId: TENANT,
+      purpose: 'local_custody_policy',
+      sessionId: PLAN,
+      boundResourceRef: ACTION_A,
+      boundPayloadSha256: binding,
+      ttlMs: 60000,
+    });
+  const consume = (challengeId: string, tenantId = TENANT) =>
+    mfa.consumeChallenge({
+      userId: USER,
+      tenantId,
+      purpose: 'local_custody_policy',
+      challengeId,
+      boundResourceRef: ACTION_A,
+      boundPayloadSha256: binding,
+    });
+  it('requires bounded session-bound source before creating the challenge', async () => {
+    await expect(
+      mfa.issueChallenge({ userId: USER, tenantId: TENANT, purpose: 'local_custody_policy' }),
+    ).rejects.toThrow();
+    expect(db.rows('mfa_challenges')).toEqual([]);
+  });
+  it('refuses a foreign-session/content binding before satisfying the challenge', async () => {
+    const { secret } = await enrol();
+    const issued = await issue();
+    if (!issued.ok) throw new Error('fixture');
+    expect(
+      await mfa.verifyChallenge({
+        challengeId: issued.challengeId,
+        userId: USER,
+        sessionId: PLAN,
+        tenantId: TENANT,
+        boundResourceRef: ACTION_A,
+        boundPayloadSha256: 'f'.repeat(64),
+        code: generateTotp(secret, T0 + STEP),
+        atMs: T0 + STEP,
+      }),
+    ).toMatchObject({ ok: false, reason: 'challenge_not_found' });
+    expect(
+      db.rows('mfa_challenges').find((r) => r.id === issued.challengeId)?.satisfied_at,
+    ).toBeFalsy();
+    expect(
+      await mfa.verifyChallenge({
+        challengeId: issued.challengeId,
+        userId: USER,
+        sessionId: PLAN,
+        tenantId: PLAN,
+        boundResourceRef: ACTION_A,
+        boundPayloadSha256: binding,
+        code: generateTotp(secret, T0 + STEP),
+        atMs: T0 + STEP,
+      }),
+    ).toMatchObject({ ok: false, reason: 'challenge_not_found' });
+    expect(
+      db.rows('mfa_challenges').find((r) => r.id === issued.challengeId)?.satisfied_at,
+    ).toBeFalsy();
+  });
+  it('pins tenant and active factor, consumes once and returns original expiry', async () => {
+    const { secret } = await enrol();
+    const issued = await issue();
+    if (!issued.ok) throw new Error('fixture');
+    expect(
+      await mfa.verifyChallenge({
+        challengeId: issued.challengeId,
+        userId: USER,
+        code: generateTotp(secret, T0 + STEP),
+        atMs: T0 + STEP,
+        sessionId: PLAN,
+        tenantId: TENANT,
+        boundResourceRef: ACTION_A,
+        boundPayloadSha256: binding,
+      }),
+    ).toMatchObject({ ok: true });
+    expect(await consume(issued.challengeId, PLAN)).toMatchObject({
+      ok: false,
+      reason: 'binding_mismatch',
+    });
+    const result = await consume(issued.challengeId);
+    expect(result).toMatchObject({ ok: true, expiresAt: issued.expiresAt });
+    expect(result.ok && result.factorId).toBeTruthy();
+    expect(await consume(issued.challengeId)).toMatchObject({
+      ok: false,
+      reason: 'challenge_already_consumed',
+    });
+  });
+  it('does not satisfy a retired-factor challenge with a replacement factor', async () => {
+    const { secret } = await enrol();
+    const issued = await issue();
+    if (!issued.ok) throw new Error('fixture');
+    const old = db
+      .rows('user_mfa_factors')
+      .find((r) => r.factor_type === 'totp' && r.status === 'active')!;
+    old.status = 'revoked';
+    db.seed('user_mfa_factors', {
+      id: OTHER_USER,
+      user_id: USER,
+      factor_type: 'totp',
+      status: 'active',
+      secret_encrypted: old.secret_encrypted,
+    });
+    expect(
+      await mfa.verifyChallenge({
+        challengeId: issued.challengeId,
+        userId: USER,
+        sessionId: PLAN,
+        tenantId: TENANT,
+        boundResourceRef: ACTION_A,
+        boundPayloadSha256: binding,
+        code: generateTotp(secret, T0 + STEP),
+        atMs: T0 + STEP,
+      }),
+    ).toMatchObject({ ok: false, reason: 'challenge_not_found' });
+    expect(
+      db.rows('mfa_challenges').find((r) => r.id === issued.challengeId)?.satisfied_at,
+    ).toBeFalsy();
+  });
+  it('refuses a satisfied challenge after active factor replacement', async () => {
+    const { secret } = await enrol();
+    const issued = await issue();
+    if (!issued.ok) throw new Error('fixture');
+    await mfa.verifyChallenge({
+      challengeId: issued.challengeId,
+      userId: USER,
+      code: generateTotp(secret, T0 + STEP),
+      atMs: T0 + STEP,
+      sessionId: PLAN,
+      tenantId: TENANT,
+      boundResourceRef: ACTION_A,
+      boundPayloadSha256: binding,
+    });
+    for (const row of db.rows('user_mfa_factors'))
+      if (row.factor_type === 'totp') row.status = 'revoked';
+    db.seed('user_mfa_factors', {
+      id: OTHER_USER,
+      user_id: USER,
+      factor_type: 'totp',
+      status: 'active',
+    });
+    expect(await consume(issued.challengeId)).toMatchObject({
+      ok: false,
+      reason: 'binding_mismatch',
+    });
+    expect(
+      db.rows('mfa_challenges').find((r) => r.id === issued.challengeId)?.consumed_at,
+    ).toBeFalsy();
+  });
+});

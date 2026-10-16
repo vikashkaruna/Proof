@@ -117,7 +117,12 @@ const ADDRESS_CHALLENGE_ISSUE_BUDGET = { limit: 200, windowSeconds: 3600 } as co
 const ADDRESS_VERIFY_ATTEMPT_BUDGET = { limit: 200, windowSeconds: 3600 } as const;
 
 export type MfaChallengePurpose =
-  'login' | 'approval_issuance' | 'enrolment' | 'factor_revocation' | 'catalogue_adoption';
+  | 'login'
+  | 'approval_issuance'
+  | 'enrolment'
+  | 'factor_revocation'
+  | 'catalogue_adoption'
+  | 'local_custody_policy';
 
 export interface ApprovalBinding {
   planId: string;
@@ -261,6 +266,10 @@ export type IssueChallengeResult =
   | { ok: false; reason: 'rate_limited'; retryAfterSeconds: number };
 
 export interface VerifyChallengeOptions {
+  /** Required only for dedicated local custody verification. */
+  tenantId?: string;
+  boundResourceRef?: string;
+  boundPayloadSha256?: string;
   challengeId: string;
   userId: string;
   code: string;
@@ -860,7 +869,7 @@ export function createMfaService(
 
     async issueChallenge(opts) {
       if (
-        opts.purpose === 'catalogue_adoption' &&
+        (opts.purpose === 'catalogue_adoption' || opts.purpose === 'local_custody_policy') &&
         (!opts.sessionId ||
           !opts.boundResourceRef ||
           !/^[0-9a-f]{64}$/.test(opts.boundPayloadSha256 ?? '') ||
@@ -946,7 +955,17 @@ export function createMfaService(
       };
     },
 
-    async verifyChallenge({ challengeId, userId, code, atMs, sessionId, addressKey }) {
+    async verifyChallenge({
+      challengeId,
+      userId,
+      code,
+      atMs,
+      sessionId,
+      addressKey,
+      tenantId,
+      boundResourceRef,
+      boundPayloadSha256,
+    }) {
       // Per-session first, for the reason given on the budget constants: a
       // stolen session must exhaust its own guesses before it can exhaust the
       // account's and lock the real user out.
@@ -1004,6 +1023,20 @@ export function createMfaService(
       if (error || !data) return { ok: false, reason: 'challenge_not_found' };
 
       const challenge = data as ChallengeRow;
+      if (
+        challenge.purpose === 'local_custody_policy' &&
+        (!sessionId ||
+          !tenantId ||
+          challenge.tenant_id !== tenantId ||
+          challenge.bound_resource_ref !== boundResourceRef ||
+          !sameDigest(challenge.bound_payload_sha256, boundPayloadSha256 ?? ''))
+      )
+        return { ok: false, reason: 'challenge_not_found' };
+      if (
+        challenge.purpose === 'local_custody_policy' &&
+        (await activeTotpFactor(userId))?.id !== challenge.factor_id
+      )
+        return { ok: false, reason: 'challenge_not_found' };
       if (challenge.satisfied_at) return { ok: false, reason: 'challenge_already_satisfied' };
       if (new Date(challenge.expires_at).getTime() <= Date.now()) {
         return { ok: false, reason: 'challenge_expired' };
@@ -1037,6 +1070,8 @@ export function createMfaService(
         const ring = requireRing();
         const factor = await activeTotpFactor(userId);
         if (!factor?.secret_encrypted) return { ok: false, reason: 'not_enrolled' };
+        if (challenge.purpose === 'local_custody_policy' && factor.id !== challenge.factor_id)
+          return { ok: false, reason: 'challenge_not_found' };
 
         let opened;
         try {
@@ -1076,6 +1111,11 @@ export function createMfaService(
         satisfiedWith = 'recovery_code';
       }
 
+      if (
+        challenge.purpose === 'local_custody_policy' &&
+        (await activeTotpFactor(userId))?.id !== challenge.factor_id
+      )
+        return { ok: false, reason: 'challenge_not_found' };
       const { data: satisfied, error: satisfyErr } = await supabase
         .from('mfa_challenges')
         .update({ satisfied_at: new Date().toISOString(), satisfied_with: satisfiedWith })
@@ -1111,7 +1151,7 @@ export function createMfaService(
 
       const challenge = data as ChallengeRow;
       if (
-        opts.purpose === 'catalogue_adoption' &&
+        (opts.purpose === 'catalogue_adoption' || opts.purpose === 'local_custody_policy') &&
         (!opts.tenantId || challenge.tenant_id !== opts.tenantId)
       )
         return { ok: false, reason: 'binding_mismatch' };
@@ -1135,7 +1175,11 @@ export function createMfaService(
       // New interactive authority remains tied to the factor that actually
       // satisfied the challenge. Replacement B cannot revive factor A.
       // Existing signed approval tokens keep their normal expiry/revocation.
-      if (opts.purpose === 'catalogue_adoption' || opts.purpose === 'approval_issuance') {
+      if (
+        opts.purpose === 'catalogue_adoption' ||
+        opts.purpose === 'local_custody_policy' ||
+        opts.purpose === 'approval_issuance'
+      ) {
         const activeFactor = await activeTotpFactor(opts.userId);
         if (!challenge.factor_id || activeFactor?.id !== challenge.factor_id)
           return {
@@ -1164,7 +1208,7 @@ export function createMfaService(
         ok: true,
         challengeId: challenge.id,
         satisfiedAt: challenge.satisfied_at,
-        ...(opts.purpose === 'catalogue_adoption'
+        ...(opts.purpose === 'catalogue_adoption' || opts.purpose === 'local_custody_policy'
           ? { expiresAt: challenge.expires_at, factorId: challenge.factor_id! }
           : {}),
       };
