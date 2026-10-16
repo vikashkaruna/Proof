@@ -241,7 +241,9 @@ describe('account fence middleware', () => {
     for (const path of ['/v1/plans', '/v1/mfa/status', '/v1/user/tenants']) {
       const res = await fenced({ sessionCurrent: false, recovery: null }, path);
       expect(res.status).toBe(401);
-      expect((await res.json()).error.code).toBe('session_superseded');
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe(
+        'session_superseded',
+      );
     }
   });
 
