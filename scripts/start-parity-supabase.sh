@@ -70,6 +70,13 @@ if [ "$started" != true ]; then
   # never raw startup logs or status JSON into CI logs/artifacts.
   exit 1
 fi
+# Privileged bootstrap accepts only the two reviewed disposable parity families.
+# Inspect public image identities only; never read credentials/status for eligibility.
+db_image=$(docker container inspect --format '{{.Image}}' "$db_container")
+api_image=$(docker container inspect --format '{{.Image}}' "supabase_kong_${project_id}")
+python3 tests/database/lib/preprovision-local-custody-issuer.py \
+  --container "$db_container" --image "$db_image" --api-image "$api_image" \
+  --parity-state "$state_dir" --project "$project_id" --port-prefix "$port_prefix"
 python3 scripts/migrate-database.py --container "$db_container"
 # Synthetic browser personas use one fixed test-only HMAC key. Provision it
 # through the DB administration role, never through the PostgREST service key.

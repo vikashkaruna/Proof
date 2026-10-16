@@ -123,3 +123,43 @@ it('reveals only a selected entry’s recorded payload and uses the active color
   fireEvent.click(screen.getByRole('button', { name: /Hide raw payload JSON/ }));
   expect(screen.queryByText(/"state": "started"/)).toBeNull();
 });
+
+it.each(['custody.local_credential_issued', 'custody.local_credential_revoked'])(
+  'inspects %s as a recorded system operation, preserving its credential target and receipt hash',
+  (type) => {
+    const credentialId = '22222222-2222-4222-8222-222222222222';
+    render(
+      <LedgerStreamView
+        entries={[
+          {
+            ...recorded,
+            type,
+            actor: 'axiom-local-custody-issuer',
+            actorType: 'system',
+            target: credentialId,
+            fullCorr: credentialId,
+            result: 'success',
+            detail: {
+              credential_id: credentialId,
+              activation_epoch: 1,
+              configuration_sha256: 'b'.repeat(64),
+            },
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: `Inspect ledger entry 1: ${type}` })).toBeTruthy();
+    expect(screen.getByText('axiom-local-custody-issuer (system)')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'Only recorded fields are shown; this entry does not prove a complete lifecycle.',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /View raw payload JSON/ }));
+    expect(screen.getByText(/"credential_id"/).textContent).toContain(credentialId);
+    expect(screen.getByText(/"configuration_sha256"/).textContent).toContain('b'.repeat(64));
+    expect(document.body.textContent).not.toMatch(
+      /Human approval token issued|report signing approved|proof sealed|evidence\.sealed/,
+    );
+  },
+);

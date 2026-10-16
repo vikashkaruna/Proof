@@ -46,6 +46,7 @@ created=true
 sql < tests/database/bootstrap.sql
 # Explicit privileged role bootstrap only for this owned disposable fixture.
 python3 tests/database/lib/preprovision-local-custody-verifier.py --container "$container" --image "${AXIOM_TEST_POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}"
+python3 tests/database/lib/preprovision-local-custody-issuer.py --container "$container" --image "${AXIOM_TEST_POSTGRES_IMAGE:-supabase/postgres:17.6.1.127}"
 
 python3 scripts/migrate-database.py --container "$container" --user postgres --database "$database"
 python3 - <<'PY' | sql > "$output_dir/preparation.log"
