@@ -70,6 +70,10 @@ while IFS= read -r suite; do
     docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "tests/database/$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
   elif [ "$suite" = coverage-first-public-reports.test.sql ]; then
     python3 tests/database/lib/report-policy-phases.py current-program --directory "$phase_dir" | sql
+  elif [ "$suite" = local-public-control-assessment-dispatch.test.sql ]; then
+    # SQL-only sessions/MFA + stored owner/founder/operator policy events in the
+    # owned fixture. No real Auth/SPIRE/key-service acceptance is claimed.
+    { python3 tests/database/lib/local-public-control-assessment-dispatch-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
   else
     sql < "tests/database/$suite"
   fi
@@ -108,6 +112,7 @@ bash tests/database/concurrent-public-control-review-sets.sh "$container"
 bash tests/database/public-control-assessment-sources.sh "$container"
 bash tests/database/concurrent-public-control-review-assets.sh "$container"
 bash tests/database/concurrent-local-custody-issuance.sh "$container" "$image"
+bash tests/database/concurrent-local-public-control-assessment-dispatch.sh "$container" "$image"
 bash tests/database/concurrent-assessment-dispatch.sh "$container"
 bash tests/database/concurrent-assessment-scheduling.sh "$container"
 bash tests/database/concurrent-assessment-retention.sh "$container"
