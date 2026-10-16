@@ -1,3 +1,5 @@
+import filesystem from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
@@ -335,4 +337,71 @@ test('browser configuration projects validated inventory IDs and excludes intern
   assert.throws(() =>
     createRegisteredBrowserConfig({ ...original, unknownConfigField: 'refused' }, scope),
   );
+});
+
+test('submission publication exposes no partial final file and still refuses duplicate replacement', (context) => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'axiom-publish-boundary-')));
+  const c = config(),
+    value = submission(c);
+  const original = filesystem.writeFileSync;
+  let observed = false;
+  const replacement: typeof filesystem.writeFileSync = (file, data, options) => {
+    const bytes =
+      typeof data === 'string'
+        ? data
+        : Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString();
+    if (observed || bytes !== JSON.stringify(value)) return original(file, data, options);
+    observed = true;
+    // Observe the final filename while the actual writer has only produced half.
+    if (typeof file === 'number') {
+      const half = Math.floor(bytes.length / 2);
+      filesystem.writeSync(file, bytes.slice(0, half));
+      assert.throws(() => readRegisteredBrowserFile(directory, 'submission'), { code: 'ENOENT' });
+      filesystem.writeSync(file, bytes.slice(half));
+    } else {
+      original(file, bytes.slice(0, Math.floor(bytes.length / 2)), options);
+      // The old direct-to-final writer deterministically fails this boundary.
+      assert.throws(() => readRegisteredBrowserFile(directory, 'submission'), { code: 'ENOENT' });
+      original(file, data, options);
+    }
+  };
+  context.mock.method(filesystem, 'writeFileSync', replacement);
+  syncBuiltinESMExports();
+  try {
+    writeRegisteredBrowserFile(directory, 'submission', value);
+    assert.equal(observed, true);
+    assert.deepEqual(readRegisteredBrowserFile(directory, 'submission'), value);
+    assert.throws(() => writeRegisteredBrowserFile(directory, 'submission', value), {
+      code: 'EEXIST',
+    });
+    assert.deepEqual(filesystem.readdirSync(directory), ['submission.private.json']);
+    assert.deepEqual(readRegisteredBrowserFile(directory, 'submission'), value);
+  } finally {
+    context.mock.restoreAll();
+    syncBuiltinESMExports();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('an existing incomplete final submission is refused immediately without malformed-read retries', async () => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'axiom-refuse-partial-')));
+  try {
+    writeFileSync(join(directory, 'submission.private.json'), '{', { mode: 0o600 });
+    let reads = 0;
+    await assert.rejects(
+      waitForRegisteredSubmission(directory, config(), {
+        deadline: Date.now() + 1000,
+        signal: new AbortController().signal,
+        browserAlive: () => {
+          reads++;
+          return true;
+        },
+      }),
+      /registered browser file refused/,
+    );
+    assert.equal(reads, 1);
+    assert.equal(readFileSync(join(directory, 'submission.private.json'), 'utf8'), '{');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
