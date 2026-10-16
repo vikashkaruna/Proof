@@ -1,3 +1,8 @@
+import {
+  probeRegisteredResponse,
+  registeredResponseScope,
+} from '../../../scripts/lib/registered-response-probe';
+import { writeRegisteredResponseProbe } from '../../../scripts/lib/registered-browser-diagnostics';
 /** Opt-in owned demo fixture. Every mutation below uses the actual product UI
  * and normal Auth/MFA; only public network bytes and KMS/storage are fixtures. */
 import { expect, type Page, type Locator } from '@playwright/test';
@@ -123,7 +128,17 @@ export async function registeredWebsiteSourceInBrowser(
   targetSubmissionCheckpoint('http-status', registration.status());
   expect(registration.status()).toBe(201);
   targetSubmissionCheckpoint('response-schema');
-  const target = publicWebsiteAssetOperationSchema.parse((await registration.json()).data);
+  const target = await probeRegisteredResponse(
+    registration,
+    'target-submit',
+    registeredResponseScope(
+      registration.request().headers(),
+      config,
+      registration.request().postData(),
+    ),
+    (body) => publicWebsiteAssetOperationSchema.parse((body as { data: unknown }).data),
+    (probe) => writeRegisteredResponseProbe(directory, probe),
+  );
   targetSubmissionCheckpoint('snapshot-schema');
   const targetSnapshot = parsePublicWebsiteAssetSnapshotText(target.snapshotText);
   targetSubmissionCheckpoint('snapshot-kind', targetSnapshot.kind === 'target');
@@ -175,8 +190,12 @@ export async function registeredWebsiteSourceInBrowser(
   );
   expect(loadedTargets.request().headers()['x-tenant-id']).toBe(config.tenantId);
   targetSelectionCheckpoint('response-schema');
-  const targetsPage = publicWebsiteAssetSelectionPageSchema.parse(
-    (await loadedTargets.json()).data,
+  const targetsPage = await probeRegisteredResponse(
+    loadedTargets,
+    'saved-targets',
+    registeredResponseScope(loadedTargets.request().headers(), config),
+    (body) => publicWebsiteAssetSelectionPageSchema.parse((body as { data: unknown }).data),
+    (probe) => writeRegisteredResponseProbe(directory, probe),
   );
   targetSelectionCheckpoint('response-kind', targetsPage.kind === 'targets');
   if (targetsPage.kind !== 'targets') throw new Error('Owned target selection refused');
