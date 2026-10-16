@@ -708,7 +708,9 @@ test.describe.serial('normal Auth local custody policy workflow', () => {
         .getByRole('button', { name: 'Record exact cancellation', exact: true })
         .click();
       await recordCompleted;
-      await expect(owner.page.getByRole('alert')).toBeVisible();
+      // The application alert is a paragraph; Next also mounts a global
+      // route-announcer alert. Inspect the app error without matching both.
+      await expect(owner.page.locator('p[role="alert"]')).toBeVisible();
     } finally {
       await owner.page.unroute(route);
     }
