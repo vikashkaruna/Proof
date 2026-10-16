@@ -173,12 +173,212 @@ class EvidenceStorageHarnessTests(unittest.TestCase):
                 harness.validate_cold_pdf_measurement(proof)
 
     def test_existing_warmup_and_full_suite_remain_separate(self):
-        browser = HARNESS[HARNESS.index("if args.browser or args.cold_pdf:") :]
+        browser = HARNESS[
+            HARNESS.index("if args.browser or args.cold_pdf or args.custody_browser:") :
+        ]
         warm = browser.index("scripts/warm-pdf-renderer.ts")
         self.assertLess(warm, browser.index('"playwright"'))
-        self.assertIn("if not args.cold_pdf:", browser[:warm])
+        self.assertIn(
+            "if not args.cold_pdf and not args.custody_browser:", browser[:warm]
+        )
         self.assertIn("expected_browser_tests = 1 if args.cold_pdf else 16", browser)
         self.assertIn("check=True", browser[warm : warm + 230])
+
+    def run_custody(self, stats=None, returncode=0):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            (directory / "runtime.env").write_text("SYNTHETIC_FIXTURE=true\n")
+            observed = []
+
+            def execute(argv, **kwargs):
+                observed.append(argv)
+                self.assertNotIn("scripts/warm-pdf-renderer.ts", argv)
+                self.assertIn("local-custody-policy-provider.spec.ts", argv)
+                self.assertNotIn("board-reports-provider.spec.ts", argv)
+                self.assertIn("--retries=0", argv)
+                self.assertEqual(kwargs["timeout"], 1800)
+                self.assertEqual(
+                    kwargs["env"]["AXIOM_LOCAL_CUSTODY_BROWSER_ACCEPTANCE"], "true"
+                )
+                Path(kwargs["env"]["PLAYWRIGHT_JSON_OUTPUT_FILE"]).write_text(
+                    json.dumps(
+                        {
+                            "stats": stats
+                            or {
+                                "expected": 4,
+                                "unexpected": 0,
+                                "flaky": 0,
+                                "skipped": 0,
+                            }
+                        }
+                    )
+                )
+                return subprocess.CompletedProcess(argv, returncode)
+
+            info = {
+                "Config": {"Labels": {"axiom.fixture.run": "owned"}},
+                "State": {"Running": True},
+            }
+            with (
+                patch.object(
+                    harness.sys,
+                    "argv",
+                    ["harness", "--custody-browser", "--directory", str(directory)],
+                ),
+                patch.object(
+                    harness, "owned_provider", return_value=({"runId": "owned"}, info)
+                ),
+                patch.object(harness, "resume_provider"),
+                patch.object(harness, "command", return_value="synthetic"),
+                patch.object(harness.subprocess, "run", side_effect=execute),
+            ):
+                try:
+                    harness.main()
+                except RuntimeError:
+                    self.assertTrue(
+                        (directory / "private-custody-playwright.json").is_file()
+                    )
+                    self.assertEqual(
+                        json.loads(
+                            (directory / "custody-browser-results.json").read_text()
+                        )["status"],
+                        "failed",
+                    )
+                    raise
+            self.assertEqual(len(observed), 1)
+            self.assertFalse((directory / "private-custody-playwright.json").exists())
+            self.assertFalse((directory / "browser-results.json").exists())
+            self.assertFalse((directory / "cold-pdf-results.json").exists())
+            return json.loads((directory / "custody-browser-results.json").read_text())
+
+    def test_custody_is_four_strict_separate_cases_not_replacement_for16_or_cold1(self):
+        proof = self.run_custody()
+        self.assertEqual(
+            proof["counts"], {"expected": 4, "unexpected": 0, "flaky": 0, "skipped": 0}
+        )
+        self.assertEqual(proof["limits"]["perCaseTimeoutMs"], 120000)
+        self.assertEqual(proof["limits"]["keyProvisioning"], "not_exercised")
+        for key, value in [
+            ("expected", 0),
+            ("expected", 3),
+            ("expected", 5),
+            ("expected", True),
+            ("unexpected", 1),
+            ("flaky", 1),
+            ("skipped", 1),
+        ]:
+            counts = {"expected": 4, "unexpected": 0, "flaky": 0, "skipped": 0}
+            counts[key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(RuntimeError):
+                self.run_custody(stats=counts)
+        with self.assertRaises(RuntimeError):
+            self.run_custody(returncode=1)
+
+    def test_custody_serial_inventory_and_original_case_budgets(self):
+        source = (
+            ROOT / "tests/e2e/tests/local-custody-policy-provider.spec.ts"
+        ).read_text()
+        self.assertEqual(len(re.findall(r"^\s+test\('", source, re.MULTILINE)), 4)
+        self.assertIn("test.describe.serial", source)
+        self.assertNotIn("test.setTimeout", source)
+        self.assertNotIn("test.skip", source)
+        self.assertNotIn(".fulfill(", source)
+        self.assertIn("await intercepted.fetch()", source)
+        self.assertIn("await intercepted.abort('failed')", source)
+        self.assertIn("withFreshMfaFixtureCounter", source)
+        config = (ROOT / "tests/e2e/playwright.config.ts").read_text()
+        self.assertIn("AXIOM_LOCAL_CUSTODY_BROWSER_ACCEPTANCE", config)
+        self.assertIn("timeout: 120_000", config)
+        self.assertIn("globalTimeout: acceptanceTarget ? 10 * 60_000", config)
+
+    def test_custody_checks_owned_parity_before_privileged_setup(self):
+        source = (
+            ROOT / "tests/e2e/tests/local-custody-policy-provider.spec.ts"
+        ).read_text()
+        self.assertIn(
+            "assertOwnedFixture();", source.split("async function fixturePost")[0]
+        )
+        post = source.split("async function fixturePost", 1)[1].split(
+            "async function signIn", 1
+        )[0]
+        self.assertLess(post.index("requireOwnedLocal();"), post.index("await fetch("))
+        self.assertRegex(
+            source, r"requireOwnedLocal\(\);\s+const who = await createMfaAccount"
+        )
+        helper = (ROOT / "scripts/lib/acceptance-local-custody-browser.ts").read_text()
+        self.assertIn("load: typeof loadParityFixture = loadParityFixture", helper)
+        self.assertIn("const fixture = load(root);", helper)
+
+    def test_custody_reload_and_positive_recovery_do_not_auto_post(self):
+        source = (
+            ROOT / "tests/e2e/tests/local-custody-policy-provider.spec.ts"
+        ).read_text()
+        self.assertIn("owner.page.on('request', countCustodyPosts)", source)
+        self.assertIn("expect(custodyPosts).toBe(0)", source)
+        self.assertEqual(
+            source.count("expect(custodyPosts).toBe(postsBeforeReload)"), 1
+        )
+        self.assertIn("request.method() === 'POST'", source)
+        self.assertIn("expect(custodyPosts).toBe(postsBeforeReload + 1)", source)
+        self.assertIn("custodyRecoveries.slice(recoveriesBeforeCheck)", source)
+        self.assertIn("body: { resolution }", source)
+
+    def test_original16_mode_does_not_enable_or_select_custody(self):
+        with tempfile.TemporaryDirectory() as raw:
+            directory = Path(raw)
+            (directory / "runtime.env").write_text(
+                "AXIOM_LOCAL_CUSTODY_BROWSER_ACCEPTANCE=true\n"
+            )
+            runs = []
+
+            def execute(argv, **kwargs):
+                runs.append(argv)
+                self.assertNotIn(
+                    "AXIOM_LOCAL_CUSTODY_BROWSER_ACCEPTANCE", kwargs["env"]
+                )
+                if "scripts/warm-pdf-renderer.ts" in argv:
+                    self.assertEqual(kwargs["timeout"], 300)
+                else:
+                    self.assertNotIn("local-custody-policy-provider.spec.ts", argv)
+                    self.assertEqual(sum(v.endswith(".spec.ts") for v in argv), 7)
+                    self.assertIn("--retries=0", argv)
+                    Path(kwargs["env"]["PLAYWRIGHT_JSON_OUTPUT_FILE"]).write_text(
+                        json.dumps(
+                            {
+                                "stats": {
+                                    "expected": 16,
+                                    "unexpected": 0,
+                                    "flaky": 0,
+                                    "skipped": 0,
+                                }
+                            }
+                        )
+                    )
+                return subprocess.CompletedProcess(argv, 0)
+
+            info = {
+                "Config": {"Labels": {"axiom.fixture.run": "owned"}},
+                "State": {"Running": True},
+            }
+            with (
+                patch.object(
+                    harness.sys,
+                    "argv",
+                    ["harness", "--browser", "--directory", str(directory)],
+                ),
+                patch.object(
+                    harness, "owned_provider", return_value=({"runId": "owned"}, info)
+                ),
+                patch.object(harness, "resume_provider"),
+                patch.object(harness, "command", return_value="synthetic"),
+                patch.object(harness.subprocess, "run", side_effect=execute),
+            ):
+                harness.main()
+            self.assertEqual(len(runs), 2)
+            self.assertEqual(
+                json.loads((directory / "browser-results.json").read_text())["counts"],
+                {"expected": 16, "unexpected": 0, "flaky": 0, "skipped": 0},
+            )
 
     def test_existing_warmup_budget_and_strict_renderer_unchanged(self):
         attempt_ms = int(

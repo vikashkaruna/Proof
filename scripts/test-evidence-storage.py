@@ -274,6 +274,11 @@ def main():
         help="Resume only the owned synthetic provider",
     )
     parser.add_argument(
+        "--custody-browser",
+        action="store_true",
+        help="Run four serial normal-Auth custody cases on the owned W8 fixture",
+    )
+    parser.add_argument(
         "--browser",
         action="store_true",
         help="Run evidence browser acceptance with private fixture environment",
@@ -297,6 +302,16 @@ def main():
         or args.build_only
     ):
         raise RuntimeError("Cold PDF mode must run separately")
+    if args.custody_browser and (
+        args.browser
+        or args.cold_pdf
+        or args.stop
+        or args.pause_provider
+        or args.resume_provider
+        or args.build_only
+        or args.keep_running
+    ):
+        raise RuntimeError("Custody browser mode must run separately")
     os.umask(0o077)
     directory = args.directory.resolve()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -315,7 +330,7 @@ def main():
             resume_provider(directory)
             print("Owned synthetic evidence provider resumed")
         return
-    if args.browser or args.cold_pdf:
+    if args.browser or args.cold_pdf or args.custody_browser:
         state, info = owned_provider(directory)
         if (
             info["Config"]["Labels"].get("axiom.fixture.run") != state["runId"]
@@ -329,9 +344,13 @@ def main():
                 for line in (directory / "runtime.env").read_text().splitlines()
             )
         )
+        if args.custody_browser:
+            env["AXIOM_LOCAL_CUSTODY_BROWSER_ACCEPTANCE"] = "true"
+        else:
+            env.pop("AXIOM_LOCAL_CUSTODY_BROWSER_ACCEPTANCE", None)
         # The cold mode runs first on a hosted disposable fixture. Its new BFF
         # process must receive its first artifact request before any warm-up.
-        if not args.cold_pdf:
+        if not args.cold_pdf and not args.custody_browser:
             subprocess.run(  # nosec B603 B607 - fixed pnpm argv, no shell
                 ["pnpm", "exec", "tsx", "scripts/warm-pdf-renderer.ts"],
                 cwd=ROOT,
@@ -348,7 +367,9 @@ def main():
         env["AXIOM_EVIDENCE_STORAGE_ACCEPTANCE"] = "true"
         env["AXIOM_EVIDENCE_FIXTURE_DIRECTORY"] = str(directory)
         raw_report = directory / (
-            "private-cold-playwright.json"
+            "private-custody-playwright.json"
+            if args.custody_browser
+            else "private-cold-playwright.json"
             if args.cold_pdf
             else "private-playwright.json"
         )
@@ -370,6 +391,8 @@ def main():
                         "finalized source, released board PDF, and source-bound Pramaan dossier use exact retained versions$",
                     ]
                     if args.cold_pdf
+                    else ["local-custody-policy-provider.spec.ts"]
+                    if args.custody_browser
                     else [
                         "source-bound-formats-provider.spec.ts",
                         "evidence-ingestion.spec.ts",
@@ -391,6 +414,8 @@ def main():
             # packs 3, pack-access 1, board 5, approval archive 1, technical+DPB
             # source-bound formats 2). Refuse a missing or silently skipped spec.
             expected_browser_tests = 1 if args.cold_pdf else 16
+            if args.custody_browser:
+                expected_browser_tests = 4
             summary["counts"] = {
                 name: stats.get(name)
                 for name in ["expected", "unexpected", "flaky", "skipped"]
@@ -409,6 +434,24 @@ def main():
                 raise RuntimeError(
                     f"Evidence browser acceptance requires all {expected_browser_tests} tests without skips or retries"
                 )
+            if args.custody_browser:
+                summary["status"] = "passed"
+                summary["outcomes"] = [
+                    "normal-auth-customer-owner-request",
+                    "normal-auth-live-founder-approval",
+                    "normal-auth-nominated-operator-activation",
+                    "normal-auth-stale-intent-cancellation-response-loss-reload-recovery",
+                ]
+                summary["limits"] = {
+                    "dispatchKeyCustodyOnly": True,
+                    "keyProvisioning": "not_exercised",
+                    "execution": "not_exercised",
+                    "reportStorage": "not_exercised",
+                    "factorEnrollment": "pre-enrolled_fixture_factors",
+                    "perCaseTimeoutMs": 120000,
+                    "retries": 0,
+                }
+                return
             if args.cold_pdf:
                 summary["measurement"] = validate_cold_pdf_measurement(
                     json.loads(measurement.read_text())
@@ -451,12 +494,17 @@ def main():
                 (
                     directory
                     / (
-                        "cold-pdf-results.json"
+                        "custody-browser-results.json"
+                        if args.custody_browser
+                        else "cold-pdf-results.json"
                         if args.cold_pdf
                         else "browser-results.json"
                     )
                 ).write_text(json.dumps(summary, indent=2) + "\n")
-                raw_report.unlink(missing_ok=True)
+                # New custody failures retain the private original report for exact operands.
+                # Existing16/cold1 cleanup behavior stays unchanged.
+                if not args.custody_browser or summary["status"] == "passed":
+                    raw_report.unlink(missing_ok=True)
                 if args.cold_pdf:
                     measurement.unlink(missing_ok=True)
         return
