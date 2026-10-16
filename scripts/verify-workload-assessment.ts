@@ -1718,15 +1718,13 @@ except Exception as error:
         },
       });
       outcomes[
-        withRegisteredBrowser
-          ? 'normal-auth-reviewed-source-board4-auditor4-mfa-human-review-exact-provider-release-download'
-          : 'normal-auth-reviewed-source-board3-auditor3-mfa-human-review-exact-provider-release-download'
+        'normal-auth-reviewed-source4-board5-auditor5-mfa-human-review-exact-provider-release-download'
       ] = true;
       if (withRegisteredBrowser) {
         writePublicReportBrowserHandoff(publicReportProof);
         assert(registeredBrowserCompletion);
         await registeredBrowserCompletion;
-        outcomes['normal-auth-registered-browser-source3-board4-auditor4-lost-response-recovery'] =
+        outcomes['normal-auth-registered-browser-source4-board5-auditor5-lost-response-recovery'] =
           true;
       }
     }

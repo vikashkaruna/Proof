@@ -26,11 +26,8 @@ import { acceptanceTarget, repoRoot, tenantCookie } from '../target';
 import {
   reportAcceptanceRequested,
   readPublicReportBrowserHandoff,
+  verifyCoverageFirstAcceptanceReport,
 } from '../../../scripts/lib/acceptance-public-control-reports';
-import {
-  BoardReportContentV3Schema,
-  BoardReportContentV4Schema,
-} from '../../../packages/report-kit/src/board-report';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
 import { unzipSync } from 'fflate';
 
@@ -55,6 +52,87 @@ function localFixture() {
   )
     throw new Error('Owned local board report provider fixture required');
   return { endpoint, bucket, accessKeyId, secretAccessKey, directory };
+}
+
+async function assertCoverageFirstPdf(bytes: Buffer, kind: 'board' | 'auditor') {
+  const pdfFile = join(localFixture().directory, `coverage-first-${kind}.private.pdf`);
+  const textFile = join(localFixture().directory, `coverage-first-${kind}.private.txt`);
+  await writeFile(pdfFile, bytes, { mode: 0o600 });
+  await execFileAsync('pdftotext', [pdfFile, textFile], { timeout: 10000 });
+  const text = await import('node:fs/promises').then((fs) => fs.readFile(textFile, 'utf8'));
+  expect(text).toMatch(/Scores and financial exposure estimates are withheld/);
+  expect(text).toMatch(/Scope and coverage/);
+  expect(text).toMatch(/Unknown/);
+  expect(text).toContain('DPDPA-GOV-001');
+  expect(text).not.toMatch(
+    /Posture score\s*[:=]?\s*\d|Estimated exposure\s*[:=]?\s*[₹0-9]|Score band\s*[:=]/i,
+  );
+  return text;
+}
+
+/** This opens the real authenticated server renderer, independently of raw
+ * recorded JSON and the client coverage summary. No response interception. */
+async function assertReadableCoveragePreview(
+  founder: Page,
+  expected: {
+    reportId: string;
+    requestId: string;
+    title: string;
+    runId: string;
+    reviewId: string;
+    sourceSha256: string;
+  },
+) {
+  const coverage = founder.getByRole('region', { name: 'Website evidence coverage' });
+  const link = coverage.getByRole('link', { name: 'Preview readable report', exact: true });
+  const path = `/api/bff/v1/reports/statutory/${expected.reportId}/html`;
+  await expect(link).toBeVisible();
+  await expect(link).toHaveAttribute('href', path);
+  const [preview] = await Promise.all([founder.waitForEvent('popup'), link.click()]);
+  try {
+    await preview.waitForLoadState('domcontentloaded');
+    expect(new URL(preview.url()).origin).toBe(new URL(founder.url()).origin);
+    expect(new URL(preview.url()).pathname).toBe(path);
+    await expect(preview.getByRole('heading', { name: expected.title, exact: true })).toBeVisible();
+    await expect(
+      preview.getByText(/^Scores and financial exposure estimates are withheld\./),
+    ).toBeVisible();
+    await expect(
+      preview.getByRole('heading', { name: 'Scope and coverage', exact: true }),
+    ).toBeVisible();
+    await expect(
+      preview.getByRole('heading', { name: 'Review coverage and evidence needed', exact: true }),
+    ).toBeVisible();
+    const footer = preview.locator('footer');
+    await expect(footer).toBeVisible();
+    for (const value of [
+      expected.requestId,
+      expected.runId,
+      expected.reviewId,
+      expected.sourceSha256,
+    ]) {
+      await expect(footer).toContainText(value);
+    }
+    await expect(preview.locator('body')).toContainText(/Unknown/);
+    await expect(preview.locator('body')).not.toContainText(
+      /Posture score\s*[:=]?\s*\d|Estimated exposure\s*[:=]?\s*[₹0-9]|Score band\s*[:=]/i,
+    );
+    await coverage.screenshot({
+      path: join(
+        localFixture().directory,
+        `coverage-first-${expected.reportId}-summary.private.png`,
+      ),
+    });
+    await preview.screenshot({
+      path: join(
+        localFixture().directory,
+        `coverage-first-${expected.reportId}-preview.private.png`,
+      ),
+      fullPage: false,
+    });
+  } finally {
+    await preview.close();
+  }
 }
 
 async function providerAction(action: '--pause-provider' | '--resume-provider') {
@@ -556,34 +634,36 @@ test.describe('real-provider board report lifecycle', () => {
         assessment_run_id: assessment.runId,
         assessment_result_digest: assessment.resultDigest,
       });
+      const sources = (await database(
+        `board_request_sources?request_id=eq.${request.requestId}&select=*`,
+      )) as { source_text: string; source_sha256: string }[];
+      expect(sources).toHaveLength(1);
       if (sourceHandoff) {
-        const document = (
-          sourceHandoff.source.asset ? BoardReportContentV4Schema : BoardReportContentV3Schema
-        ).parse(JSON.parse(row.content_text));
-        expect(document.schema_version).toBe(sourceHandoff.source.asset ? 4 : 3);
-        if (sourceHandoff.source.asset) {
-          expect('asset_scope' in document).toBe(true);
-          if (!('asset_scope' in document))
-            throw new Error('Registered asset report downgrade refused');
-          expect(document.asset_scope.estate.id).toBe(sourceHandoff.source.estateId);
-          expect(document.asset_scope.system.id).toBe(sourceHandoff.source.systemId);
-          expect(document.asset_scope.target.id).toBe(sourceHandoff.source.asset.targetId);
-          expect(document.asset_scope.association.id).toBe(
-            sourceHandoff.source.asset.associationId,
-          );
-          expect(document.asset_scope.target.sha256).toBe(sourceHandoff.source.asset.targetSha256);
-          expect(document.asset_scope.association.sha256).toBe(
-            sourceHandoff.source.asset.associationSha256,
-          );
-          expect(document.asset_scope.target.url).toBe('https://fixture.axiomproof.ai/');
-          expect(document.asset_scope.ownership_verified).toBe(false);
-          expect(document.asset_scope.connector_access_granted).toBe(false);
-          expect(document.asset_scope.review_required).toBe(true);
-        }
-        expect(document.public_review_appendix.reviewId).toBe(sourceHandoff.source.reviewId);
-        expect(document.public_review_appendix.controls).toHaveLength(46);
-        expect(document.public_review_appendix.declarationsVerified).toBe(false);
-        expect(document.public_review_appendix.evidenceVerified).toBe(false);
+        const { content: document } = verifyCoverageFirstAcceptanceReport({
+          kind: 'board',
+          title: request.title,
+          tenantId,
+          requestId: request.requestId,
+          source: sourceHandoff.source,
+          resultDigest: assessment.resultDigest,
+          sourceText: sources[0]!.source_text,
+          sourceSha256: sources[0]!.source_sha256,
+          contentText: row.content_text,
+          contentSha256: row.content_sha256,
+        });
+        expect(document.schema_version).toBe(5);
+        expect(document.presentation_policy.metrics).toBe('withheld');
+        expect(document.provenance.reviewId).toBe(sourceHandoff.source.reviewId);
+        expect(document.controls).toHaveLength(46);
+        expect(document.summary.omittedUnknown).toBeGreaterThan(0);
+        expect(document.declarationsVerified).toBe(false);
+        expect(document.evidenceVerified).toBe(false);
+        if (sourceHandoff.source.asset)
+          expect(document.asset_scope!.target.url).toBe('https://fixture.axiomproof.ai/');
+      } else {
+        // Default historical mode stays source1/doc2; no permissive OR-version fallback.
+        expect(JSON.parse(sources[0]!.source_text).schema_version).toBe(1);
+        expect(JSON.parse(row.content_text).schema_version).toBe(2);
       }
       const detail = await founder.request.get(`/api/bff/v1/reports/${draft.reportId}`);
       expect(detail.status()).toBe(200);
@@ -612,15 +692,34 @@ test.describe('real-provider board report lifecycle', () => {
         ).toBeVisible();
         await review.getByText('Exact recorded content', { exact: true }).click();
         await expect(review.locator('pre')).toContainText(sourceHandoff.source.reviewId);
+        const coverage = review.getByRole('region', { name: 'Website evidence coverage' });
+        await expect(coverage).toBeVisible();
+        await expect(
+          coverage.getByText('Scores and financial exposure estimates are withheld.', {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(coverage).toContainText(/Unknown/i);
+        await expect(coverage).not.toContainText(
+          /Posture score\s*[:=]?\s*\d|Estimated exposure\s*[:=]?\s*[₹0-9]/i,
+        );
+        await assertReadableCoveragePreview(founder, {
+          reportId: draft.reportId,
+          requestId: request.requestId,
+          title: request.title,
+          runId: assessment.runId,
+          reviewId: sourceHandoff.source.reviewId,
+          sourceSha256: sources[0]!.source_sha256,
+        });
         if (sourceHandoff.source.asset) {
-          await expect(review.locator('pre')).toContainText('human-declared asset scope');
+          await expect(review.locator('pre')).toContainText(/human.declared asset scope/i);
           await expect(review.locator('pre')).toContainText(
             'Synthetic controller acceptance estate',
           );
           await expect(review.locator('pre')).toContainText('Synthetic public website inventory');
           await expect(review.locator('pre')).toContainText('fixture.axiomproof.ai');
           await expect(review.locator('pre')).toContainText('does not verify website ownership');
-          await expect(review.locator('pre')).toContainText('unknown');
+          await expect(review.locator('pre')).toContainText(/Unknown/i);
           await expect(review.locator('pre')).toContainText('privacy_notice');
           await expect(review.locator('pre')).toContainText('processor_disclosure');
           await expect(review.locator('pre')).toContainText('consent_ui');
@@ -669,9 +768,6 @@ test.describe('real-provider board report lifecycle', () => {
         retain_until: string;
       }[];
       expect(rows.map((r) => r.artifact_kind)).toEqual(['board_pdf', 'source_json']);
-      const sources = (await database(
-        `board_request_sources?request_id=eq.${request.requestId}&select=*`,
-      )) as { source_text: string; source_sha256: string }[];
       const source = sources[0]!;
       expect(rows[1]!.content_hash).toBe(source.source_sha256);
       const config = localFixture();
@@ -702,19 +798,15 @@ test.describe('real-provider board report lifecycle', () => {
       );
       expect(privatePdf.status()).toBe(200);
       const downloadedPdf = Buffer.from(await privatePdf.body());
-      if (sourceHandoff?.source.asset) {
-        const pdfFile = join(localFixture().directory, 'registered-source-board.private.pdf');
-        const textFile = join(localFixture().directory, 'registered-source-board.private.txt');
-        await writeFile(pdfFile, downloadedPdf, { mode: 0o600 });
-        await execFileAsync('pdftotext', [pdfFile, textFile], { timeout: 10000 });
-        const text = await import('node:fs/promises').then((fs) => fs.readFile(textFile, 'utf8'));
-        expect(text).toMatch(/human.declared asset scope/i);
-        expect(text).toContain('Synthetic controller acceptance estate');
-        expect(text).toContain('Synthetic public website inventory');
-        expect(text).toContain('fixture.axiomproof.ai');
-        expect(text).toMatch(/does not verify website ownership/i);
-        expect(text).toMatch(/unknown/i);
-        expect(text).toContain('DPDPA-GOV-001');
+      if (sourceHandoff) {
+        const text = await assertCoverageFirstPdf(downloadedPdf, 'board');
+        if (sourceHandoff.source.asset) {
+          expect(text).toMatch(/human.declared asset scope/i);
+          expect(text).toContain('Synthetic controller acceptance estate');
+          expect(text).toContain('Synthetic public website inventory');
+          expect(text).toContain('fixture.axiomproof.ai');
+          expect(text).toMatch(/Ownership is not verified/i);
+        }
       }
 
       expect(sha(downloadedPdf)).toBe(pdfVersion.content_hash);
@@ -871,7 +963,14 @@ test.describe('real-provider board report lifecycle', () => {
         { headers: { 'x-tenant-id': tenantId } },
       );
       expect(retained.status()).toBe(200);
-      expect(sha(Buffer.from(await retained.body()))).toBe(dossier.archiveHash);
+      const retainedArchive = Buffer.from(await retained.body());
+      expect(sha(retainedArchive)).toBe(dossier.archiveHash);
+      const retainedFiles = unzipSync(retainedArchive);
+      expect(Buffer.from(retainedFiles['source/assessment.json']!).toString('utf8')).toBe(
+        source.source_text,
+      );
+      expect(Buffer.from(retainedFiles['source/board-report.pdf']!)).toEqual(downloadedPdf);
+      if (sourceHandoff) expect(JSON.parse(source.source_text).schema_version).toBe(4);
       expect(retained.headers()['x-content-sha256']).toBe(dossier.archiveHash);
       expect(
         (
@@ -1198,10 +1297,27 @@ test.describe('real-provider board report lifecycle', () => {
     browser,
   }) => {
     test.setTimeout(300_000);
+    const sourceHandoff = reportAcceptanceRequested()
+      ? readPublicReportBrowserHandoff(repoRoot)
+      : undefined;
+    const tenantId = sourceHandoff?.tenantId ?? state.tenantA.id;
+    const post = (actor: Page, path: string, body: unknown) =>
+      postInTenant(actor, path, body, tenantId);
+    const select = async (actor: Page, id: string, role: 'admin' | 'founder' | 'viewer') => {
+      if (!sourceHandoff) return selectTenant(actor, 'a');
+      await database('tenant_users', { tenant_id: tenantId, user_id: id, role });
+      await actor.context().addCookies([tenantCookie(sourceHandoff.tenantSlug)]);
+    };
     const manager = await createMfaAccount('auditor-manager', { role: 'admin', withFactor: true });
     await signInAs(page, manager.email, manager.password, manager.totpSecret!);
-    await selectTenant(page, 'a');
-    const assessment = await finalizedAssessment(manager.id);
+    await select(page, manager.id, 'admin');
+    const assessment = sourceHandoff
+      ? {
+          engagementId: sourceHandoff.source.engagementId,
+          runId: sourceHandoff.source.runId,
+          resultDigest: sourceHandoff.resultDigest,
+        }
+      : await finalizedAssessment(manager.id);
     const requestBody = {
       engagementId: assessment.engagementId,
       assessmentRunId: assessment.runId,
@@ -1237,7 +1353,7 @@ test.describe('real-provider board report lifecycle', () => {
         withFactor: true,
       });
       await signInAs(founder, founderAccount.email, founderAccount.password);
-      await selectTenant(founder, 'a');
+      await select(founder, founderAccount.id, 'founder');
       await satisfyLoginMfaWithSecret(founder, founderAccount.totpSecret!);
       const generated = await post(
         founder,
@@ -1254,20 +1370,87 @@ test.describe('real-provider board report lifecycle', () => {
         findings: Array<{ risk_points: number }>;
         limitations: string;
       };
-      expect(content.schema_version).toBe(2);
-      expect(content.source_kind).toBe('finalized_assessment');
-      expect(content.findings).toHaveLength(1);
-      expect(content.findings[0]?.risk_points).toBe(10);
-      expect(content.limitations).toContain('No independent audit');
+      const sources = (await database(
+        `statutory_request_sources?request_id=eq.${request.requestId}&select=source_text,source_sha256`,
+      )) as Array<{ source_text: string; source_sha256: string }>;
+      expect(sources).toHaveLength(1);
+      if (sourceHandoff) {
+        const { content: qualified } = verifyCoverageFirstAcceptanceReport({
+          kind: 'auditor',
+          title: requestBody.title,
+          tenantId,
+          requestId: request.requestId,
+          source: sourceHandoff.source,
+          resultDigest: assessment.resultDigest,
+          sourceText: sources[0]!.source_text,
+          sourceSha256: sources[0]!.source_sha256,
+          contentText: row.content_text,
+          contentSha256: row.content_sha256,
+        });
+        expect(qualified.schema_version).toBe(5);
+        expect(qualified.presentation_policy.metrics).toBe('withheld');
+        expect(qualified.controls).toHaveLength(46);
+      } else {
+        expect(JSON.parse(sources[0]!.source_text).schema_version).toBe(1);
+        expect(content.schema_version).toBe(2);
+        expect(content.source_kind).toBe('finalized_assessment');
+        expect(content.findings).toHaveLength(1);
+        expect(content.findings[0]?.risk_points).toBe(10);
+        expect(content.limitations).toContain('No independent audit');
+      }
       expect(row.content_text).not.toContain('auditor_attestation');
       expect(
         (await founder.request.get(`/api/bff/v1/reports/statutory/${draft.reportId}/pdf`)).status(),
       ).toBe(409);
-      const reviewed = await post(founder, `/reports/${draft.reportId}/review`, {
-        decision: 'approved',
-        expectedContentHash: row.content_sha256,
-      });
-      expect(reviewed.status()).toBe(200);
+      if (sourceHandoff) {
+        await founder.goto('/reports');
+        const workflow = founder.getByRole('region', { name: 'Auditor pack workflow' });
+        await workflow.getByRole('button', { name: new RegExp(requestBody.title) }).click();
+        const selected = founder.locator('[aria-label="Selected auditor request"]');
+        await selected.getByRole('button', { name: 'Open report for review' }).click();
+        const review = founder.getByRole('region', { name: 'Report detail' });
+        await expect(
+          review.getByRole('heading', { name: requestBody.title, exact: true }),
+        ).toBeVisible();
+        await review.getByText('Exact recorded content', { exact: true }).click();
+        await expect(review.locator('pre')).toContainText(sourceHandoff.source.reviewId);
+        const coverage = review.getByRole('region', { name: 'Website evidence coverage' });
+        await expect(coverage).toBeVisible();
+        await expect(
+          coverage.getByText('Scores and financial exposure estimates are withheld.', {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await expect(coverage).toContainText(/Unknown/i);
+        await expect(coverage).not.toContainText(
+          /Posture score\s*[:=]?\s*\d|Estimated exposure\s*[:=]?\s*[₹0-9]/i,
+        );
+        await assertReadableCoveragePreview(founder, {
+          reportId: draft.reportId,
+          requestId: request.requestId,
+          title: requestBody.title,
+          runId: assessment.runId,
+          reviewId: sourceHandoff.source.reviewId,
+          sourceSha256: sources[0]!.source_sha256,
+        });
+        await review
+          .getByRole('checkbox', { name: 'I reviewed the exact content and SHA-256 shown above.' })
+          .check();
+        const response = founder.waitForResponse(
+          (r) =>
+            new URL(r.url()).pathname === `/api/bff/v1/reports/${draft.reportId}/review` &&
+            r.request().method() === 'POST',
+        );
+        await review.getByRole('button', { name: 'Approve reviewed content' }).click();
+        expect((await response).status()).toBe(200);
+        await expect(review.getByText(/^approved · [^·]+ · Library /)).toBeVisible();
+      } else {
+        const reviewed = await post(founder, `/reports/${draft.reportId}/review`, {
+          decision: 'approved',
+          expectedContentHash: row.content_sha256,
+        });
+        expect(reviewed.status()).toBe(200);
+      }
       const built = await post(founder, `/reports/statutory/${draft.reportId}/artifacts`, {
         operationKey: crypto.randomUUID(),
       });
@@ -1286,9 +1469,6 @@ test.describe('real-provider board report lifecycle', () => {
         retain_until: string;
       }>;
       expect(versions.map((item) => item.artifact_kind)).toEqual(['source_json', 'statutory_pdf']);
-      const sources = (await database(
-        `statutory_request_sources?request_id=eq.${request.requestId}&select=source_text,source_sha256`,
-      )) as Array<{ source_text: string; source_sha256: string }>;
       expect(versions[0]?.content_hash).toBe(sources[0]?.source_sha256);
       const config = localFixture();
       const vault = new EvidenceVault('ap-south-1', config.endpoint, config);
@@ -1313,8 +1493,14 @@ test.describe('real-provider board report lifecycle', () => {
         vault.close();
       }
       const viewer = await viewerContext.newPage();
-      await signIn(viewer, 'viewer');
-      await selectTenant(viewer, 'a');
+      if (sourceHandoff) {
+        const account = await createMfaAccount('source-auditor-viewer', { role: 'viewer' });
+        await signInAs(viewer, account.email, account.password);
+        await select(viewer, account.id, 'viewer');
+      } else {
+        await signIn(viewer, 'viewer');
+        await selectTenant(viewer, 'a');
+      }
       expect(
         (await viewer.request.get(`/api/bff/v1/reports/statutory/${draft.reportId}/pdf`)).status(),
       ).toBe(403);
@@ -1332,7 +1518,9 @@ test.describe('real-provider board report lifecycle', () => {
         `/api/bff/v1/reports/statutory/${draft.reportId}/pdf`,
       );
       expect(publicPdf.status()).toBe(200);
-      expect(sha(Buffer.from(await publicPdf.body()))).toBe(versions[1]!.content_hash);
+      const downloadedPdf = Buffer.from(await publicPdf.body());
+      expect(sha(downloadedPdf)).toBe(versions[1]!.content_hash);
+      if (sourceHandoff) await assertCoverageFirstPdf(downloadedPdf, 'auditor');
       const dossierOperation = crypto.randomUUID();
       const wrongDossier = await post(
         page,
@@ -1357,7 +1545,7 @@ test.describe('real-provider board report lifecycle', () => {
       const detailResponse = await founder.request.get(
         `/api/bff/v1/dossiers/${dossierBuild.dossierId}`,
         {
-          headers: { 'x-tenant-id': state.tenantA.id },
+          headers: { 'x-tenant-id': tenantId },
         },
       );
       expect(detailResponse.status()).toBe(200);
@@ -1381,7 +1569,7 @@ test.describe('real-provider board report lifecycle', () => {
       const archiveResponse = await founder.request.get(
         `/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`,
         {
-          headers: { 'x-tenant-id': state.tenantA.id },
+          headers: { 'x-tenant-id': tenantId },
         },
       );
       expect(archiveResponse.status()).toBe(200);
@@ -1422,9 +1610,8 @@ test.describe('real-provider board report lifecycle', () => {
       expect(Buffer.from(files['source/assessment.json']!).toString()).toBe(
         sources[0]!.source_text,
       );
-      expect(sha(Buffer.from(files['source/auditor-review-pack.pdf']!))).toBe(
-        versions[1]!.content_hash,
-      );
+      expect(Buffer.from(files['source/auditor-review-pack.pdf']!)).toEqual(downloadedPdf);
+      if (sourceHandoff) expect(JSON.parse(sources[0]!.source_text).schema_version).toBe(4);
       const manifest = JSON.parse(Buffer.from(files['manifest.json']!).toString()) as {
         kind: string;
         limitations: string[];
@@ -1434,7 +1621,7 @@ test.describe('real-provider board report lifecycle', () => {
       expect(
         (
           await viewer.request.get(`/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`, {
-            headers: { 'x-tenant-id': state.tenantA.id },
+            headers: { 'x-tenant-id': tenantId },
           })
         ).status(),
       ).toBe(403);

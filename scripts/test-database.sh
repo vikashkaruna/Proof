@@ -16,8 +16,12 @@ if ! docker image inspect "$image" >/dev/null 2>&1; then
   fi
 fi
 test_log=$(mktemp)
-cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -f "$test_log"; }
+phase_dir=$(mktemp -d "${TMPDIR:-/tmp}/axiom-report-policy.XXXXXXXX")
+phase_dir=$(cd "$phase_dir" && pwd -P)
+cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -f "$test_log"; rm -rf "$phase_dir"; }
 trap cleanup EXIT
+python3 tests/database/lib/report-policy-phases.py prepare --directory "$phase_dir"
+pnpm exec tsx scripts/lib/coverage-first-report-sql-fixtures.ts "$phase_dir"
 docker run --rm -d --name "$container" --label com.axiom.fixture=database-policy-test --label com.axiom.fixture.project=axiom-db-tests --label "com.axiom.owner-worktree=$(pwd)" -e POSTGRES_HOST_AUTH_METHOD=trust "$image" >/dev/null
 for attempt in $(seq 1 60); do
   if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
@@ -26,7 +30,8 @@ done
 docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null
 docker exec "$container" createdb -U postgres axiom_policy_test
 sql() {
-  if ! docker exec -i "$container" psql -X -U postgres -d axiom_policy_test -v ON_ERROR_STOP=1 -q >"$test_log" 2>&1; then
+  local database="${1:-axiom_policy_test}"
+  if ! docker exec -i "$container" psql -X -U postgres -d "$database" -v ON_ERROR_STOP=1 -q >"$test_log" 2>&1; then
     cat "$test_log"
     return 1
   fi
@@ -35,21 +40,40 @@ sql < tests/database/bootstrap.sql
 # Explicit privileged role bootstrap only for this owned disposable fixture.
 python3 tests/database/lib/preprovision-local-custody-verifier.py --container "$container" --image "$image"
 
+# Original138/142 assertions exercise their genuine historical NEW-request policy.
+python3 scripts/migrate-database.py --container "$container" --user postgres --database axiom_policy_test --migrations "$phase_dir/migrations143"
+# Prove the ordinary service role, never the fixture image's implicit RLS bypass.
+docker exec "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q -c "alter role service_role nobypassrls;"
+while IFS= read -r suite; do
+  echo "Testing $suite (historical143)"
+  sql < "tests/database/$suite"
+  printf '143|%s\n' "$suite" >> "$phase_dir/executed-suites.txt"
+done < <(python3 tests/database/lib/report-policy-phases.py historical-list --directory "$phase_dir")
+# Fresh owned databases retain actual source2/3 pending rows through the upgrade.
+# Their lifetime is the already-owned disposable container; no retained DB is used.
+for version in 2 3; do
+  legacy_database="axiom_proof_local_report_source$version"
+  docker exec "$container" createdb -U postgres "$legacy_database"
+  sql "$legacy_database" < tests/database/bootstrap.sql
+  python3 scripts/migrate-database.py --container "$container" --user postgres --database "$legacy_database" --migrations "$phase_dir/migrations143"
+  python3 tests/database/lib/report-policy-phases.py legacy-program --directory "$phase_dir" --version "$version" | sql "$legacy_database"
+done
 python3 scripts/migrate-database.py --container "$container" --user postgres --database axiom_policy_test
 bash tests/database/migration-runner.sh "$container"
-# Prove the ordinary managed service role, not the Supabase image's implicit
-# superuser-like RLS bypass. Only this disposable container is modified.
-docker exec "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q -c "alter role service_role nobypassrls;"
-for suite in tests/database/*.test.sql; do
-  echo "Testing $(basename "$suite")"
-  if [ "$(basename "$suite")" = controller-credential-issuance.test.sql ]; then
+while IFS= read -r suite; do
+  echo "Testing $suite (current144)"
+  if [ "$suite" = controller-credential-issuance.test.sql ]; then
     # The production migration deliberately grants no issuer membership to
     # postgres. Only this disposable test session assumes the private role.
-    docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+    docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "tests/database/$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [ "$suite" = coverage-first-public-reports.test.sql ]; then
+    python3 tests/database/lib/report-policy-phases.py current-program --directory "$phase_dir" | sql
   else
-    sql < "$suite"
+    sql < "tests/database/$suite"
   fi
-done
+  printf '144|%s\n' "$suite" >> "$phase_dir/executed-suites.txt"
+done < <(python3 tests/database/lib/report-policy-phases.py current-list --directory "$phase_dir")
+python3 tests/database/lib/report-policy-phases.py verify --directory "$phase_dir"
 python3 tests/database/sudhaar-review-adoption-fixture.py | sql
 bash tests/database/operator-workflows-public-source.sh "$container"
 bash tests/database/concurrent-operator-workflows.sh "$container"

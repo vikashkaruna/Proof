@@ -1,0 +1,239 @@
+"""Explicit historical143/current144 SQL phases; pure preparation, no DB transport.
+
+The parent owns one disposable container and executes emitted SQL with psql.
+No product downgrade flag, historical rewrite, broad exception or skipped suite.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import json
+import os
+import shutil
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[3]
+HISTORICAL = (
+    "public-control-report-provenance.test.sql",
+    "public-control-asset-report-provenance.test.sql",
+)
+CURRENT = "coverage-first-public-reports.test.sql"
+MIGRATION = "0144_coverage_first_public_report_presentation.sql"
+
+
+def need(value: bool, code: str) -> None:
+    if not value:
+        raise ValueError(code)
+
+
+def protected(directory: Path) -> Path:
+    need(
+        directory.is_absolute()
+        and directory.resolve() == directory
+        and not directory.is_symlink(),
+        "fixture_directory_boundary",
+    )
+    stat = directory.stat()
+    need(
+        directory.is_dir()
+        and stat.st_mode & 0o777 == 0o700
+        and stat.st_uid == os.getuid(),
+        "owned_protected_directory_required",
+    )
+    return directory
+
+
+def plan(root: Path = ROOT) -> dict:
+    files = sorted(path.name for path in (root / "tests/database").glob("*.test.sql"))
+    need(
+        all(name in files for name in (*HISTORICAL, CURRENT)),
+        "required_report_suite_missing",
+    )
+    return {
+        "historical143": list(HISTORICAL),
+        "current144": [name for name in files if name not in HISTORICAL],
+        "all": files,
+    }
+
+
+def prepare(directory: Path, root: Path = ROOT) -> None:
+    directory = protected(directory)
+    need(not list(directory.iterdir()), "fresh_fixture_directory_required")
+    migrations = directory / "migrations143"
+    migrations.mkdir(mode=0o700)
+    files = sorted((root / "infra/supabase/migrations").glob("*.sql"))
+    historical = [
+        path for path in files if path.name[:4].isdigit() and int(path.name[:4]) <= 143
+    ]
+    policy = root / "infra/supabase/migrations" / MIGRATION
+    need(
+        len(historical) == 143 and policy in files,
+        "historical143_and_policy144_inventory_required",
+    )
+    for path in historical:
+        shutil.copyfile(path, migrations / path.name)
+    latest = directory / "migration144"
+    latest.mkdir(mode=0o700)
+    shutil.copyfile(policy, latest / MIGRATION)
+    (directory / "suite-plan.json").write_text(json.dumps(plan(root), indent=2) + "\n")
+    (directory / "executed-suites.txt").write_text("")
+
+
+def historical_prefix(version: int, root: Path = ROOT) -> str:
+    name = HISTORICAL[version - 2]
+    text = (root / "tests/database" / name).read_text()
+    boundary = "do $$declare kind text;doc jsonb;r jsonb;report public.reports;begin"
+    need(text.count(boundary) == 1, "reviewed_legacy_fixture_boundary_changed")
+    return text.split(boundary)[0]
+
+
+def current_program(directory: Path, root: Path = ROOT) -> str:
+    # Reuse exact immutable canonical142 setup through creation of pending requests.
+    text = (root / "tests/database" / HISTORICAL[1]).read_text()
+    boundary = "select pg_temp.ok((select value->>'status'='requested' from board_requested),'board source3 requested');"
+    need(text.count(boundary) == 1, "reviewed_current_fixture_boundary_changed")
+    setup = text.split(boundary)[0]
+    fixture = directory / "parity-fixtures.sql"
+    need(
+        fixture.is_file()
+        and not fixture.is_symlink()
+        and fixture.stat().st_size < 4 * 1024 * 1024,
+        "generated_parity_fixture_required",
+    )
+    suite = (root / "tests/database" / CURRENT).read_text()
+    need(
+        suite.count("-- @coverage144_setup") == 1
+        and suite.count("-- @coverage144_parity") == 1,
+        "reviewed_current_suite_markers_changed",
+    )
+    return suite.replace("-- @coverage144_setup", setup).replace(
+        "-- @coverage144_parity", fixture.read_text()
+    )
+
+
+def migration_program(directory: Path, root: Path = ROOT) -> str:
+    spec = importlib.util.spec_from_file_location(
+        "coverage144_migration_runner", root / "scripts/migrate-database.py"
+    )
+    need(spec is not None and spec.loader is not None, "migration_runner_unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.migration_program(directory / "migration144")
+
+
+def rpc_query() -> str:
+    return """select jsonb_agg(jsonb_build_object('name',p.proname,'oid',p.oid,
+      'identity',pg_get_function_identity_arguments(p.oid),'owner',p.proowner,
+      'acl',p.proacl) order by p.proname) as value from pg_catalog.pg_proc p
+      join pg_catalog.pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='public' and p.proname in
+      ('capture_board_request_source','capture_statutory_request_source',
+       'record_board_report_draft','record_source_bound_statutory_draft',
+       'begin_board_artifact_build','begin_statutory_artifact_build')"""
+
+
+def legacy_program(directory: Path, version: int, root: Path = ROOT) -> str:
+    need(version in (2, 3), "explicit_legacy_version_required")
+    text = historical_prefix(version, root)
+    text += """
+-- These are genuine committed request rows, never superuser-invented source rows.
+create temporary table coverage144_old_expected as
+ select 'board'::text kind,to_jsonb(r) request_row,s.source_text,s.source_sha256,pg_temp.document('board') document
+ from public.board_report_requests r join public.board_request_sources s on s.tenant_id=r.tenant_id and s.request_id=r.id
+ where r.id=((select value from board_requested)->>'requestId')::uuid
+ union all
+ select 'auditor',to_jsonb(r),s.source_text,s.source_sha256,pg_temp.document('auditor')
+ from public.statutory_report_requests r join public.statutory_request_sources s on s.tenant_id=r.tenant_id and s.request_id=r.id
+ where r.id=((select value from auditor_requested)->>'requestId')::uuid;
+"""
+    text += f"select pg_temp.ok((select count(*)=2 and bool_and(source_text::jsonb->'schema_version'='{version}'::jsonb) and bool_and(request_row->>'status'='requested') from coverage144_old_expected),'genuine committed old pending requests');\n"
+    text += "create temporary table coverage144_rpc_before as " + rpc_query() + ";\n"
+    text += "select pg_temp.ok((select jsonb_array_length(value)=6 from coverage144_rpc_before),'exact six prior RPC identities');\n"
+    text += "create temporary table coverage144_history_before as select to_jsonb(h) value from axiom_migrations.applied h;\nCOMMIT;\n"
+    program = migration_program(directory, root)
+    text += (
+        program
+        + "\n"
+        + (root / "tests/database/lib/coverage-first-legacy-after.sql").read_text()
+    )
+    text += (
+        "select pg_temp.ok(("
+        + rpc_query()
+        + ")=(select value from coverage144_rpc_before),'six RPC OID ACL exact after upgrade');\n"
+    )
+    text += "create temporary table coverage144_rpc_after as " + rpc_query() + ";\n"
+    # The exact canonical migration runner performs a checksum no-op on repeat.
+    text += "\n" + program + "\n"
+    text += (
+        "select pg_temp.ok(("
+        + rpc_query()
+        + ")=(select value from coverage144_rpc_before),'six RPC OID ACL exact after checksum repeat');\n"
+    )
+    text += "select pg_temp.ok((select count(*)=144 from axiom_migrations.applied),'exact144 history after repeat');\n"
+    text += (
+        "select jsonb_build_object('database',current_database(),'before',(select value from coverage144_rpc_before),'after',(select value from coverage144_rpc_after),'repeat',("
+        + rpc_query()
+        + "),'unchanged',true) as coverage144_rpc_parity;\n"
+    )
+    return text
+
+
+def verify_inventory(directory: Path, root: Path = ROOT) -> None:
+    expected = plan(root)
+    expected_rows = [f"143|{name}" for name in expected["historical143"]] + [
+        f"144|{name}" for name in expected["current144"]
+    ]
+    actual = (directory / "executed-suites.txt").read_text().splitlines()
+    need(
+        len(actual) == len(set(actual)) and sorted(actual) == sorted(expected_rows),
+        "suite_inventory_not_exact_once",
+    )
+    (directory / "suite-inventory-verified.json").write_text(
+        json.dumps(
+            {
+                "suiteCount": len(actual),
+                "exactOnce": True,
+                "noneOmitted": True,
+                "historical143": expected["historical143"],
+                "current144": expected["current144"],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "action",
+        choices=[
+            "prepare",
+            "historical-list",
+            "current-list",
+            "current-program",
+            "legacy-program",
+            "verify",
+        ],
+    )
+    parser.add_argument("--directory", type=Path, required=True)
+    parser.add_argument("--version", type=int, choices=[2, 3])
+    args = parser.parse_args()
+    directory = protected(args.directory)
+    if args.action == "prepare":
+        prepare(directory)
+    elif args.action.endswith("-list"):
+        phase = "historical143" if args.action == "historical-list" else "current144"
+        print("\n".join(plan()[phase]))
+    elif args.action == "current-program":
+        print(current_program(directory))
+    elif args.action == "legacy-program":
+        need(args.version in (2, 3), "explicit_legacy_version_required")
+        print(legacy_program(directory, args.version))
+    else:
+        verify_inventory(directory)
+
+
+if __name__ == "__main__":
+    main()
