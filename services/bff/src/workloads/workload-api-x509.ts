@@ -1,5 +1,6 @@
 import { Client, credentials, Metadata, type ClientReadableStream } from '@grpc/grpc-js';
 import { z } from 'zod';
+import { types as utilTypes } from 'node:util';
 import { fetchX509Svid, type X509SvidResponse } from './workload-api-protocol.js';
 import { prepareX509Material, x509Identity, X509Refused, type X509Material } from './x509-svid.js';
 
@@ -114,10 +115,39 @@ export class WorkloadApiX509Source {
     this.#config = configuration.parse(config);
     if (health.domain !== new URL(this.#config.spiffeId).hostname) throw new X509Refused();
   }
-  async withSnapshot<T>(
+  withSnapshot<T>(
     deadline: number,
     work: (material: X509Material, lease: X509Lease, signal: AbortSignal) => Promise<T>,
   ): Promise<T> {
+    return this.exchange(
+      deadline,
+      work,
+      () => {},
+      async (value) => value,
+      false,
+    );
+  }
+  /** Trusted transport port only. The one synchronous enqueue follows final live
+   * checks while the original lease is held. A later failure cannot undo a write:
+   * callers must reconcile its outcome, never automatically repeat the operation.
+   * receive must honor abort and the same original deadline; no lease renewal.
+   * Return-value validation detects misuse, not arbitrary callback side effects:
+   * only a fixed synchronous in-process transport writer may be supplied. */
+  withPublication<T, R>(
+    deadline: number,
+    prepare: (material: X509Material, lease: X509Lease, signal: AbortSignal) => Promise<T>,
+    publish: (value: T, lease: Readonly<X509Lease>) => undefined,
+    receive: (value: T, signal: AbortSignal) => Promise<R>,
+  ): Promise<R> {
+    return this.exchange(deadline, prepare, publish, receive);
+  }
+  private async exchange<T, R>(
+    deadline: number,
+    work: (material: X509Material, lease: X509Lease, signal: AbortSignal) => Promise<T>,
+    publish: (value: T, lease: Readonly<X509Lease>) => undefined,
+    receive: (value: T, signal: AbortSignal) => Promise<R>,
+    checkReceived = true,
+  ): Promise<R> {
     let material: X509Material | undefined, stream: X509Stream | undefined;
     let materialEpoch: number | undefined;
     let valid = true,
@@ -184,7 +214,7 @@ export class WorkloadApiX509Source {
       );
       material = await Promise.race([first, failure]);
       const epoch = materialEpoch;
-      const validUntil = Math.min(deadline, before, material.certificateExpiresAt);
+      let validUntil = Math.min(deadline, before, material.certificateExpiresAt);
       if (
         !valid ||
         epoch === undefined ||
@@ -220,7 +250,36 @@ export class WorkloadApiX509Source {
         clock() >= Math.min(validUntil, after)
       )
         throw new X509Refused();
-      return result;
+      // Later health can only shorten the original window, never renew it.
+      validUntil = Math.min(validUntil, after);
+      clearTimeout(timer);
+      timer = setTimeout(refuse, Math.max(1, validUntil - clock()));
+      // No await may intervene between the checked lease and this enqueue.
+      const publication: unknown = publish(
+        result,
+        Object.freeze({ ...lease, validUntil: Math.min(validUntil, after) }),
+      );
+      // A trusted-port bug must refuse deterministically, without leaving a
+      // rejected native Promise unobserved. Do not invoke arbitrary thenables;
+      // this cannot undo side effects or stop an async callback already running.
+      if (utilTypes.isPromise(publication))
+        void Promise.prototype.then.call(publication, undefined, () => undefined);
+      if (publication !== undefined) throw new X509Refused();
+      const received = await Promise.race([receive(result, abort.signal), failure]);
+      const finalHealth = checkReceived
+        ? await Promise.race([this.health.validUntil(), failure])
+        : after;
+      if (
+        !valid ||
+        abort.signal.aborted ||
+        epoch !== this.#epoch ||
+        material.revision !== this.#revision ||
+        finalHealth === null ||
+        !Number.isSafeInteger(finalHealth) ||
+        clock() >= Math.min(validUntil, finalHealth)
+      )
+        throw new X509Refused();
+      return received;
     } catch {
       throw new X509Refused();
     } finally {

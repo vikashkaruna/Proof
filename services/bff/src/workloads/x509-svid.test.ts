@@ -327,6 +327,134 @@ describe('fixed source lease without a server or network', () => {
     for (const stream of streams) stream.fail();
     await Promise.all(waiting);
   });
+  it('publishes once only after final health checks and while the stream is held', async () => {
+    const f = sourceFixture();
+    const events: string[] = [];
+    f.health.mockImplementation(async () => {
+      events.push('health');
+      return Date.now() + 10000;
+    });
+    const result = await f.source.withPublication(
+      Date.now() + 1000,
+      async () => {
+        events.push('prepare');
+        return 'owned';
+      },
+      (value) => {
+        expect(value).toBe('owned');
+        expect(f.close).not.toHaveBeenCalled();
+        events.push('publish');
+      },
+      async () => {
+        events.push('receive');
+        return 'received';
+      },
+    );
+    expect(result).toBe('received');
+    expect(events).toEqual(['health', 'prepare', 'health', 'publish', 'receive', 'health']);
+    expect(f.close).toHaveBeenCalledOnce();
+  });
+  it.each(['health', 'rotation', 'stream'])(
+    'refuses publication if %s changes during the final read',
+    async (kind) => {
+      const f = sourceFixture();
+      const publish = vi.fn();
+      let calls = 0;
+      f.health.mockImplementation(async () => {
+        if (++calls === 2) {
+          if (kind === 'health') return null;
+          if (kind === 'rotation') f.emit(reply('rotated'));
+          if (kind === 'stream') f.fail();
+        }
+        return Date.now() + 10000;
+      });
+      await expect(
+        f.source.withPublication(
+          Date.now() + 1000,
+          async () => 'withheld',
+          publish,
+          async () => 'no',
+        ),
+      ).rejects.toThrow(X509Refused);
+      expect(publish).not.toHaveBeenCalled();
+      expect(f.close).toHaveBeenCalledOnce();
+    },
+  );
+  it('pins a shortened final health window through receive instead of renewing it', async () => {
+    vi.useFakeTimers();
+    const now = Date.now(),
+      f = sourceFixture();
+    let reads = 0;
+    f.health.mockImplementation(async () => (++reads === 2 ? now + 20 : now + 10000));
+    const publish = vi.fn((_value: string, lease: Readonly<{ validUntil: number }>) => {
+      expect(lease.validUntil).toBe(now + 20);
+      return undefined;
+    });
+    await expect(
+      f.source.withPublication(
+        now + 1000,
+        async () => 'owned',
+        publish,
+        async () => {
+          vi.setSystemTime(now + 21);
+          return 'too-late';
+        },
+      ),
+    ).rejects.toThrow(X509Refused);
+    expect(publish).toHaveBeenCalledOnce();
+    expect(f.close).toHaveBeenCalledOnce();
+  });
+  it('refuses a dynamically malformed async publisher and never enters receive', async () => {
+    const f = sourceFixture(),
+      receive = vi.fn(async () => 'must-not-release');
+    const asyncPublisher = async () => {};
+    // This trusted-port misuse is also statically refused, rather than accepted
+    // through TypeScript's special void callback assignment rule.
+    // @ts-expect-error Promise<void> is not synchronous undefined.
+    const publisher: (value: string) => undefined = asyncPublisher;
+    await expect(
+      f.source.withPublication(Date.now() + 1000, async () => 'owned', publisher, receive),
+    ).rejects.toThrow(X509Refused);
+    expect(receive).not.toHaveBeenCalled();
+    expect(f.close).toHaveBeenCalledOnce();
+  });
+  it('observes a rejected native Promise from a malformed publisher before refusing misuse', async () => {
+    const f = sourceFixture(),
+      receive = vi.fn(async () => 'must-not-release');
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      const rejectedPublisher = () => Promise.reject(new Error('Owned async publisher bug'));
+      // @ts-expect-error A native Promise is not an allowed synchronous writer.
+      const publisher: () => undefined = rejectedPublisher;
+      await expect(
+        f.source.withPublication(Date.now() + 1000, async () => 'owned', publisher, receive),
+      ).rejects.toThrow(X509Refused);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unhandled).not.toHaveBeenCalled();
+      expect(receive).not.toHaveBeenCalled();
+      expect(f.close).toHaveBeenCalledOnce();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+  it('withholds received result after post-send health loss without repeating publication', async () => {
+    const f = sourceFixture();
+    const publish = vi.fn();
+    await expect(
+      f.source.withPublication(
+        Date.now() + 1000,
+        async () => 'sent',
+        publish,
+        async () => {
+          f.health.mockResolvedValue(null);
+          return 'received-but-stale';
+        },
+      ),
+    ).rejects.toThrow(X509Refused);
+    expect(publish).toHaveBeenCalledOnce();
+  });
   it('refuses absent health before touching Workload API and rejects oversized deadline', async () => {
     const f = sourceFixture(vi.fn(async () => 0));
     await expect(f.source.withSnapshot(Date.now() + 1000, async () => 'no')).rejects.toThrow(
