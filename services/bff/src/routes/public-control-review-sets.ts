@@ -85,6 +85,20 @@ function refused(c: Ctx, value: unknown) {
     : c.json({ error: { code: 'public_control_review_unavailable' } }, 503);
 }
 
+/** Compare instants without rewriting hashed strings or truncating PostgreSQL microseconds. */
+function sameCaptureInstant(left: string, right: string) {
+  const instant = (value: string) => {
+    const fractional = /\.(\d+)(?=Z|[+-]\d{2}:\d{2}$)/.exec(value);
+    return {
+      seconds: Date.parse(value.replace(/\.\d+(?=Z|[+-]\d{2}:\d{2}$)/, '')),
+      fraction: (fractional?.[1] ?? '').replace(/0+$/, ''),
+    };
+  };
+  const a = instant(left),
+    b = instant(right);
+  return Number.isFinite(a.seconds) && a.seconds === b.seconds && a.fraction === b.fraction;
+}
+
 /** Validate exact retained bytes and relationships, not merely plausible JSON. */
 export function verifyPublicControlReviewRow(value: unknown, scope: Scope) {
   const row = publicControlReviewSetRowSchema.parse(value);
@@ -173,7 +187,7 @@ export function verifyPublicControlReviewRow(value: unknown, scope: Scope) {
       association.targetId !== target.id ||
       association.targetSha256 !== asset.target.snapshot_sha256 ||
       association.requestedUrl !== target.url ||
-      association.checkedAt !== snapshot.checkedAt ||
+      !sameCaptureInstant(association.checkedAt, snapshot.checkedAt) ||
       association.checkId !== row.check_id ||
       association.payloadSha256 !== snapshot.request.expectedSource.payloadSha256 ||
       association.captureReceipt.id !== snapshot.captureReceipt

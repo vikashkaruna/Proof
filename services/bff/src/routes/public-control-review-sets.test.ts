@@ -571,3 +571,48 @@ it('refuses a self-hashed review timestamp that disagrees with its captured asse
   f.row.snapshot_sha256 = f.hash(f.row.snapshot_text);
   expect(() => verifyPublicControlReviewRow(f.row, { tenantId: ids.tenant })).toThrow();
 });
+
+function linkedTimestampRow(associationAt: string, reviewAt: string) {
+  const f = linkedRow();
+  const association = f.snapshot.assetProvenance.association;
+  association.snapshot_text = canonicalJson({
+    ...JSON.parse(association.snapshot_text),
+    checkedAt: associationAt,
+  });
+  association.snapshot_sha256 = f.hash(association.snapshot_text);
+  f.snapshot.request.associationRef.associationSha256 = association.snapshot_sha256;
+  f.snapshot.checkedAt = reviewAt;
+  f.row.request_text = canonicalJson(f.snapshot.request);
+  f.row.request_sha256 = f.hash(f.row.request_text);
+  f.row.snapshot_text = canonicalJson(f.snapshot);
+  f.row.snapshot_sha256 = f.hash(f.row.snapshot_text);
+  return f;
+}
+it.each([
+  ['2026-10-16T00:00:00.000000Z', '2026-10-16T00:00:00+00:00'],
+  ['2026-10-16T00:00:00.123000Z', '2026-10-16T00:00:00.123+00:00'],
+  ['2026-10-16T00:00:00.123456Z', '2026-10-16T00:00:00.123456+00:00'],
+  ['2026-10-16T00:00:00.120000Z', '2026-10-16T05:30:00.12+05:30'],
+])(
+  'accepts equivalent PostgreSQL capture instants without changing frozen bytes: %s / %s',
+  (associationAt, reviewAt) => {
+    const f = linkedTimestampRow(associationAt, reviewAt);
+    const frozen = JSON.stringify(f.row);
+    const result = verifyPublicControlReviewRow(f.row, { tenantId: ids.tenant });
+    expect(result.snapshot.checkedAt).toBe(reviewAt);
+    if (result.snapshot.version !== 2) throw new Error('Linked snapshot required');
+    expect(result.snapshot.assetProvenance.association.snapshot_text).toBe(
+      f.snapshot.assetProvenance.association.snapshot_text,
+    );
+    expect(JSON.stringify(f.row)).toBe(frozen);
+  },
+);
+it.each([
+  '2026-10-16T00:00:00.123455+00:00',
+  '2026-10-16T00:00:00.123457+00:00',
+  '2026-10-16T00:00:00.124456+00:00',
+  '2026-10-16T00:00:01.123456+00:00',
+])('refuses changed capture instant including one microsecond: %s', (reviewAt) => {
+  const f = linkedTimestampRow('2026-10-16T00:00:00.123456Z', reviewAt);
+  expect(() => verifyPublicControlReviewRow(f.row, { tenantId: ids.tenant })).toThrow();
+});
