@@ -1,7 +1,12 @@
+import { parseCatalogueJson } from '@axiom/control-library';
 /** Verify the exact frozen packet, reviewed draft and human review before PDF rendering. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { isDeepStrictEqual } from 'node:util';
+import {
+  FrozenHumanControlReviewSchema,
+  verifyFrozenHumanControlReview,
+} from './public-control-provenance';
 import { BoardReportContentSchema, renderBoardReportHtml } from './board-report';
 import {
   interpretAssessmentReport,
@@ -31,6 +36,18 @@ const sourceSchema = z.object({
     finalized: z.object({ id: z.string().regex(/^[1-9][0-9]*$/), entry_hash: digest }),
   }),
 });
+const sourceV2Schema = sourceSchema
+  .extend({
+    schema_version: z.literal(2),
+    completed_at: timestamp,
+    limitations: z.array(z.string().max(2000)).max(10),
+    human_control_review: FrozenHumanControlReviewSchema,
+  })
+  .strict();
+export const FrozenBoardSourceSchema = z.discriminatedUnion('schema_version', [
+  sourceSchema,
+  sourceV2Schema,
+]);
 const controlSchema = z.object({
   id: z.string().min(1).max(100),
   title: z.string().min(1).max(300),
@@ -94,7 +111,12 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
   ) {
     throw new Error('Board source or review digest mismatch');
   }
-  const source = sourceSchema.parse(parseBounded(input.sourceText, 4 * 1024 * 1024));
+  let sourceRaw = parseBounded(input.sourceText, 4 * 1024 * 1024);
+  if ((sourceRaw as Record<string, unknown>)?.schema_version === 2)
+    sourceRaw = parseCatalogueJson(input.sourceText, 4 * 1024 * 1024);
+  const source = FrozenBoardSourceSchema.parse(sourceRaw);
+  if (source.schema_version === 1 && Object.hasOwn(sourceRaw as object, 'human_control_review'))
+    throw new Error('Board source provenance downgrade refused');
   const content = BoardReportContentSchema.parse(parseBounded(input.documentText, 5 * 1024 * 1024));
   const review = reviewSchema.parse(parseBounded(input.reviewText, 256 * 1024));
   const controlsValue: unknown = JSON.parse(source.controls_text);
@@ -126,6 +148,20 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
   same(content.signatures.prepared_by.agent, 'board-report-builder');
   same(content.action_plan.length, 0);
 
+  if ((source.schema_version === 2) !== (content.schema_version === 3))
+    throw new Error('Board document provenance downgrade refused');
+  if (source.schema_version === 2 && content.schema_version === 3) {
+    const appendix = verifyFrozenHumanControlReview(source.human_control_review, {
+      tenantId: input.tenantId,
+      engagementId: input.engagementId,
+      assessmentRunId: input.assessmentRunId,
+      libraryVersion: source.library_version,
+      controlsText: source.controls_text,
+      resultText: source.result_text,
+    });
+    if (!isDeepStrictEqual(content.public_review_appendix, appendix))
+      throw new Error('Board document differs from frozen source');
+  }
   const controlsById = new Map(controls.map((item) => [item.id, item]));
   const findingIds = new Set(result.findings.map((item) => item.control_id));
   if (
@@ -144,10 +180,10 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
   )
     throw new Error('Board document provenance downgrade refused');
   const interpreted =
-    content.schema_version === 2
+    content.schema_version !== 1
       ? interpretAssessmentReport(resultValue, controlsValue, source.controls_sha256, input.title)
       : null;
-  if (content.schema_version === 2 && interpreted) {
+  if (content.schema_version !== 1 && interpreted) {
     if (
       !isDeepStrictEqual(content.questionnaire_interpretation, interpreted.interpretation) ||
       !isDeepStrictEqual(content.executive_summary, interpreted.summary)
@@ -166,7 +202,7 @@ export function renderReviewedBoardHtml(input: ReviewedBoardInput): string {
     same(rendered.severity, control.severity);
     same(rendered.score, finding.score);
     same(rendered.gap_summary, finding.rationale);
-    if (content.schema_version === 2) {
+    if (content.schema_version !== 1) {
       const expected = interpretations.get(finding.control_id)!;
       const actual = content.key_findings[index]!;
       for (const key of [

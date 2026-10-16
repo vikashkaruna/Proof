@@ -701,3 +701,57 @@ describe('Board Reports HTTP Routes', () => {
     expect((await app().request('/v1/reports/board/requests?offset=-1')).status).toBe(400);
   });
 });
+
+it.each(['malformed', 'changed'] as const)(
+  'board request refuses %s expected actor before any writer',
+  async (mode) => {
+    const writer = vi.fn();
+    fixture.db.rpc = writer as never;
+    const response = await app().request('/v1/reports/board/request', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-expected-actor-id': mode === 'malformed' ? 'broken' : randomUUID(),
+      },
+      body: JSON.stringify({
+        engagementId: randomUUID(),
+        assessmentRunId: randomUUID(),
+        title: 'Exact report request',
+        operationKey: randomUUID(),
+      }),
+    });
+    expect(response.status).toBe(mode === 'malformed' ? 400 : 409);
+    expect(writer).not.toHaveBeenCalled();
+  },
+);
+it.each([false, true])(
+  'board request retains legacy absence and matching current actor header (present=%s)',
+  async (present) => {
+    const requestId = randomUUID();
+    const writer = vi.fn(() =>
+      abortableResult(
+        Promise.resolve({
+          data: { requestId, status: 'requested', reportId: null, replayed: false },
+          error: null,
+        }),
+      ),
+    );
+    fixture.db.rpc = writer as never;
+    const response = await app().request('/v1/reports/board/request', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(present ? { 'x-expected-actor-id': fixture.owner.toUpperCase() } : {}),
+      },
+      body: JSON.stringify({
+        engagementId: randomUUID(),
+        assessmentRunId: randomUUID(),
+        title: 'Exact report request',
+        operationKey: randomUUID(),
+      }),
+    });
+    expect(response.status).toBe(201);
+    expect(writer).toHaveBeenCalledOnce();
+    expect(await response.json()).toMatchObject({ requestId });
+  },
+);

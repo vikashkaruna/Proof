@@ -3,6 +3,10 @@
  * Strictly adheres to Axiom Proof design tokens and regulatory DPDPA standards.
  */
 import { z } from 'zod';
+import {
+  PublicControlReportAppendixSchema,
+  renderPublicControlReportAppendix,
+} from './public-control-provenance';
 import { BRANDING } from './schema';
 import {
   AssessmentReportInterpretationSchema,
@@ -156,10 +160,26 @@ export const BoardReportContentV2Schema = BoardReportContentV1Schema.omit({
     )
       ctx.addIssue({ code: 'custom', message: 'Board interpretation register is incomplete' });
   });
+export const BoardReportContentV3Schema = z
+  .object({
+    ...BoardReportContentV2Schema.shape,
+    schema_version: z.literal(3),
+    public_review_appendix: PublicControlReportAppendixSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const { public_review_appendix: appendix, ...base } = value;
+    void appendix;
+    const legacy = BoardReportContentV2Schema.safeParse({ ...base, schema_version: 2 });
+    if (!legacy.success)
+      ctx.addIssue({ code: 'custom', message: 'Board interpretation register is incomplete' });
+  });
 export const BoardReportContentSchema = z.discriminatedUnion('schema_version', [
   BoardReportContentV1Schema,
   BoardReportContentV2Schema,
+  BoardReportContentV3Schema,
 ]);
+export type BoardReportContentV3 = z.infer<typeof BoardReportContentV3Schema>;
 export type BoardReportContentV2 = z.infer<typeof BoardReportContentV2Schema>;
 export type BoardReportContent = z.infer<typeof BoardReportContentSchema>;
 
@@ -188,7 +208,7 @@ export function renderBoardReportHtml(content: BoardReportContent): string {
   const validated = BoardReportContentSchema.parse(content);
   const preparedByRenderer = validated.signatures.prepared_by.agent === 'board-report-builder';
   const es = validated.executive_summary;
-  const v2 = validated.schema_version === 2 ? validated : null;
+  const v2 = validated.schema_version !== 1 ? validated : null;
   const legacy = validated.schema_version === 1 ? validated : null;
   const scoreColor = '#64748B';
   const scoreTitle = v2 ? 'Provisional Posture Score' : 'Recorded Posture Score';
@@ -576,6 +596,6 @@ export function renderBoardReportHtml(content: BoardReportContent): string {
     <div><strong>Library Digest:</strong> <span class="code-col">${escapeHtml(validated.library_digest)}</span></div>
     <div><strong>Platform:</strong> ${escapeHtml(validated.branding.company_url)}</div>
   </div>
-</body>
+${validated.schema_version === 3 ? renderPublicControlReportAppendix(validated.public_review_appendix) : ''}</body>
 </html>`;
 }

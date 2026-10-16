@@ -9,6 +9,7 @@ import {
   publicControlCatalogueV2Manifest,
   publicEvidenceCatalogueRowsMatchV2,
 } from '@axiom/control-library';
+import { PublicControlHumanReview } from './public-control-human-review';
 import { sourceRequest, SourceWorkflowError } from './source-request';
 
 const responseSchema = z
@@ -28,6 +29,9 @@ type Props = {
   engagementId: string;
   checkId: string;
   recaptureContent?: React.ReactNode;
+  actorId?: string;
+  canReview?: boolean;
+  canRun?: boolean;
 };
 type Evidence = PublicControlAssessmentV2['controls'][number]['questions'][number]['evidence'];
 const stateLabels: Record<Evidence['state'], string> = {
@@ -65,9 +69,22 @@ function Disposition({ value }: { value: Evidence }) {
 
 /** A separate deterministic, read-only review. It never invokes an agent or captures a website. */
 export function PublicControlReview(props: Props) {
-  return <Review key={`${props.tenantId}/${props.engagementId}/${props.checkId}`} {...props} />;
+  return (
+    <Review
+      key={`${props.tenantId}/${props.actorId ?? 'read-only'}/${props.engagementId}/${props.checkId}`}
+      {...props}
+    />
+  );
 }
-function Review({ tenantId, engagementId, checkId, recaptureContent }: Props) {
+function Review({
+  tenantId,
+  actorId,
+  canReview = false,
+  canRun = false,
+  engagementId,
+  checkId,
+  recaptureContent,
+}: Props) {
   const helpId = useId();
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
@@ -173,6 +190,14 @@ function Review({ tenantId, engagementId, checkId, recaptureContent }: Props) {
         ))}
       {result && manifest && (
         <>
+          {actorId && z.uuid().safeParse(actorId).success && (
+            <PublicControlHumanReview
+              actorId={actorId}
+              canReview={canReview}
+              canRun={canRun}
+              assessment={result.assessment}
+            />
+          )}
           <p className="font-medium text-indigo-900">
             Human review required · {result.assessment.controls.length} controls · Library{' '}
             {result.assessment.catalogue.libraryVersion}

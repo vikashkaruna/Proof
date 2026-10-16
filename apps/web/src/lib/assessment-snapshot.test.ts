@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { loadAssessmentSnapshot } from './assessment-snapshot';
+import { loadAssessmentSnapshot, loadAssessmentConfiguration } from './assessment-snapshot';
 
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const engagementId = '22222222-2222-4222-8222-222222222222';
@@ -155,4 +155,33 @@ it('refuses inconsistent or falsely verified structured readouts', async () => {
       await loadAssessmentSnapshot(client('session-token'), tenantId, engagementId),
     ).toBeNull();
   }
+});
+
+it('reads only the authenticated tenant configuration and never infers health from it', async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      Response.json({
+        tenantId,
+        configuration: 'unconfigured',
+        executionReadiness: 'not_verified',
+      }),
+    )
+    .mockResolvedValueOnce(
+      Response.json({
+        tenantId: engagementId,
+        configuration: 'configured',
+        executionReadiness: 'not_verified',
+      }),
+    )
+    .mockRejectedValueOnce(new Error('offline'));
+  vi.stubGlobal('fetch', fetcher);
+  expect(await loadAssessmentConfiguration(client('session-token'), tenantId)).toBe('unconfigured');
+  expect(fetcher.mock.calls[0]![1].headers['X-Tenant-Id']).toBe(tenantId);
+  expect(fetcher.mock.calls[0]![1].headers.Authorization).toBe('Bearer session-token');
+  expect(new URL(fetcher.mock.calls[0]![0]).pathname).toBe('/v1/assessment/configuration');
+  expect(await loadAssessmentConfiguration(client('session-token'), tenantId)).toBe('unknown');
+  expect(await loadAssessmentConfiguration(client('session-token'), tenantId)).toBe('unknown');
+  expect(await loadAssessmentConfiguration(client(null), tenantId)).toBe('unknown');
+  expect(fetcher).toHaveBeenCalledTimes(3);
 });

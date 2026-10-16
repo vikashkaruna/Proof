@@ -1,3 +1,4 @@
+import type { publicWebsiteCheckRoutes } from './routes/public-website-checks.js';
 import { createConfiguredOwnedSynthetic } from './services/owned-synthetic-composition.js';
 import type { OwnedSyntheticRouteDeps } from './routes/owned-synthetic-plans.js';
 import { stagedEvidencePrivateRoutes } from './routes/staged-evidence-private.js';
@@ -8,6 +9,7 @@ import {
 import { discoveryRoutes } from './routes/discovery.js';
 import type { DiscoveryService } from './connectors/discovery.js';
 import { Hono } from 'hono';
+import { PUBLIC_CONTROL_REVIEW_MAX_BYTES } from '@axiom/types';
 import { logger } from 'hono/logger';
 import { secureHeaders } from 'hono/secure-headers';
 import { cors } from 'hono/cors';
@@ -53,6 +55,7 @@ export function createApp(
     ownedSynthetic?: OwnedSyntheticRouteDeps | null;
     assessmentTools?: AssessmentTools;
     assessmentRequests?: AssessmentRequestProducer;
+    publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
     discovery?: Pick<DiscoveryService, 'run'>;
     licensePublicKeyPem?: string;
   } = {},
@@ -160,6 +163,22 @@ export function createApp(
     '/v1/plans/owned-synthetic/outcome',
   ])
     app.use(path, boundedJsonBody(16384));
+  app.use('/v1/engagements', boundedJsonBody(4096));
+  app.use('/v1/public-control-review-sets', boundedJsonBody(PUBLIC_CONTROL_REVIEW_MAX_BYTES));
+  app.use('/v1/public-control-review-sets/*', async (c, next) => {
+    if (
+      /^\/v1\/public-control-review-sets\/operations\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
+        c.req.path,
+      )
+    )
+      return boundedJsonBody(PUBLIC_CONTROL_REVIEW_MAX_BYTES + 8192)(c, next);
+    return next();
+  });
+  app.use('/v1/assessment/jobs/*', async (c, next) => {
+    if (/^\/v1\/assessment\/jobs\/[0-9a-fA-F-]{36}\/cancel-source-intent$/.test(c.req.path))
+      return boundedJsonBody(16384)(c, next);
+    return next();
+  });
   app.use('/v1/*', reportBodyLimit);
   app.use('/v1/*', reportAuthority());
   app.use('/v1/*', idempotency);
@@ -174,6 +193,7 @@ export function createApp(
       mfa,
       realtime,
       assessmentRequests: options.assessmentRequests,
+      publicWebsiteCapture: options.publicWebsiteCapture,
       ownedSynthetic,
       stagedEvidence: {
         rpc: evidenceControllerRpc,

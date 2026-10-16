@@ -3,6 +3,11 @@ import { createHash } from 'node:crypto';
 import { crc32c } from '@aws-crypto/crc32c';
 import { AssessmentRequestSchema, type TenantId } from '@axiom/types';
 import { canonicalJson } from '@axiom/ledger';
+import {
+  publicControlReviewSetFixture,
+  reviewIds,
+} from '../test/public-control-review-set-fixture.js';
+import { canonicalAssessmentInput } from './assessment-input.js';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
 import { DispatchKeyPolicy } from './dispatch-key-policy.js';
 import {
@@ -130,7 +135,9 @@ beforeEach(() => {
 describe('trusted human assessment producer composition', () => {
   it('constructs a real production wrapping adapter and only exposes the request facade', async () => {
     const p = await producer();
-    expect(Object.keys(p)).toEqual(['request']);
+    expect(Object.keys(p)).toEqual(['configurationForTenant', 'request']);
+    expect(p.configurationForTenant?.(T)).toBe(true);
+    expect(p.configurationForTenant?.(A)).toBe(false);
     const receipt = await p.request(T.toUpperCase(), A.toUpperCase(), parsed());
     expect(receipt.run_id).toBe(R);
     expect(send).toHaveBeenCalledTimes(1);
@@ -549,4 +556,81 @@ describe('trusted human assessment producer composition', () => {
     expect(send).not.toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
   });
+});
+
+function reviewSourceFixture() {
+  const original = publicControlReviewSetFixture();
+  const raw = JSON.stringify(original)
+    .replaceAll(reviewIds.tenant, T)
+    .replaceAll(reviewIds.engagement, E)
+    .replaceAll(reviewIds.actor, A)
+    .replaceAll(reviewIds.operation, J)
+    .replaceAll(reviewIds.review, R);
+  const value = JSON.parse(raw) as ReturnType<typeof publicControlReviewSetFixture>;
+  value.row.request_text = canonicalJson(value.request);
+  value.row.request_sha256 = createHash('sha256').update(value.row.request_text).digest('hex');
+  value.row.snapshot_text = canonicalJson(value.snapshot);
+  value.row.snapshot_sha256 = createHash('sha256').update(value.row.snapshot_text).digest('hex');
+  const request = parsed({
+    operationKey: J,
+    engagementId: E,
+    reviewRef: {
+      reviewId: R,
+      requestSha256: value.row.request_sha256,
+      snapshotSha256: value.row.snapshot_sha256,
+    },
+  });
+  const inputText = canonicalAssessmentInput(T, E, '0.1.1', {
+    ...request,
+    answers: value.snapshot.normalizedAnswers,
+  });
+  human.onRpc('resolve_public_control_assessment_source', () => ({
+    review: value.row,
+    inputText,
+    inputSha256: createHash('sha256').update(inputText).digest('hex'),
+  }));
+  human.onRpc('recover_public_control_assessment_dispatch', recovery);
+  human.onRpc('enqueue_public_control_assessment_dispatch', enqueue);
+  return { value, request, inputText };
+}
+it('composes the review handoff through real encryption and the existing dispatch with exact reference custody', async () => {
+  const { request, inputText } = reviewSourceFixture();
+  const p = await producer();
+  await p.request(T, A, request);
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(enqueue).toHaveBeenCalledTimes(1);
+  expect(enqueue.mock.calls[0]![0]).toMatchObject({
+    p_review_id: R,
+    p_review_request_sha256: request.reviewRef!.requestSha256,
+    p_review_snapshot_sha256: request.reviewRef!.snapshotSha256,
+    p_input_hash: createHash('sha256').update(inputText).digest('hex'),
+  });
+  expect(enqueue.mock.calls[0]![0]).not.toHaveProperty('p_expected_questionnaire_digest');
+});
+it('recovers a frozen review request without current engagement/library or KMS reads', async () => {
+  const { request } = reviewSourceFixture();
+  fake.rows('engagements').splice(0);
+  fake.rows('controls').splice(0);
+  fake.rows('control_libraries').splice(0);
+  recovery.mockReturnValue({ job_id: J, run_id: R, expires_at: '2026-10-05T20:00:00Z' });
+  const p = await producer();
+  expect((await p.request(T, A, request)).run_id).toBe(R);
+  expect(send).not.toHaveBeenCalled();
+  expect(enqueue).not.toHaveBeenCalled();
+});
+it('never wraps, enqueues or falls back to browser inputs after source authority is refused', async () => {
+  const { request } = reviewSourceFixture();
+  human.onRpc('resolve_public_control_assessment_source', () => ({ error: 'forbidden' }));
+  const p = await producer();
+  await expect(p.request(T, A, request)).rejects.toThrow();
+  expect(send).not.toHaveBeenCalled();
+  expect(enqueue).not.toHaveBeenCalled();
+  expect(recovery).not.toHaveBeenCalled();
+});
+it('does not wrap or create a plain request when the generic SQL recovery fences its spent source key', async () => {
+  human.onRpc('recover_assessment_dispatch', () => ({ error: 'assessment_source_cancelled' }));
+  const p = await producer();
+  await expect(p.request(T, A, parsed())).rejects.toThrow();
+  expect(send).not.toHaveBeenCalled();
+  expect(enqueue).not.toHaveBeenCalled();
 });

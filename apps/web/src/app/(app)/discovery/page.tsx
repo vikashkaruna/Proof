@@ -4,10 +4,17 @@ import { can, UserRole } from '@axiom/types';
 import { PublicSourceWorkflow } from '../public-source-workflow/source-workflow';
 import { DataPlaceholder } from '@axiom/ui';
 import { routeCapability } from '@/app/(app)/nav';
+import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
 
-export default async function DiscoveryPage() {
+export default async function DiscoveryPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ checkId?: string | string[] }>;
+} = {}) {
+  const requestedCheck = (await searchParams)?.checkId;
+  const selectedCheck = z.uuid().safeParse(requestedCheck);
   const { supabase, tenantId, userId, role, isAxiomInternal } = await requireCapabilityContext(
     routeCapability('/discovery'),
   );
@@ -51,7 +58,11 @@ export default async function DiscoveryPage() {
         telemetryTitle: 'Recorded Discovery Events',
       }}
     >
+      {requestedCheck !== undefined && !selectedCheck.success && (
+        <p role="alert">The saved website check link is invalid. Choose a saved check below.</p>
+      )}
       <PublicSourceWorkflow
+        initialCheckId={selectedCheck.success ? selectedCheck.data.toLowerCase() : undefined}
         tenantId={tenantId}
         actorId={userId}
         canCapture={

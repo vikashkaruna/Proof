@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+import { canonicalJson } from '@axiom/ledger';
 import { AssessmentRequestSchema, ASSESSMENT_REQUEST_MAX_BYTES } from '@axiom/types';
 import {
   readAssessmentJournal,
+  resolveAssessmentSourceIntent,
+  clearCancelledAssessmentSourceJournal,
   retainAssessmentJournal,
   clearFinalizedAssessmentJournal,
   assessmentJournalKey,
@@ -406,3 +409,77 @@ it.each(['library', 'digest'])(
     expect(fetchMock).not.toHaveBeenCalled();
   },
 );
+
+function sourceIntentFixture() {
+  const v = retainedFixture();
+  v.request = AssessmentRequestSchema.parse({
+    ...v.request,
+    reviewRef: { reviewId: run, requestSha256: 'a'.repeat(64), snapshotSha256: 'b'.repeat(64) },
+  });
+  const reason = 'Human explicitly abandons this source intent.';
+  const request_text = canonicalJson(v.request),
+    request_sha256 = 'c'.repeat(64);
+  const cancellation_text = canonicalJson({
+    version: 1,
+    tenantId: tenant,
+    actorId: actor,
+    jobId: operation,
+    engagementId: engagement,
+    requestSha256: request_sha256,
+    reason,
+  });
+  const row = {
+    id: run,
+    tenant_id: tenant,
+    actor_id: actor,
+    job_id: operation,
+    engagement_id: engagement,
+    request_text,
+    request_sha256,
+    reason,
+    cancellation_text,
+    cancellation_sha256: 'd'.repeat(64),
+    receipt_id: '99',
+    created_at: '2026-10-16T00:00:00Z',
+  };
+  return { value: v, row, reason };
+}
+it('preserves a source journal after not_found or refusal and clears only exact positive cancellation readback', async () => {
+  const { value, row } = sourceIntentFixture();
+  retainAssessmentJournal(localStorage, value);
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ data: { state: 'not_found' } }))
+    .mockResolvedValueOnce(Response.json({ error: { code: 'forbidden' } }, { status: 403 }))
+    .mockResolvedValueOnce(Response.json({ data: { state: 'cancelled', data: row } }));
+  vi.stubGlobal('fetch', fetchMock);
+  const absent = await resolveAssessmentSourceIntent(value);
+  expect(() => clearCancelledAssessmentSourceJournal(localStorage, value, absent)).toThrow();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+  await expect(resolveAssessmentSourceIntent(value)).rejects.toThrow();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+  const positive = await resolveAssessmentSourceIntent(value);
+  clearCancelledAssessmentSourceJournal(localStorage, value, positive);
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull();
+  expect(fetchMock.mock.calls.every((call) => call[1].method === 'GET')).toBe(true);
+});
+it('never archives another actor or a concurrently changed journal on source cancellation', async () => {
+  const { value, row } = sourceIntentFixture();
+  retainAssessmentJournal(localStorage, value);
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ data: { state: 'cancelled', data: { ...row, actor_id: run } } }),
+      ),
+  );
+  await expect(resolveAssessmentSourceIntent(value)).rejects.toThrow();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+  const changed = { ...value, request: { ...value.request, operationKey: run } };
+  localStorage.setItem(assessmentJournalKey(tenant, actor), JSON.stringify(changed));
+  expect(() =>
+    clearCancelledAssessmentSourceJournal(localStorage, value, { state: 'cancelled', data: row }),
+  ).toThrow();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(changed);
+});

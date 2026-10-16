@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { test, expect, type Page } from '@playwright/test';
+import { z } from 'zod';
 import {
   createMfaAccount,
   selectTenant,
@@ -14,7 +15,12 @@ import {
   signInFreshOwner,
 } from '../fixtures';
 import { localRoleBearer } from '../local-writer';
-import { acceptanceTarget, repoRoot } from '../target';
+import { acceptanceTarget, repoRoot, tenantCookie } from '../target';
+import {
+  reportAcceptanceRequested,
+  readPublicReportBrowserHandoff,
+} from '../../../scripts/lib/acceptance-public-control-reports';
+import { BoardReportContentV3Schema } from '../../../packages/report-kit/src/board-report';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
 import { unzipSync } from 'fflate';
 
@@ -240,16 +246,18 @@ async function finalizedAssessment(
   return { engagementId, runId: issued.run_id, resultDigest: completed.result_digest };
 }
 
-async function post(page: Page, path: string, body: unknown) {
+async function postInTenant(page: Page, path: string, body: unknown, tenantId = state.tenantA.id) {
   return page.request.post(`/api/bff/v1${path}`, {
-    headers: { 'x-tenant-id': state.tenantA.id, 'idempotency-key': crypto.randomUUID() },
+    headers: { 'x-tenant-id': tenantId, 'idempotency-key': crypto.randomUUID() },
     data: body,
   });
 }
+const post = postInTenant;
 
 async function boardRequest(
   page: Page,
   assessment: Awaited<ReturnType<typeof finalizedAssessment>>,
+  tenantId = state.tenantA.id,
 ) {
   const title = `Provider board ${crypto.randomUUID()}`;
   const body = {
@@ -258,14 +266,196 @@ async function boardRequest(
     title,
     operationKey: crypto.randomUUID(),
   };
-  const requested = await post(page, '/reports/board/request', body);
+  const requested = await postInTenant(page, '/reports/board/request', body, tenantId);
   expect(requested.status()).toBe(201);
   const request = (await requested.json()) as { requestId: string; replayed: boolean };
   expect(request.replayed).toBe(false);
-  const repeated = await post(page, '/reports/board/request', body);
+  const repeated = await postInTenant(page, '/reports/board/request', body, tenantId);
   expect(repeated.status()).toBe(201);
   expect(((await repeated.json()) as typeof request).requestId).toBe(request.requestId);
   return { ...request, title };
+}
+
+/** Continue the real controller packet through the ordinary Reports form.
+ * The real server commits before response delivery is lost; reload and explicit
+ * confirmed retry must recover the original journal without a second intent. */
+async function boardRequestInBrowser(
+  page: Page,
+  assessment: Awaited<ReturnType<typeof finalizedAssessment>>,
+  tenantId: string,
+  actorId: string,
+) {
+  const title = `Source-linked browser board ${crypto.randomUUID()}`;
+  const bodySchema = z
+    .object({
+      engagementId: z.uuid(),
+      assessmentRunId: z.uuid(),
+      title: z.string(),
+      operationKey: z.uuid(),
+    })
+    .strict();
+  const receiptSchema = z
+    .object({
+      requestId: z.uuid(),
+      status: z.literal('requested'),
+      reportId: z.null(),
+      replayed: z.boolean(),
+    })
+    .strict();
+  type Observation = {
+    body: z.infer<typeof bodySchema>;
+    headers: Record<string, string>;
+    journal: string | null;
+    journalKey: string;
+    rawBody: string;
+    saved: z.infer<typeof receiptSchema>;
+  };
+  let observe: (value: Observation) => void = () => {};
+  let refuseObservation: (reason: unknown) => void = () => {};
+  const observation = new Promise<Observation>((resolve, reject) => {
+    observe = resolve;
+    refuseObservation = reject;
+  });
+  const path = '/api/bff/v1/reports/board/request';
+  const routePattern = `**${path}`;
+  await page.goto('/reports');
+  const form = page
+    .getByRole('region', { name: 'Board report workflow' })
+    .getByRole('form', { name: 'Request board report' });
+  await expect(form.getByRole('option', { name: /Choose a finalized assessment/ })).toBeAttached();
+  await expect(form.locator(`option[value="${assessment.runId}"]`)).toBeAttached();
+  await form.getByLabel('Assessment', { exact: true }).selectOption(assessment.runId);
+  await form.getByLabel('Report title', { exact: true }).fill(title);
+  await form
+    .getByRole('checkbox', {
+      name: 'I request a draft bound to this finalized assessment and its recorded control library.',
+    })
+    .check();
+  await expect(
+    form.getByRole('button', { name: 'Request board draft', exact: true }),
+  ).toBeEnabled();
+  let requests = 0;
+  const recordRequest = (request: import('@playwright/test').Request) => {
+    if (new URL(request.url()).pathname === path && request.method() === 'POST') requests++;
+  };
+  page.on('request', recordRequest);
+  await page.route(routePattern, async (route) => {
+    if (route.request().method() !== 'POST') return route.continue();
+    try {
+      const rawBody = route.request().postData();
+      if (rawBody === null) throw new Error('Report form sent no request body');
+      const body = bodySchema.parse(JSON.parse(rawBody));
+      const journalKey = `axiom.report-request.operation.v1:${tenantId}:${actorId}:board:${body.operationKey}`;
+      const journal = await page.evaluate((key) => localStorage.getItem(key), journalKey);
+      // The actual server commits and returns its strict receipt. Only its
+      // delivery to the browser is lost; no response or receipt is fabricated.
+      const committed = await route.fetch({ maxRetries: 0, maxRedirects: 0 });
+      expect(committed.status()).toBe(201);
+      const saved = receiptSchema.parse(await committed.json());
+      expect(saved.replayed).toBe(false);
+      observe({ body, rawBody, journalKey, journal, headers: route.request().headers(), saved });
+    } catch (error) {
+      refuseObservation(error);
+    } finally {
+      await route.abort('failed');
+    }
+  });
+  let saved: z.infer<typeof receiptSchema>;
+  let original: Observation;
+  try {
+    await form.getByRole('button', { name: 'Request board draft', exact: true }).click();
+    original = await observation;
+    saved = original.saved;
+    expect(requests).toBe(1);
+    expect(original.headers['x-tenant-id']).toBe(tenantId);
+    expect(original.headers['x-expected-actor-id']).toBe(actorId);
+    expect(z.uuid().safeParse(original.headers['idempotency-key']).success).toBe(true);
+    expect(original.body).toEqual({
+      engagementId: assessment.engagementId,
+      assessmentRunId: assessment.runId,
+      title,
+      operationKey: original.body.operationKey,
+    });
+    const journal = z
+      .object({
+        version: z.literal(1),
+        tenantId: z.uuid(),
+        actorId: z.uuid(),
+        kind: z.literal('board'),
+        body: bodySchema,
+      })
+      .strict()
+      .parse(JSON.parse(original.journal ?? 'null'));
+    expect(journal).toEqual({ version: 1, tenantId, actorId, kind: 'board', body: original.body });
+    await expect(
+      page.getByRole('alert').filter({ hasText: 'The outcome is uncertain.' }),
+    ).toBeVisible();
+    expect(await page.evaluate((key) => localStorage.getItem(key), original.journalKey)).toBe(
+      original.journal,
+    );
+  } finally {
+    await page.unroute(routePattern);
+  }
+  try {
+    await page.reload();
+    const workflow = page.getByRole('region', { name: 'Board report workflow' });
+    const pending = workflow.getByRole('region', { name: 'Retained report request' });
+    await expect(pending).toContainText(title);
+    for (const identity of [assessment.engagementId, assessment.runId, original.body.operationKey])
+      await expect(pending).toContainText(identity);
+    const confirmation = pending.getByRole('checkbox', {
+      name: 'I authorize checking or retrying this exact retained request.',
+    });
+    const retry = pending.getByRole('button', {
+      name: 'Check or retry exact retained request',
+      exact: true,
+    });
+    await expect(confirmation).toBeEnabled();
+    await expect(confirmation).not.toBeChecked();
+    await expect(retry).toBeDisabled();
+    await expect(
+      workflow.getByRole('button', { name: 'Request board draft', exact: true }),
+    ).toBeDisabled();
+    expect(await page.evaluate((key) => localStorage.getItem(key), original.journalKey)).toBe(
+      original.journal,
+    );
+    expect(requests).toBe(1); // Reload/readback must never send the retained mutation automatically.
+    const retryRequest = page.waitForRequest(
+      (request) => new URL(request.url()).pathname === path && request.method() === 'POST',
+    );
+    const retryResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === path && response.request().method() === 'POST',
+    );
+    await confirmation.check();
+    await retry.click();
+    const [sent, positive] = await Promise.all([retryRequest, retryResponse]);
+    expect(sent.postData()).toBe(original.rawBody);
+    expect(sent.headers()['x-tenant-id']).toBe(tenantId);
+    expect(sent.headers()['x-expected-actor-id']).toBe(actorId);
+    expect(positive.status()).toBe(201);
+    expect(receiptSchema.parse(await positive.json())).toEqual({ ...saved, replayed: true });
+    expect(requests).toBe(2);
+    await expect
+      .poll(() => page.evaluate((key) => localStorage.getItem(key), original.journalKey))
+      .toBeNull();
+    await expect(workflow.getByRole('button', { name: new RegExp(title) })).toBeVisible();
+  } finally {
+    page.off('request', recordRequest);
+  }
+  // Replay precisely the UI intent, through the real API and same authenticated actor.
+  const replay = await page.request.post(path, {
+    headers: {
+      'x-tenant-id': tenantId,
+      'x-expected-actor-id': actorId,
+      'content-type': 'application/json',
+      'idempotency-key': crypto.randomUUID(),
+    },
+    data: original.rawBody,
+  });
+  expect(replay.status()).toBe(201);
+  expect(receiptSchema.parse(await replay.json())).toEqual({ ...saved, replayed: true });
+  return { ...saved, title };
 }
 
 async function reportRow(reportId: string) {
@@ -291,11 +481,30 @@ test.describe('real-provider board report lifecycle', () => {
     browser,
   }) => {
     test.setTimeout(300_000);
+    const sourceHandoff = reportAcceptanceRequested()
+      ? readPublicReportBrowserHandoff(repoRoot)
+      : undefined;
+    const tenantId = sourceHandoff?.tenantId ?? state.tenantA.id;
+    const post = (actor: Page, path: string, body: unknown) =>
+      postInTenant(actor, path, body, tenantId);
+    const select = async (actor: Page, id: string, role: 'admin' | 'founder' | 'viewer') => {
+      if (!sourceHandoff) return selectTenant(actor, 'a');
+      await database('tenant_users', { tenant_id: tenantId, user_id: id, role });
+      await actor.context().addCookies([tenantCookie(sourceHandoff.tenantSlug)]);
+    };
     const manager = await createMfaAccount('board-manager', { role: 'admin', withFactor: true });
     await signInAs(page, manager.email, manager.password, manager.totpSecret!);
-    await selectTenant(page, 'a');
-    const assessment = await finalizedAssessment(manager.id);
-    const request = await boardRequest(page, assessment);
+    await select(page, manager.id, 'admin');
+    const assessment = sourceHandoff
+      ? {
+          engagementId: sourceHandoff.source.engagementId,
+          runId: sourceHandoff.source.runId,
+          resultDigest: sourceHandoff.resultDigest,
+        }
+      : await finalizedAssessment(manager.id);
+    const request = sourceHandoff
+      ? await boardRequestInBrowser(page, assessment, tenantId, manager.id)
+      : await boardRequest(page, assessment, tenantId);
     expect((await post(page, `/reports/board/${request.requestId}/generate`, {})).status()).toBe(
       403,
     );
@@ -309,7 +518,7 @@ test.describe('real-provider board report lifecycle', () => {
         withFactor: true,
       });
       await signInAs(founder, founderAccount.email, founderAccount.password);
-      await selectTenant(founder, 'a');
+      await select(founder, founderAccount.id, 'founder');
       await satisfyLoginMfaWithSecret(founder, founderAccount.totpSecret!);
       const generated = await post(founder, `/reports/board/${request.requestId}/generate`, {});
       expect(generated.status()).toBe(200);
@@ -320,6 +529,14 @@ test.describe('real-provider board report lifecycle', () => {
         assessment_run_id: assessment.runId,
         assessment_result_digest: assessment.resultDigest,
       });
+      if (sourceHandoff) {
+        const document = BoardReportContentV3Schema.parse(JSON.parse(row.content_text));
+        expect(document.schema_version).toBe(3);
+        expect(document.public_review_appendix.reviewId).toBe(sourceHandoff.source.reviewId);
+        expect(document.public_review_appendix.controls).toHaveLength(46);
+        expect(document.public_review_appendix.declarationsVerified).toBe(false);
+        expect(document.public_review_appendix.evidenceVerified).toBe(false);
+      }
       const detail = await founder.request.get(`/api/bff/v1/reports/${draft.reportId}`);
       expect(detail.status()).toBe(200);
       const report = ((await detail.json()) as { data: { contentHash: string } }).data;
@@ -335,14 +552,39 @@ test.describe('real-provider board report lifecycle', () => {
       expect(((await premature.json()) as { error: { code: string } }).error.code).toBe(
         'not_approved',
       );
-      const reviewed = await post(founder, `/reports/${draft.reportId}/review`, {
-        decision: 'approved',
-        expectedContentHash: row.content_sha256,
-      });
-      expect(reviewed.status()).toBe(200);
-      expect(((await reviewed.json()) as { data: { status: string } }).data.status).toBe(
-        'approved',
-      );
+      if (sourceHandoff) {
+        await founder.goto('/reports');
+        const workflow = founder.getByRole('region', { name: 'Board report workflow' });
+        await workflow.getByRole('button', { name: new RegExp(request.title) }).click();
+        const selected = founder.locator('[aria-label="Selected board request"]');
+        await selected.getByRole('button', { name: 'Open report for review' }).click();
+        const review = founder.getByRole('region', { name: 'Report detail' });
+        await expect(
+          review.getByRole('heading', { name: request.title, exact: true }),
+        ).toBeVisible();
+        await review.getByText('Exact recorded content', { exact: true }).click();
+        await expect(review.locator('pre')).toContainText(sourceHandoff.source.reviewId);
+        await review
+          .getByRole('checkbox', { name: 'I reviewed the exact content and SHA-256 shown above.' })
+          .check();
+        const response = founder.waitForResponse(
+          (r) =>
+            new URL(r.url()).pathname === `/api/bff/v1/reports/${draft.reportId}/review` &&
+            r.request().method() === 'POST',
+        );
+        await review.getByRole('button', { name: 'Approve reviewed content' }).click();
+        expect((await response).status()).toBe(200);
+        await expect(review.getByText(/^approved · [^·]+ · Library /)).toBeVisible();
+      } else {
+        const reviewed = await post(founder, `/reports/${draft.reportId}/review`, {
+          decision: 'approved',
+          expectedContentHash: row.content_sha256,
+        });
+        expect(reviewed.status()).toBe(200);
+        expect(((await reviewed.json()) as { data: { status: string } }).data.status).toBe(
+          'approved',
+        );
+      }
       const operationKey = crypto.randomUUID();
       const artifactRequestStarted = performance.now();
       const built = await post(founder, `/reports/board/${draft.reportId}/artifacts`, {
@@ -426,8 +668,14 @@ test.describe('real-provider board report lifecycle', () => {
         );
       }
       const viewer = await viewerContext.newPage();
-      await signIn(viewer, 'viewer');
-      await selectTenant(viewer, 'a');
+      if (sourceHandoff) {
+        const account = await createMfaAccount('source-report-viewer', { role: 'viewer' });
+        await signInAs(viewer, account.email, account.password);
+        await select(viewer, account.id, 'viewer');
+      } else {
+        await signIn(viewer, 'viewer');
+        await selectTenant(viewer, 'a');
+      }
       expect(
         (await viewer.request.get(`/api/bff/v1/reports/board/${draft.reportId}/pdf`)).status(),
       ).toBe(403);
@@ -467,7 +715,9 @@ test.describe('real-provider board report lifecycle', () => {
         body: Buffer.from(
           JSON.stringify({
             kind: 'board',
-            fixture: 'one synthetic finalized assessment control',
+            fixture: sourceHandoff
+              ? 'real worker finalized public-source reviewed packet, 46 controls'
+              : 'one synthetic finalized assessment control',
             target: 'owned local provider',
             sourceBound: true,
             exactRetainedVersionsVerified: true,
@@ -477,7 +727,7 @@ test.describe('real-provider board report lifecycle', () => {
             reviewToReleaseMs: publishedAt - reviewedAt,
             requestToReleaseWallMs: publishedAt - requestedAt,
             thresholdMs: 300_000,
-            nfr8: 'UNVERIFIED: synthetic one-control fixture and human-review dwell',
+            nfr8: 'UNVERIFIED: synthetic fixture, loopback provider and human-review dwell',
           }),
         ),
         contentType: 'application/json',
@@ -517,7 +767,7 @@ test.describe('real-provider board report lifecycle', () => {
       expect(dossierBuild.status).toBe('settled');
       const dossierResponse = await page.request.get(
         `/api/bff/v1/dossiers/${dossierBuild.dossierId}`,
-        { headers: { 'x-tenant-id': state.tenantA.id } },
+        { headers: { 'x-tenant-id': tenantId } },
       );
       expect(dossierResponse.status()).toBe(200);
       const dossier = (await dossierResponse.json()) as {
@@ -541,7 +791,7 @@ test.describe('real-provider board report lifecycle', () => {
       expect(sealed.status()).toBe(200);
       const retained = await founder.request.get(
         `/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`,
-        { headers: { 'x-tenant-id': state.tenantA.id } },
+        { headers: { 'x-tenant-id': tenantId } },
       );
       expect(retained.status()).toBe(200);
       expect(sha(Buffer.from(await retained.body()))).toBe(dossier.archiveHash);
@@ -549,7 +799,7 @@ test.describe('real-provider board report lifecycle', () => {
       expect(
         (
           await viewer.request.get(`/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`, {
-            headers: { 'x-tenant-id': state.tenantA.id },
+            headers: { 'x-tenant-id': tenantId },
           })
         ).status(),
       ).toBe(403);
@@ -571,7 +821,7 @@ test.describe('real-provider board report lifecycle', () => {
         expect(
           (
             await founder.request.get(`/api/bff/v1/dossiers/${dossierBuild.dossierId}/archive`, {
-              headers: { 'x-tenant-id': state.tenantA.id },
+              headers: { 'x-tenant-id': tenantId },
             })
           ).status(),
         ).toBe(503);

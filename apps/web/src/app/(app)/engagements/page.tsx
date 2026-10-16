@@ -18,7 +18,7 @@ import { routeCapability } from '@/app/(app)/nav';
 export const dynamic = 'force-dynamic';
 
 export default async function EngagementsListPage() {
-  const { supabase, tenantId, role } = await requireCapabilityContext(
+  const { supabase, tenantId, role, userId } = await requireCapabilityContext(
     routeCapability('/engagements'),
   );
   const canCreate = can(Capability.ENGAGEMENT_CREATE, { role });
@@ -72,6 +72,7 @@ export default async function EngagementsListPage() {
           </p>
         ) : (
           <CreateAssessmentForm
+            actorId={userId}
             tenantId={tenantId}
             libraryVersion={libraryResult.data.version}
             estates={estateResult.data}

@@ -12,6 +12,7 @@ vi.mock('./report-request', async (importOriginal) => ({
 }));
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -145,13 +146,17 @@ it.each([BoardWorkflow, AuditorWorkflow])(
             offset: 0,
           }),
         );
-      if (options?.body !== undefined) return Promise.resolve(Response.json({ requestId: id }));
+      if (options?.body !== undefined)
+        return Promise.resolve(
+          Response.json({ requestId: id, reportId: null, status: 'requested', replayed: false }),
+        );
       return Promise.resolve(Response.json({ requests: [], total: 0, limit: 20, offset: 0 }));
     });
     vi.stubGlobal('crypto', {});
     render(
       <Workflow
         tenantId={id}
+        actorId={id}
         canRequest
         canManage={false}
         onOpenReport={vi.fn()}

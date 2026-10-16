@@ -55,6 +55,63 @@ def healthy():
     return value.get('healthy') is True and now-10000<value.get('observedAtMs',0)<=now and now-30000<value.get('syncAtMs',0)<=now
 
 
+
+def reviewed_unit_failures(unit, deadline):
+    """Exact volume-gate properties, returned only as fixed safe categories."""
+    if unit not in (SERVICE,HEALTH):raise ValueError('unexpected fixture unit')
+    properties=('ActiveState','SubState','MainPID','FragmentPath','DropInPaths','NeedDaemonReload','Transient')
+    remaining=deadline-time.monotonic()
+    if remaining<=0:return ('deadline',)
+    try:
+        result=control('show',*('--property='+key for key in properties),unit,check=False,timeout=min(3,remaining))
+        if result.returncode:return ('query_refused',)
+        lines=result.stdout.decode('ascii').splitlines()
+        if len(lines)!=len(properties):return ('property_set',)
+        fields=dict(line.split('=',1) for line in lines)
+        if set(fields)!=set(properties):return ('property_set',)
+    except (OSError,UnicodeError,ValueError,fixture.subprocess.TimeoutExpired):
+        return ('query_unavailable',)
+    expected={'ActiveState':'active','SubState':'running','FragmentPath':'/etc/systemd/system/'+unit,'DropInPaths':'','NeedDaemonReload':'no','Transient':'no'}
+    failed=[key for key in properties if key in expected and fields[key]!=expected[key]]
+    if not fields['MainPID'].isdigit() or int(fields['MainPID'])<=0:failed.append('MainPID')
+    return tuple(failed)
+
+
+def reviewed_restart_ready(completed_at_ms, expected_node, deadline):
+    if reviewed_unit_failures(SERVICE,deadline) or reviewed_unit_failures(HEALTH,deadline):return False
+    if time.monotonic()>=deadline:return False
+    value=health();now=time.time_ns()//1000000
+    if not isinstance(value,dict):return False
+    observed=value.get('observedAtMs');synced=value.get('syncAtMs');expires=value.get('certificateExpiresAtMs')
+    return (value.get('healthy') is True and value.get('nodeId')==expected_node
+            and type(observed) is int and type(synced) is int and type(expires) is int
+            and completed_at_ms<observed<=now and now-10000<observed
+            and now-30000<synced<=observed and expires>now)
+
+
+def wait_for_reviewed_restart(completed_at_ms, expected_node):
+    # One original 40-second observation window; subprocesses share its deadline.
+    deadline=time.monotonic()+40
+    while time.monotonic()<deadline:
+        if reviewed_restart_ready(completed_at_ms,expected_node,deadline):return
+        remaining=deadline-time.monotonic()
+        if remaining>0:time.sleep(min(0.5,remaining))
+    raise ValueError('runner fixture observation timed out')
+
+
+def check_restart_volumes(volume_cli, manifest_sha):
+    try:
+        # Exactly one strict production check; never retry a refused operation.
+        run([*volume_cli,'--check',manifest_sha])
+    except (RuntimeError,OSError,fixture.subprocess.TimeoutExpired):
+        deadline=time.monotonic()+6
+        categories=[]
+        for label,unit in (('runner',SERVICE),('observer',HEALTH)):
+            categories.append(label+'='+','.join(reviewed_unit_failures(unit,deadline) or ('ready',)))
+        print('Restart volume check refused; reviewed unit categories: '+'; '.join(categories),flush=True)
+        raise
+
+
 def main():
     if sys.argv[1:]!=['--isolated-ci'] or sys.platform!='linux' or os.geteuid()!=0 or os.environ.get('GITHUB_ACTIONS')!='true' or os.environ.get('RUNNER_ENVIRONMENT')!='github-hosted' or Path('/proc/1/comm').read_text().strip()!='systemd':
         raise ValueError('dedicated hosted CI required')
@@ -243,11 +300,12 @@ def main():
         outcomes['controller-partial-generation-preserved-for-review']=True
         run([*delivery,'--check',tenant,file_sha])
         outcomes['controller-delivery-does-not-require-or-claim-runtime-activation']=True
-        before_restart=health()['observedAtMs']
-        control('restart',SERVICE);wait_for(lambda:healthy() and health()['observedAtMs']>before_restart)
+        control('restart',SERVICE)
+        restart_completed_at_ms=time.time_ns()//1000000
+        wait_for_reviewed_restart(restart_completed_at_ms,expected)
         check(Path('/run/workload').stat().st_ino==inode and health()['nodeId']==expected,'restart lost the socket directory or node binding')
         outcomes['normal-restart-preserves-socket-directory-and-node']=True
-        run([*volume_cli,'--check',manifest_sha])
+        check_restart_volumes(volume_cli,manifest_sha)
         wait_for(admitted)
         check(run(['docker','exec',consumer,'stat','-c','%i','/run/workload/api.sock']).stdout.strip()==str(Path('/run/workload/api.sock').stat().st_ino).encode(),'consumer lost the replaced workload socket')
         outcomes['consumer-reconnects-through-replaced-socket-in-same-directory']=True

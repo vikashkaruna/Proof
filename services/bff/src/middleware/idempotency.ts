@@ -25,6 +25,13 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     return next();
   }
 
+  const durableIntake = c.req.method === 'POST' && c.req.path === '/v1/engagements';
+  const durablePublicControlReviewSet =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/public-control-review-sets' ||
+      /^\/v1\/public-control-review-sets\/operations\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
+        c.req.path,
+      ));
   const durableSourceReview =
     c.req.method === 'POST' &&
     /^\/v1\/public-source-bindings\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/observations\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/reviews$/.test(
@@ -57,13 +64,15 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     c.req.method === 'POST' &&
     (c.req.path === '/v1/assessment/jobs' ||
       c.req.path === '/v1/plans/proposals' ||
-      /^\/v1\/assessment\/jobs\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/cancel$/.test(
+      /^\/v1\/assessment\/jobs\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/(?:cancel|cancel-source-intent)$/.test(
         c.req.path,
       ) ||
       /^\/v1\/plans\/proposals\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/adopt$/.test(
         c.req.path,
       ));
   if (
+    durableIntake ||
+    durablePublicControlReviewSet ||
     durableSourceReview ||
     durableOperatorWorkflow ||
     trustedSourceRequest ||
@@ -111,6 +120,8 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   // Cached responses would skip live authority/context and cancellation checks
   // or freeze structural-review currency. Keep key checks above.
   if (
+    durableIntake ||
+    durablePublicControlReviewSet ||
     durableSourceReview ||
     durableOperatorWorkflow ||
     trustedSourceRequest ||

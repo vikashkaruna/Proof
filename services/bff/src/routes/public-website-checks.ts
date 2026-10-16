@@ -93,13 +93,16 @@ export function publicWebsiteCheckRoutes(deps: { capture?: Capture } = {}) {
     const denied = requireCapability(c, Capability.POSTURE_READ);
     if (denied) return denied;
     c.header('Cache-Control', 'private, no-store');
-    const { data, error } = await createSupabaseAdmin()
+    const query = z.object({ id: z.uuid().optional() }).strict().safeParse(c.req.query());
+    if (!query.success || (c.req.queries('id')?.length ?? 0) > 1)
+      return c.json({ error: { code: 'invalid_request' } }, 400);
+    let history = createSupabaseAdmin()
       .from('public_website_checks')
       .select('id,result')
       .eq('tenant_id', c.get('tenantId'))
-      .eq('status', 'checked')
-      .order('checked_at', { ascending: false })
-      .limit(20);
+      .eq('status', 'checked');
+    if (query.data.id) history = history.eq('id', query.data.id);
+    const { data, error } = await history.order('checked_at', { ascending: false }).limit(20);
     if (error) return c.json({ error: { code: 'website_checks_unavailable' } }, 503);
     const checked = (data ?? []).map((row) => checkSchema.safeParse(row.result));
     if (checked.some((entry) => !entry.success))

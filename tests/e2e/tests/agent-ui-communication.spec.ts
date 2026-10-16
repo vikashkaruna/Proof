@@ -1,3 +1,4 @@
+import { z } from 'zod';
 /**
  * E2E: Agent ↔ UI communication.
  *
@@ -210,8 +211,58 @@ test('assessment waits for confirmation and never invents score improvements or 
   });
   await page.goto(`/assessment?engagement=${engagement}`);
   const summary = await page.getByTestId('assessment-summary').innerText();
+  const readConfiguration = async () => {
+    const response = await page.request.get('/api/bff/v1/assessment/configuration', {
+      headers: { 'X-Tenant-Id': state.tenantA.id },
+    });
+    expect(response.status()).toBe(200);
+    // Unknown/malformed metadata must fail this fixture contract, not silently
+    // enter the unconfigured branch or simulate a working producer.
+    const configuration = z
+      .object({
+        tenantId: z.uuid(),
+        configuration: z.enum(['configured', 'unconfigured']),
+        executionReadiness: z.literal('not_verified'),
+      })
+      .strict()
+      .parse(await response.json());
+    expect(configuration.tenantId).toBe(state.tenantA.id);
+    return configuration.configuration;
+  };
+  const configuration = await readConfiguration();
   await page.clock.install();
   await page.getByRole('checkbox', { name: /every answer and applicability flag/ }).check();
+  if (configuration === 'unconfigured') {
+    // Production-container acceptance deliberately has no producer. Exercise
+    // its real SSR/API refusal rather than claiming mocked job replies prove
+    // dispatch. Local owned SSR metadata fixtures exercise the full configured
+    // failure/recovery journey below, with all its original assertions.
+    const button = page.getByRole('button', {
+      name: 'Request unknown-answer assessment',
+      exact: true,
+    });
+    await expect(button).toBeDisabled();
+    await expect(
+      page.getByText(/Assessment requests are not configured for this organisation\./),
+    ).toBeVisible();
+    await page.clock.fastForward(7000);
+    for (const agent of ['parikshan', 'drishti', 'vibhaag', 'saakshi', 'prativedan'])
+      await expect(page.getByTestId(`pipeline-${agent}`)).toHaveAttribute('data-state', 'not-run');
+    expect(await page.getByTestId('assessment-summary').innerText()).toBe(summary);
+    expect(posts).toBe(0);
+    await page.reload();
+    expect(await readConfiguration()).toBe('unconfigured');
+    await expect(button).toBeDisabled();
+    await expect(
+      page.getByText(/Assessment requests are not configured for this organisation\./),
+    ).toBeVisible();
+    for (const agent of ['parikshan', 'drishti', 'vibhaag', 'saakshi', 'prativedan'])
+      await expect(page.getByTestId(`pipeline-${agent}`)).toHaveAttribute('data-state', 'not-run');
+    await expect(page.getByRole('button', { name: 'Check retained request' })).toHaveCount(0);
+    expect(await page.getByTestId('assessment-summary').innerText()).toBe(summary);
+    expect(posts).toBe(0);
+    return;
+  }
   await page
     .getByRole('button', { name: 'Request unknown-answer assessment', exact: true })
     .click();

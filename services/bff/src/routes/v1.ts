@@ -1,3 +1,4 @@
+import { engagementIntakeRoutes } from './engagement-intake.js';
 import { monitoringOutcomeRoutes } from './monitoring-outcomes.js';
 import { loadMonitoringOutcomes } from '../services/monitoring-outcomes.js';
 import { ownedSyntheticPlanRoutes, type OwnedSyntheticRouteDeps } from './owned-synthetic-plans.js';
@@ -19,6 +20,7 @@ import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
 import { catalogueReferenceRoutes } from './catalogue-references.js';
 import { publicWebsiteControlReviewRoutes } from './public-website-control-review.js';
+import { publicControlReviewSetRoutes } from './public-control-review-sets.js';
 import { publicWebsiteCheckRoutes } from './public-website-checks.js';
 import { publicSourceBindingRoutes } from './public-source-bindings.js';
 import { publicSourceAgentRoutes } from './public-source-agents.js';
@@ -218,6 +220,7 @@ interface Deps {
   ownedSynthetic?: OwnedSyntheticRouteDeps | null;
   stagedEvidence?: StagedEvidenceRoutesDeps;
   assessmentRequests?: AssessmentRequestProducer;
+  publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
   ledger: LedgerService;
@@ -255,8 +258,9 @@ export function v1Routes(deps: Deps) {
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', catalogueReferenceRoutes());
-  app.route('/', publicWebsiteCheckRoutes());
+  app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', publicWebsiteControlReviewRoutes());
+  app.route('/', publicControlReviewSetRoutes());
   app.route('/', publicSourceBindingRoutes());
   app.route('/', publicSourceReadRoutes());
   app.route('/', publicSourceReviewRoutes());
@@ -3737,154 +3741,7 @@ export function v1Routes(deps: Deps) {
     return c.json(data);
   });
 
-  app.post('/engagements', async (c) => {
-    const engagementRefusal = requireCapability(c, Capability.ENGAGEMENT_CREATE);
-    if (engagementRefusal) return engagementRefusal;
-    const body = await c.req.json();
-    const Schema = z.object({
-      libraryVersion: z.string(),
-      estateId: z.uuid().optional(),
-      title: z.string().min(3).max(200),
-      // The caller keeps this UUID while a response is uncertain. Reusing the
-      // primary key makes retries safe without a second persistence surface.
-      requestKey: z.uuid().optional(),
-    });
-    const parsed = Schema.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: { code: 'validation_failed', details: parsed.error.flatten() } }, 400);
-    }
-    const admin = createSupabaseAdmin();
-    const sameRequest = (
-      row: {
-        lead_reviewer_id: string | null;
-        title: string;
-        library_version: string;
-        estate_id: string | null;
-      } | null,
-    ) =>
-      row?.lead_reviewer_id === c.get('user').id &&
-      row?.title === parsed.data.title &&
-      row?.library_version === parsed.data.libraryVersion &&
-      row?.estate_id === (parsed.data.estateId ?? null);
-    if (parsed.data.requestKey) {
-      const prior = await admin
-        .from('engagements')
-        .select('id, tenant_id, lead_reviewer_id, title, library_version, estate_id')
-        .eq('id', parsed.data.requestKey)
-        .eq('tenant_id', c.get('tenantId'))
-        .maybeSingle();
-      if (prior.error)
-        return c.json(
-          {
-            error: {
-              code: 'outcome_unavailable',
-              message: 'Could not confirm the earlier request.',
-            },
-          },
-          503,
-        );
-      if (prior.data)
-        return sameRequest(prior.data)
-          ? c.json(prior.data, 200)
-          : c.json(
-              {
-                error: {
-                  code: 'request_key_conflict',
-                  message: 'This request key belongs to a different assessment.',
-                },
-              },
-              409,
-            );
-    }
-    const library = await admin
-      .from('control_libraries')
-      .select('version, status, is_current')
-      .eq('version', parsed.data.libraryVersion)
-      .maybeSingle();
-    if (library.error)
-      return c.json(
-        {
-          error: { code: 'library_unavailable', message: 'Could not verify the control library.' },
-        },
-        503,
-      );
-    if (library.data?.status !== 'published' || library.data?.is_current !== true)
-      return c.json(
-        {
-          error: {
-            code: 'invalid_library',
-            message: 'Choose the current published control library.',
-          },
-        },
-        422,
-      );
-    const { data, error } = await admin
-      .from('engagements')
-      .insert({
-        ...(parsed.data.requestKey ? { id: parsed.data.requestKey } : {}),
-        tenant_id: c.get('tenantId'),
-        library_version: parsed.data.libraryVersion,
-        estate_id: parsed.data.estateId ?? null,
-        title: parsed.data.title,
-        lead_reviewer_id: c.get('user').id,
-        status: 'intake',
-      })
-      .select()
-      .single();
-    if (error?.code === '23505' && parsed.data.requestKey) {
-      const replay = await admin
-        .from('engagements')
-        .select('id, tenant_id, lead_reviewer_id, title, library_version, estate_id')
-        .eq('id', parsed.data.requestKey)
-        .eq('tenant_id', c.get('tenantId'))
-        .maybeSingle();
-      if (replay.error)
-        return c.json(
-          {
-            error: {
-              code: 'outcome_unavailable',
-              message: 'Could not confirm the earlier request.',
-            },
-          },
-          503,
-        );
-      if (!sameRequest(replay.data))
-        return c.json(
-          {
-            error: {
-              code: 'request_key_conflict',
-              message: 'This request key belongs to a different assessment.',
-            },
-          },
-          409,
-        );
-      return c.json(replay.data, 200);
-    }
-    if (error?.code === '23514' && parsed.data.estateId)
-      return c.json(
-        {
-          error: {
-            code: 'estate_archived',
-            message: 'Restore the estate before starting an assessment.',
-          },
-        },
-        409,
-      );
-    if (error?.code === '23503' && parsed.data.estateId) {
-      return c.json(
-        {
-          error: {
-            code: 'invalid_reference',
-            message: 'The estate and library must belong to the requested assessment scope.',
-          },
-        },
-        422,
-      );
-    }
-    if (error)
-      return c.json({ error: { code: 'persistence_failed', message: error.message } }, 500);
-    return c.json(data, 201);
-  });
+  app.route('/', engagementIntakeRoutes());
 
   // ─── Dynamic Organization Onboarding & User Tenants ─────────────
 

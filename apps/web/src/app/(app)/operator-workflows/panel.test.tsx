@@ -113,7 +113,9 @@ it('saves unknowns as null and reloads the human record rather than inventing re
   fireEvent.click(screen.getByRole('button', { name: 'Save processing activity' }));
   await screen.findByText('Saved with a human audit receipt. Reload reads the retained record.');
   expect(saved?.payload).toEqual(payload);
-  expect(screen.getAllByText('Unknown — human confirmation required').length).toBeGreaterThan(8);
+  await waitFor(() =>
+    expect(screen.getAllByText('Unknown — human confirmation required').length).toBeGreaterThan(8),
+  );
   expect(screen.queryByText('ap-south-1')).toBeNull();
   expect(sessionStorage.length).toBe(0);
   expect(calls.filter((c) => c.options?.method === 'POST')).toHaveLength(1);

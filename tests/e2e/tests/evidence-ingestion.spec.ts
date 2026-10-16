@@ -354,8 +354,10 @@ test.describe('real provider evidence ingestion', () => {
           `/api/bff/v1/evidence/ingestions/${pending.operationKey}/reconcile` &&
         response.request().method() === 'POST',
     );
+    checkpoint('pending_reconciliation_requested');
     await operationRow.getByRole('button', { name: 'Reconcile upload', exact: true }).click();
     const reconciled = await reconciledResponse;
+    checkpoint('pending_reconciliation_response');
     expect(reconciled.status()).toBe(200);
     const settled = (await reconciled.json()).data as { status: string; evidenceId: string };
     expect(settled.status).toBe('settled');
@@ -365,6 +367,7 @@ test.describe('real provider evidence ingestion', () => {
     const recoveredDetail = await page.request.get(`/api/bff/v1/evidence/${settled.evidenceId}`, {
       headers,
     });
+    checkpoint('reconciled_evidence_readback');
     expect(recoveredDetail.status()).toBe(200);
     expect((await recoveredDetail.json()).data).toMatchObject({
       content_hash: pending.hash,
@@ -376,8 +379,10 @@ test.describe('real provider evidence ingestion', () => {
       .getByLabel('Search description or evidence ID', { exact: true })
       .fill(pending.description);
     await filters.getByRole('button', { name: 'Apply filters', exact: true }).click();
+    checkpoint('reconciled_evidence_filtered');
     await records.getByRole('button').filter({ hasText: pending.filename }).click();
     await expect(inspector.getByText(`Exact version: ${pending.versionId}`)).toBeVisible();
+    checkpoint('reconciled_download_requested');
     const recoveredDownloadPromise = page.waitForEvent('download');
     await inspector.getByRole('button', { name: 'Download exact version', exact: true }).click();
     const recoveredDownload = await recoveredDownloadPromise;
@@ -388,13 +393,40 @@ test.describe('real provider evidence ingestion', () => {
 
     // Begin committed, but no storage write ever happened. Reconciliation
     // must not fabricate a version or evidence row, and the UI explains why.
+    checkpoint('reconciled_download_verified');
+    checkpoint('missing_object_begin_requested');
     const missing = await pendingEvidence(false);
+    checkpoint('missing_object_begin_committed');
+    const retainedMissing = await page.request.get(
+      `/api/bff/v1/evidence/ingestions/${missing.operationKey}`,
+      { headers },
+    );
+    expect(retainedMissing.status()).toBe(200);
+    expect(await retainedMissing.json()).toMatchObject({
+      data: { operationKey: missing.operationKey, status: 'pending', evidenceId: null },
+    });
+    checkpoint('missing_object_operation_readback_verified');
+    const missingListResponse = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === '/api/bff/v1/evidence/ingestions' &&
+        response.request().method() === 'GET',
+    );
     await page.reload();
+    checkpoint('missing_object_page_reloaded');
+    const missingList = await missingListResponse;
+    expect(missingList.status()).toBe(200);
+    expect(await missingList.json()).toMatchObject({
+      data: expect.arrayContaining([
+        expect.objectContaining({ operationKey: missing.operationKey, status: 'pending' }),
+      ]),
+    });
+    checkpoint('missing_object_browser_readback_verified');
     const missingRow = page
       .getByRole('region', { name: 'Upload operations', exact: true })
       .locator('div.rounded')
       .filter({ hasText: missing.operationKey });
     await expect(missingRow).toContainText('pending');
+    checkpoint('missing_object_pending_rendered');
     const missingResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname ===

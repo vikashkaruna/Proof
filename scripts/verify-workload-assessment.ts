@@ -1,3 +1,14 @@
+import {
+  reportAcceptanceRequested,
+  clearPublicReportBrowserHandoff,
+  verifyPublicControlReports,
+  writePublicReportBrowserHandoff,
+} from './lib/acceptance-public-control-reports.js';
+import {
+  acceptancePublicWebsiteCapture,
+  verifyPublicControlSourceThroughController,
+  publicControlAcceptanceFailure,
+} from './lib/acceptance-public-control-source.js';
 /** Real UID-attested worker → private Hono tools → real PostgREST transactions.
  * Only synthetic fixtures in the isolated local parity project. No private
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
@@ -71,8 +82,11 @@ import { workloadToolsRoutes } from '../services/bff/src/routes/workload-tools.j
 let phase = 'setup';
 const outcomes: Record<string, boolean> = {};
 let finalizedHttpProof: Record<string, unknown> | undefined;
+let publicReportProof: Awaited<ReturnType<typeof verifyPublicControlReports>> | undefined;
 let httpFailure: ReturnType<typeof acceptanceHttpFailure> | undefined;
 async function main() {
+  const withPublicReports = reportAcceptanceRequested();
+  if (withPublicReports) clearPublicReportBrowserHandoff();
   const input = z
     .object({
       containerName: z.string().regex(/^axiom-spire-test-[a-f0-9]{12}$/),
@@ -921,7 +935,11 @@ except Exception as error:
   // synthetic port, never evidence of cloud IAM/KMS or all-agent clearance.
   phase = 'normal-auth-assessment-http';
   const roleKey = (
-    role: 'human_action_writer' | 'evidence_ingestion_writer' | 'agent_ledger_writer',
+    role:
+      | 'human_action_writer'
+      | 'evidence_ingestion_writer'
+      | 'agent_ledger_writer'
+      | 'statutory_proof_writer',
   ) =>
     mintLocalPostgrestRoleKey({
       role,
@@ -938,6 +956,9 @@ except Exception as error:
     SUPABASE_HUMAN_ACTION_WRITER_KEY: roleKey('human_action_writer'),
     SUPABASE_EVIDENCE_INGESTION_WRITER_KEY: roleKey('evidence_ingestion_writer'),
     SUPABASE_AGENT_LEDGER_WRITER_KEY: roleKey('agent_ledger_writer'),
+    ...(withPublicReports
+      ? { SUPABASE_STATUTORY_PROOF_WRITER_KEY: roleKey('statutory_proof_writer') }
+      : {}),
     APPROVAL_SIGNING_KEY: randomBytes(32).toString('hex'),
     AXIOM_MFA_ENCRYPTION_KEY: randomBytes(32).toString('hex'),
     AGENT_RUNTIME_INTERNAL_TOKEN: randomBytes(32).toString('hex'),
@@ -1012,6 +1033,7 @@ except Exception as error:
   );
   const normalApp = applicationModule.createApp({
     assessmentRequests: producer,
+    publicWebsiteCapture: acceptancePublicWebsiteCapture,
   });
   // Standard Node HTTP transport only; every application request goes through
   // the complete mounted app.fetch middleware chain, with no injected Auth state.
@@ -1249,38 +1271,43 @@ except Exception as error:
     );
     outcomes['normal-auth-accepted-is-queued-no-claim-no-launch-no-findings'] = true;
     phase = 'normal-auth-separate-spire-controller';
-    const credential = controllerCredentialFixture(tenantId, status);
-    try {
-      const controllerDb = createClient(url.origin, status.ANON_KEY!, {
-        auth: { persistSession: false, autoRefreshToken: false },
-        global: { headers: { Authorization: `Bearer ${credential.accessToken}` } },
-      });
-      const { requireControllerBackend } =
-        await import('../services/bff/src/workloads/controller-files.js');
-      await requireControllerBackend(controllerDb, tenantId);
-      const controllerDispatch = new AssessmentDispatch(controllerDb, wrapper, policyRevisions);
-      const controller = new AssessmentController(
-        controllerDispatch,
-        new AssessmentChannel(
-          launchSupervised,
-          {
-            start: (value) => callTool('start', value),
-            complete: (value) => callTool('complete', value),
-          },
-          'spiffe://local.axiomproof.test/agent/parikshan',
-        ),
-        new AssessmentConfirmation(controllerDb),
-      );
-      const executed = await controller.run(tenantId, jobId);
-      assert.equal(executed.status, 'confirmed');
-      assert.equal(executed.cleanupConfirmed, true);
-      assert.equal(jobNames.length, launchesBefore + 1);
-      const recovered = await controller.reconcile(tenantId, jobId);
-      assert.equal(recovered.status, 'confirmed');
-      assert.equal(jobNames.length, launchesBefore + 1);
-    } finally {
-      credential.revoke();
-    }
+    const executeNormalJob = async (jobId: string) => {
+      const launchesBeforeExecution = jobNames.length;
+      const credential = controllerCredentialFixture(tenantId, status);
+      try {
+        const controllerDb = createClient(url.origin, status.ANON_KEY!, {
+          auth: { persistSession: false, autoRefreshToken: false },
+          global: { headers: { Authorization: `Bearer ${credential.accessToken}` } },
+        });
+        const { requireControllerBackend } =
+          await import('../services/bff/src/workloads/controller-files.js');
+        await requireControllerBackend(controllerDb, tenantId);
+        const controllerDispatch = new AssessmentDispatch(controllerDb, wrapper, policyRevisions);
+        const controller = new AssessmentController(
+          controllerDispatch,
+          new AssessmentChannel(
+            launchSupervised,
+            {
+              start: (value) => callTool('start', value),
+              complete: (value) => callTool('complete', value),
+            },
+            'spiffe://local.axiomproof.test/agent/parikshan',
+          ),
+          new AssessmentConfirmation(controllerDb),
+        );
+        const executed = await controller.run(tenantId, jobId);
+        assert.equal(executed.status, 'confirmed');
+        assert.equal(executed.cleanupConfirmed, true);
+        assert.equal(jobNames.length, launchesBeforeExecution + 1);
+        const recovered = await controller.reconcile(tenantId, jobId);
+        assert.equal(recovered.status, 'confirmed');
+        assert.equal(jobNames.length, launchesBeforeExecution + 1);
+      } finally {
+        credential.revoke();
+      }
+    };
+    await executeNormalJob(jobId);
+    assert.equal(jobNames.length, launchesBefore + 1);
     outcomes['normal-auth-separate-restricted-controller-single-spire-worker'] = true;
     phase = 'normal-auth-finalized-unknown-readback';
     const finalized = z
@@ -1418,7 +1445,43 @@ except Exception as error:
     outcomes['normal-auth-finalized-library011-46-controls-65-unknown-no-confirmed-compliance'] =
       true;
     outcomes['normal-auth-full-jsonb-packet-hash-one-human-request-zero-chain-violations'] = true;
+    phase = 'normal-auth-reviewed-public-source-controller';
+    const reviewedSourceProof = await verifyPublicControlSourceThroughController({
+      request,
+      headers: ownerHeaders,
+      db,
+      tenantId,
+      actorId,
+      libraryVersion: acceptanceLibrary.version,
+      execute: executeNormalJob,
+      launchCount: () => jobNames.length,
+      onPhase: (value) => {
+        phase = `normal-auth-public-source-${value}`;
+      },
+    });
+    outcomes['normal-auth-real-capture-human-review-source-controller-finalization'] = true;
+    if (withPublicReports) {
+      publicReportProof = await verifyPublicControlReports({
+        request,
+        db,
+        tenantId,
+        foreignTenantId,
+        ownerHeaders,
+        viewerHeaders,
+        source: reviewedSourceProof,
+        authUrl: url.origin,
+        anonKey: status.PUBLISHABLE_KEY ?? status.ANON_KEY!,
+        onPhase: (value) => {
+          phase = `normal-auth-public-report-${value}`;
+        },
+      });
+      outcomes[
+        'normal-auth-reviewed-source-board3-auditor3-mfa-human-review-exact-provider-release-download'
+      ] = true;
+    }
+
     finalizedHttpProof = {
+      reviewedSourceProof,
       kind: 'isolated-normal-auth-finalized-assessment',
       projectId: selectedParity.projectId,
       stateDirectory: selectedParity.stateDirectory,
@@ -2322,6 +2385,10 @@ print('parent-death-clean')`;
     { mode: 0o600 },
   );
 
+  if (withPublicReports) {
+    assert(publicReportProof);
+    writePublicReportBrowserHandoff(publicReportProof);
+  }
   mkdirSync('.axiom-runtime/workload-assessment', { recursive: true, mode: 0o700 });
   writeFileSync(
     '.axiom-runtime/workload-assessment/results.json',
@@ -2346,6 +2413,14 @@ main().catch((error: unknown) => {
     error instanceof Error &&
     /^Controller entrypoint fixture refused at ([a-z-]{1,40})$/.exec(error.message);
   if (entrypoint) phase = `vm-entrypoint-${entrypoint[1]}`;
+  if (phase.startsWith('normal-auth-public-source-')) {
+    mkdirSync('.axiom-runtime/review/all-agent-acceptance', { recursive: true, mode: 0o700 });
+    writeFileSync(
+      `.axiom-runtime/review/all-agent-acceptance/public-source-failure-${Date.now()}.private.json`,
+      JSON.stringify({ phase, ...publicControlAcceptanceFailure(error), accepted: false }) + '\n',
+      { mode: 0o600 },
+    );
+  }
   if (httpFailure) {
     const revision = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const directory = '.axiom-runtime/review/all-agent-acceptance';
