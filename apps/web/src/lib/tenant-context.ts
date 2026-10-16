@@ -121,6 +121,12 @@ async function enforceLoginMfa(
     required = error || !tenant ? true : (tenant.mfa_required_roles ?? []).includes(role);
   }
 
+  // An account under founder-led recovery cannot satisfy a code prompt with
+  // the factor it lost; its only way forward is the recovery panel (0153).
+  const { data: recovery, error: recoveryError } = await supabase.rpc('read_my_mfa_recovery');
+  if (recoveryError) throw new Error('Recovery status is unavailable');
+  if (recovery) redirect('/settings/security?recovery=1');
+
   if (!required) return;
 
   const { data: factors } = await supabase

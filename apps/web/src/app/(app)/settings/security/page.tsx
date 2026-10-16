@@ -1,6 +1,7 @@
 import { PageHeader, Card, CardHeader, CardTitle, CardDescription, CardContent } from '@axiom/ui';
 import { requireTenantContext } from '@/lib/tenant-context';
 import { MfaEnrolment } from './mfa-enrolment';
+import { RecoveryBeneficiary, RecoveryConsole, type OwnRecovery } from './recovery-panels';
 import { moduleBarProps } from '@/lib/module-bar';
 
 export const dynamic = 'force-dynamic';
@@ -36,6 +37,24 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
     .from('user_mfa_factors')
     .select('id, factor_type, status, label, activated_at, last_used_at, consumed_at');
   if (factorError || !factorRows) throw new Error('MFA factor status is unavailable');
+
+  // Founder-led recovery (0152/0153). Both reads go through the user's own
+  // JWT; neither grants anything — the BFF and SQL re-decide every act.
+  const { data: ownRecoveryRaw, error: recoveryError } =
+    await ctx.supabase.rpc('read_my_mfa_recovery');
+  if (recoveryError) throw new Error('Recovery status is unavailable');
+  const ownRecovery = ownRecoveryRaw as {
+    case_id: string;
+    state: OwnRecovery['state'];
+    bound_here: boolean;
+    session_id: string | null;
+  } | null;
+  const { data: founderRows } = await ctx.supabase
+    .from('platform_founders')
+    .select('user_id')
+    .eq('user_id', ctx.userId)
+    .is('revoked_at', null);
+  const isPlatformFounder = (founderRows ?? []).length > 0;
 
   const rows = factorRows;
   const initialStatus = {
@@ -91,13 +110,30 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
         </CardContent>
       </Card>
 
-      <MfaEnrolment
-        key={`${ctx.userId}:${ctx.tenantId}`}
-        tenantId={ctx.tenantId}
-        accountEmail={ctx.email ?? 'your account'}
-        initialStatus={initialStatus}
-        enrolmentRequired={sentHere}
-      />
+      {ownRecovery ? (
+        <RecoveryBeneficiary
+          key={`${ctx.userId}:${ownRecovery.case_id}`}
+          tenantId={ctx.tenantId}
+          initial={{
+            caseId: ownRecovery.case_id,
+            state: ownRecovery.state,
+            boundHere: ownRecovery.bound_here,
+            sessionId: ownRecovery.session_id,
+          }}
+        />
+      ) : (
+        <MfaEnrolment
+          key={`${ctx.userId}:${ctx.tenantId}`}
+          tenantId={ctx.tenantId}
+          accountEmail={ctx.email ?? 'your account'}
+          initialStatus={initialStatus}
+          enrolmentRequired={sentHere}
+        />
+      )}
+
+      {isPlatformFounder && !ownRecovery && initialStatus.enrolled && (
+        <RecoveryConsole key={`${ctx.userId}:recovery`} tenantId={ctx.tenantId} />
+      )}
     </div>
   );
 }
