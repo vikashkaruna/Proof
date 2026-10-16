@@ -14,13 +14,13 @@ export default async function LocalCustodyPage() {
       </p>
     );
   return (
-    <main className="space-y-5">
-      <h1>Local dispatch-key custody</h1>
+    <section className="space-y-5" aria-labelledby="local-custody-heading">
+      <h1 id="local-custody-heading">Local dispatch-key custody</h1>
       <LocalCustodyClient
         key={ctx.tenantId + ':' + ctx.userId}
         tenantId={ctx.tenantId}
         actorId={ctx.userId}
       />
-    </main>
+    </section>
   );
 }

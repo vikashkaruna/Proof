@@ -87,6 +87,10 @@ def plan(root: Path = ROOT) -> dict:
         versions[-1] < 149 or "local-custody-intent-cancellation.test.sql" in files,
         "custody149_cancellation_suite_required",
     )
+    need(
+        versions[-1] < 150 or "local-custody-mfa-time-contract.test.sql" in files,
+        "custody150_mfa_clock_suite_required",
+    )
     return {
         "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),

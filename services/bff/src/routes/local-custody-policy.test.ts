@@ -198,6 +198,7 @@ it('binds the dedicated challenge to exact authenticated actor/session/request a
   expect(f.write).toHaveBeenCalledTimes(1);
   expect((await f.send('record', { request: r })).status).toBe(200);
   expect(f.mfa.consumeChallenge).toHaveBeenCalledTimes(1);
+  expect(f.mfa.consumeChallenge).toHaveBeenCalledWith(expect.objectContaining({ sessionId: s }));
   expect(f.write).toHaveBeenCalledTimes(1);
 });
 it('preserves uncertain committed outcome and only recovers exact positive readback', async () => {
@@ -535,6 +536,7 @@ it('records only exact fresh cancellation MFA and refuses self-consistent change
   );
   expect(f.mfa.consumeChallenge).toHaveBeenCalledWith(
     expect.objectContaining({
+      sessionId: s,
       consumedFor: event,
       boundPayloadSha256: bindingSha256([
         'axiom.local-custody.cancel',

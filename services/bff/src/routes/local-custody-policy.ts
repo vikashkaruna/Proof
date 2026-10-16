@@ -252,6 +252,7 @@ export function localCustodyPolicyRoutes(deps: {
       }
       if (parsed.code) return c.json({ error: { code: 'invalid_request' } }, 400);
       const consumed = await deps.mfa.consumeChallenge({
+        sessionId: s,
         userId: a,
         tenantId: t,
         purpose: 'local_custody_policy',
