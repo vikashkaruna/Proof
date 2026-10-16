@@ -43,6 +43,12 @@ async function buildApp(
   app.use('/v1/*', idempotency);
   app.post('/v1/execute', (c) => c.json({ executed: true, key: c.get('idempotencyKey') }));
   for (const path of [
+    '/v1/public-website-assets/operations',
+    '/v1/public-website-assets/operations/99990000-0000-4000-8000-000000000004/cancel',
+    '/v1/public-website-assets/operations-extra',
+    '/v1/public-website-assets/operations/extra',
+    '/v1/public-website-assets/operations/not-a-uuid/cancel',
+    '/v1/public-website-assets/operations/99990000-0000-4000-8000-000000000004/cancel-extra',
     '/v1/engagements',
     '/v1/engagements-extra',
     '/v1/engagements/extra',
@@ -299,4 +305,59 @@ it('lets only exact intake POST reach live atomic replay without a generic cache
   expect(response.status).toBe(200);
   expect(response.headers.get('cache-control')).toBe('private, no-store');
   expect(double.createClient).not.toHaveBeenCalled();
+});
+
+it.each([
+  '/v1/public-website-assets/operations',
+  '/v1/public-website-assets/operations/99990000-0000-4000-8000-000000000004/cancel',
+])(
+  'website asset operation %s always reaches live durable authority and receipt reconciliation',
+  async (path) => {
+    const double = createSupabaseDouble({
+      idempotencyHit: { response_status: 200, response_body: { cached: true } },
+    });
+    double.state.failRpc = 'claim_request';
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await app.request(path, {
+        method: 'POST',
+        headers: { 'Idempotency-Key': 'durable-website-asset' },
+        body: JSON.stringify({ attempt }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ executed: true, key: 'durable-website-asset' });
+      expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    }
+    expect(double.createClient).not.toHaveBeenCalled();
+    for (const key of [undefined, 'short', 'x'.repeat(257)]) {
+      const response = await app.request(path, {
+        method: 'POST',
+        headers: key ? { 'Idempotency-Key': key } : {},
+      });
+      expect(response.status).toBe(400);
+      expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    }
+  },
+);
+
+it.each([
+  ['PUT', '/v1/public-website-assets/operations'],
+  ['POST', '/v1/public-website-assets/operations-extra'],
+  ['POST', '/v1/public-website-assets/operations/extra'],
+  ['POST', '/v1/public-website-assets/operations/not-a-uuid/cancel'],
+  [
+    'POST',
+    '/v1/public-website-assets/operations/99990000-0000-4000-8000-000000000004/cancel-extra',
+  ],
+  ['PUT', '/v1/public-website-assets/operations/99990000-0000-4000-8000-000000000004/cancel'],
+])('website-like %s %s retains generic idempotency protection', async (method, path) => {
+  const double = createSupabaseDouble({});
+  double.state.failRpc = 'claim_request';
+  const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+  const response = await app.request(path, {
+    method,
+    headers: { 'Idempotency-Key': 'durable-website-asset' },
+  });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: { code: 'idempotency_unavailable' } });
 });
