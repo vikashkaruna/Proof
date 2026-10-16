@@ -72,6 +72,7 @@ test('owner can audit public content and inspect a recorded result after reload'
   await website.getByRole('textbox', { name: 'Public page URL' }).fill(result.requestedUrl);
   await website.getByRole('button', { name: 'Audit public website' }).click();
   await expect(website.getByText('Privacy notice')).toBeVisible();
+  await website.getByText('Show retained HTML facts and hashes', { exact: true }).click();
   await expect(website.getByText('How we use data')).toBeVisible();
   await expect(website.getByText(/Contact: https:\/\/example.com\/contact/)).toBeVisible();
   await expect(website.getByText(/Content SHA-256/)).toBeVisible();
@@ -81,6 +82,7 @@ test('owner can audit public content and inspect a recorded result after reload'
   await expect(website.getByRole('link', { name: /Contact/ })).toHaveCount(0);
   await page.reload();
   website = page.getByRole('region', { name: 'Public website content audit' });
+  await website.getByText('Show retained HTML facts and hashes', { exact: true }).click();
   await expect(website.getByText('contact · Contact us', { exact: false })).toBeVisible();
 });
 
