@@ -179,13 +179,14 @@ class ParityIdentity(unittest.TestCase):
     def test_preparation_refuses_foreign_scope_symlinks_hardlinks_and_ownership(self):
         outside = self.owner / "unrelated"
         outside.mkdir(mode=0o755)
+        outside_mode = outside.stat().st_mode & 0o777
         for state, project in [
             (outside, self.project),
             (self.state, "axiom-owner-test"),
         ]:
             with self.assertRaises(GUARD.Refused):
                 GUARD.prepare_parity_paths(self.owner, state, project, "563")
-        self.assertEqual(outside.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(outside.stat().st_mode & 0o777, outside_mode)
         alias = self.owner / "config-hardlink"
         os.link(self.config, alias)
         with self.assertRaises(GUARD.Refused):
