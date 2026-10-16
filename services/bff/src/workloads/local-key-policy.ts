@@ -37,6 +37,24 @@ export interface LocalKeyCaller {
   readonly tenantId: string;
   readonly workloadId: string;
   readonly role: 'operator' | 'producer' | 'controller';
+  /** Required only by the durable143 authority; supplied by trusted peer identity. */
+  readonly servicePrincipal?: string;
+  readonly originalRunId?: string;
+}
+export interface LocalKeyAuthorization {
+  readonly kind: 'durable_local_custody_143';
+  readonly commitment: string;
+}
+export interface LocalKeyAuthority {
+  readonly value: { readonly primary: string };
+  require(
+    caller: LocalKeyCaller,
+    operation: LocalKeyOperation,
+    keyRef: string,
+    deadline: number,
+    admission?: LocalKeyAdmission,
+    context?: Uint8Array | null,
+  ): Promise<void | LocalKeyAuthorization>;
 }
 export interface LocalKeyAdmissionRequest {
   readonly tenantId: string;
