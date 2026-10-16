@@ -587,3 +587,52 @@ it('invalid inventory and changed fields refuse a new request without transport'
   await screen.findByText(/Website asset context could not be verified/);
   expect(transport.send).not.toHaveBeenCalled();
 });
+
+it('offers an explicit Discovery check link only after a matching association receipt, without running agents', async () => {
+  const intent: WebsiteAssetIntent = {
+    ...retained(),
+    requestText: encodePublicWebsiteAssetRequest({
+      version: 1,
+      kind: 'capture',
+      confirmed: true,
+      operationKey: other,
+      targetId: target,
+      expectedTargetSha256: hash(snap),
+    }),
+  };
+  const snapshotText = canonicalJson({
+    version: 1,
+    kind: 'association',
+    id: association,
+    tenantId: tenant,
+    actorId: actor,
+    ownershipVerified: false,
+    connectorAccessGranted: false,
+    targetId: target,
+    targetSha256: hash(snap),
+    checkId: other,
+    payloadSha256: 'a'.repeat(64),
+    captureReceipt: { id: '90', entryHash: 'b'.repeat(64) },
+    requestedUrl: 'https://public.org/',
+    finalUrl: 'https://public.org/',
+    checkedAt: '2026-10-16T00:00:00Z',
+  });
+  const result = {
+    ...positive(intent),
+    kind: 'capture' as const,
+    snapshotText,
+    snapshotSha256: hash(snapshotText),
+  };
+  const transport = ports();
+  transport.read.mockResolvedValue(result);
+  retainWebsiteAssetIntent(localStorage, intent);
+  render(<PublicWebsiteAssetConsole {...props()} canOpenDiscovery transport={transport} />);
+  expect(screen.queryByText('Continue this saved check in Discovery')).toBeNull();
+  await screen.findByText(/Retained capture request/);
+  fireEvent.click(screen.getByRole('button', { name: 'Check retained operation' }));
+  const link = await screen.findByRole('link', { name: 'Continue this saved check in Discovery' });
+  expect(link.getAttribute('href')).toContain('checkId=' + other);
+  expect(link.getAttribute('href')).toContain('associationId=' + association);
+  expect(link.getAttribute('href')).toContain('targetId=' + target);
+  expect(transport.send).not.toHaveBeenCalled();
+});

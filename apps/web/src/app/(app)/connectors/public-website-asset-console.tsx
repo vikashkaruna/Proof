@@ -47,6 +47,7 @@ export interface WebsiteAssetConsoleProps {
   tenantId: string;
   actorId: string;
   canManage: boolean;
+  canOpenDiscovery?: boolean;
   inventory: PublicWebsiteAssetInventory;
   targets: PublicWebsiteAssetTargetRow[];
   captures: PublicWebsiteAssetCaptureRow[];
@@ -172,8 +173,7 @@ function PendingCard({
     </article>
   );
 }
-/** Prepared in isolation. Do not mount until cancellation and downstream review,
- * assessment/report provenance are integrated and verified together. */
+/** Retained website operations remain subject to server authority and provenance checks. */
 function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
   const { tenantId, actorId, canManage } = props,
     scope = tenantId.toLowerCase() + ':' + actorId.toLowerCase();
@@ -646,6 +646,31 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
       {feedback?.scope === scope && (
         <p role={feedback.known ? 'status' : 'alert'}>{feedback.text}</p>
       )}
+      {feedback?.scope === scope &&
+        feedback.known?.state === 'recorded' &&
+        props.canOpenDiscovery &&
+        (() => {
+          const snapshot = parsePublicWebsiteAssetSnapshotText(feedback.known.snapshotText);
+          return snapshot.kind === 'association' ? (
+            <p>
+              Saved association {snapshot.id} for target {snapshot.targetId}.{' '}
+              <a
+                href={
+                  '/discovery?' +
+                  new URLSearchParams({
+                    checkId: snapshot.checkId,
+                    associationId: snapshot.id,
+                    targetId: snapshot.targetId,
+                  }).toString()
+                }
+              >
+                Continue this saved check in Discovery
+              </a>
+              . Select the matching engagement and confirm the association there; no agent has been
+              run.
+            </p>
+          ) : null;
+        })()}
       {entries.map((entry) => (
         <PendingCard
           key={

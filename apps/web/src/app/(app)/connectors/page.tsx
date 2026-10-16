@@ -1,10 +1,11 @@
 import Link from 'next/link';
-import { Capability, can } from '@axiom/types';
+import { Capability, can, UserRole } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
 import { ConnectorsClient, type ConnectorRow, type ConnectorSystem } from './connectors-client';
 import { routeCapability } from '@/app/(app)/nav';
+import { PublicWebsiteAssetInventory } from './public-website-asset-inventory';
 export const dynamic = 'force-dynamic';
 export default async function ConnectorsPage() {
   const ctx = await requireCapabilityContext(Capability.POSTURE_READ);
@@ -39,6 +40,17 @@ export default async function ConnectorsPage() {
         fetches public HTML only; private credentials, live access grants and transport verification
         remain separate steps.
       </p>
+      <PublicWebsiteAssetInventory
+        key={ctx.tenantId + ':' + ctx.userId}
+        tenantId={ctx.tenantId}
+        actorId={ctx.userId}
+        canManage={
+          can(Capability.CONNECTOR_MANAGE, { role: ctx.role }) &&
+          can(Capability.ESTATE_MANAGE, { role: ctx.role }) &&
+          (ctx.role !== UserRole.FOUNDER || ctx.isAxiomInternal === true)
+        }
+        canOpenDiscovery={canOpenDiscovery}
+      />
       {canOpenDiscovery && (
         <section
           aria-label="Continue a saved public check"
@@ -57,6 +69,10 @@ export default async function ConnectorsPage() {
           </Link>
         </section>
       )}
+      <p className="text-sm text-slate-600">
+        The standalone URL check below is separate from registered estate and system website
+        targets. It does not create a target or associate a check with a system.
+      </p>
       {connectors.error ||
       systems.error ||
       !Array.isArray(connectors.data) ||

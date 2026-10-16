@@ -75,28 +75,14 @@ const serverSnapshot = () => false;
 function CheckResult({
   check,
   canOpenDiscovery,
+  compact = false,
 }: {
   check: WebsiteCheck;
   canOpenDiscovery: boolean;
+  compact?: boolean;
 }) {
-  return (
-    <article className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
-      <div className="flex flex-wrap items-center gap-2">
-        <strong className="text-indigo-900">{check.title || 'Untitled public page'}</strong>
-        <span className="rounded-full bg-teal-50 px-2 py-0.5 text-teal-800">{check.status}</span>
-      </div>
-      <p className="break-all text-slate-700">{check.finalUrl}</p>
-      <p className="text-slate-600">
-        Fetched <time dateTime={check.checkedAt}>{check.checkedAt}</time> · {check.bytes} bytes
-      </p>
-      {canOpenDiscovery && (
-        <Link
-          href={`/discovery?checkId=${check.id}`}
-          className="inline-block font-medium text-teal-700 underline"
-        >
-          Review this saved website evidence
-        </Link>
-      )}
+  const facts = (
+    <>
       <PublicFormFacts metadata={check.formMetadata} pageLabel="Starting page" />
       {check.observations && (
         <div>
@@ -175,6 +161,36 @@ function CheckResult({
       <p className="break-all text-xs text-slate-600">
         Content SHA-256: <code>{check.contentSha256}</code>
       </p>
+    </>
+  );
+  return (
+    <article className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <strong className="text-indigo-900">{check.title || 'Untitled public page'}</strong>
+        <span className="rounded-full bg-teal-50 px-2 py-0.5 text-teal-800">{check.status}</span>
+      </div>
+      <p className="break-all text-slate-700">{check.finalUrl}</p>
+      <p className="text-slate-600">
+        Fetched <time dateTime={check.checkedAt}>{check.checkedAt}</time> · {check.bytes} bytes
+      </p>
+      {canOpenDiscovery && (
+        <Link
+          href={`/discovery?checkId=${check.id}`}
+          className="inline-block font-medium text-teal-700 underline"
+        >
+          Review this saved website evidence
+        </Link>
+      )}
+      {compact ? (
+        <details>
+          <summary className="cursor-pointer font-medium text-indigo-900">
+            Show retained HTML facts and hashes
+          </summary>
+          <div className="mt-2 space-y-2">{facts}</div>
+        </details>
+      ) : (
+        facts
+      )}
     </article>
   );
 }
@@ -661,7 +677,7 @@ export function PublicWebsiteClient({
           <ol className="space-y-2">
             {visibleHistory.map((check) => (
               <li key={check.id}>
-                <CheckResult check={check} canOpenDiscovery={canOpenDiscovery} />
+                <CheckResult check={check} canOpenDiscovery={canOpenDiscovery} compact />
               </li>
             ))}
           </ol>
