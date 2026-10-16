@@ -69,3 +69,32 @@ it('refuses a failed write/readback and observed concurrent new intent before di
   expect(() => retainControlReviewOperation(localStorage, operation)).toThrow(/Concurrent/);
   expect(localStorage.length).toBe(2);
 });
+
+it('keeps v1 storage bytes and key stable while admitting a separately explicit v2 intent', async () => {
+  const { reviewFixture, ids } = await import('./control-review-fixture.test-helper');
+  const { linkedReviewFixture } = await import('./control-review-v2-fixture.test-helper');
+  const old = reviewFixture();
+  const {
+    retainControlReviewOperation,
+    readControlReviewOperations,
+    clearResolvedControlReviewOperation,
+  } = await import('./control-review-journal');
+  localStorage.clear();
+  retainControlReviewOperation(localStorage, old.operation);
+  const key = localStorage.key(0)!;
+  const bytes = localStorage.getItem(key);
+  expect(key).toBe(
+    `axiom.public-control-review.operation.v1:${ids.tenant}:${ids.actor}:${ids.operation}`,
+  );
+  expect(readControlReviewOperations(localStorage, ids.tenant, ids.actor)[0]?.requestText).toBe(
+    old.operation.requestText,
+  );
+  expect(localStorage.getItem(key)).toBe(bytes);
+  clearResolvedControlReviewOperation(localStorage, old.operation);
+  const linked = linkedReviewFixture();
+  retainControlReviewOperation(localStorage, linked.operation);
+  expect(localStorage.key(0)).toBe(key);
+  expect(readControlReviewOperations(localStorage, ids.tenant, ids.actor)[0]?.requestText).toBe(
+    linked.operation.requestText,
+  );
+});

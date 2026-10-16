@@ -245,3 +245,146 @@ it('offers only an explicit identifier-bound assessment-page handoff after a sav
     screen.queryByRole('button', { name: 'Request assessment from recorded review' }),
   ).toBeNull();
 });
+
+it('requires explicit association confirmation for hinted v2 and recovers its exact bytes through reload to assessment handoff', async () => {
+  const { linkedReviewFixture, assetIds } = await import('./control-review-v2-fixture.test-helper');
+  const f = linkedReviewFixture();
+  load.mockResolvedValue({ ...f.head, review: null });
+  send.mockRejectedValue(new Error('lost response'));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      if (url.includes('/estates/'))
+        return Response.json({
+          data: {
+            id: assetIds.estate,
+            tenant_id: ids.tenant,
+            name: 'Estate',
+            status: 'active',
+            version: 1,
+            systems: [
+              {
+                id: assetIds.system,
+                tenant_id: ids.tenant,
+                estate_id: assetIds.estate,
+                name: 'Website',
+                status: 'active',
+                version: 1,
+              },
+            ],
+          },
+        });
+      const query = new URL('http://test' + url).searchParams;
+      return Response.json({
+        data:
+          query.get('kind') === 'targets'
+            ? {
+                kind: 'targets',
+                tenantId: ids.tenant,
+                actorId: ids.actor,
+                estateId: assetIds.estate,
+                systemId: assetIds.system,
+                rows: [f.targetRow],
+                nextCursor: null,
+              }
+            : {
+                kind: 'associations',
+                tenantId: ids.tenant,
+                actorId: ids.actor,
+                targetId: assetIds.target,
+                rows: [f.associationRow],
+                nextCursor: null,
+              },
+      });
+    }),
+  );
+  const props = {
+    actorId: ids.actor,
+    canReview: true,
+    canRun: true,
+    assessment: f.assessment,
+    assetHint: { targetId: assetIds.target, associationId: assetIds.association },
+  };
+  const view = render(<PublicControlHumanReview {...props} />);
+  await screen.findByText(/Estate Estate/);
+  fireEvent.change(screen.getByLabelText('Applicability rationale'), {
+    target: { value: f.request.applicability.rationale },
+  });
+  confirm();
+  expect(screen.getByRole('button', { name: 'Record human control review' })).toHaveProperty(
+    'disabled',
+    true,
+  );
+  expect(send).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Website review system'), {
+    target: { value: assetIds.system },
+  });
+  fireEvent.click(screen.getByText('Load registered review targets'));
+  await screen.findByLabelText('Registered review target');
+  fireEvent.change(screen.getByLabelText('Registered review target'), {
+    target: { value: assetIds.target },
+  });
+  fireEvent.click(screen.getByText('Load saved review associations'));
+  await screen.findByLabelText('Saved review association');
+  fireEvent.change(screen.getByLabelText('Saved review association'), {
+    target: { value: assetIds.association },
+  });
+  fireEvent.click(screen.getByRole('checkbox', { name: /I confirm this exact saved target/ }));
+  // A fresh read of the identical displayed source refreshes the head without changing its identity.
+  await act(async () => {
+    view.rerender(
+      <PublicControlHumanReview {...props} assessment={structuredClone(f.assessment)} />,
+    );
+  });
+  await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+  await screen.findByText(/Estate Estate/);
+  expect(screen.queryByRole('checkbox', { name: /I confirm this exact saved target/ })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Record human control review' })).toHaveProperty(
+    'disabled',
+    true,
+  );
+  fireEvent.change(screen.getByLabelText('Website review system'), {
+    target: { value: assetIds.system },
+  });
+  fireEvent.click(screen.getByText('Load registered review targets'));
+  await screen.findByLabelText('Registered review target');
+  fireEvent.change(screen.getByLabelText('Registered review target'), {
+    target: { value: assetIds.target },
+  });
+  fireEvent.click(screen.getByText('Load saved review associations'));
+  await screen.findByLabelText('Saved review association');
+  fireEvent.change(screen.getByLabelText('Saved review association'), {
+    target: { value: assetIds.association },
+  });
+  expect(
+    screen.getByRole('checkbox', { name: /I confirm this exact saved target/ }),
+  ).toHaveProperty('checked', false);
+  fireEvent.click(screen.getByRole('checkbox', { name: /I confirm this exact saved target/ }));
+  fireEvent.change(screen.getByLabelText('Applicability rationale'), {
+    target: { value: f.request.applicability.rationale },
+  });
+  confirm();
+  fireEvent.click(screen.getByRole('button', { name: 'Record human control review' }));
+  await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+  const retained = readControlReviewOperations(localStorage, ids.tenant, ids.actor)[0]!;
+  expect(retained.requestText).toBe(f.operation.requestText);
+  view.unmount();
+  load.mockResolvedValue(f.head);
+  reconcile.mockResolvedValue({
+    state: 'recorded',
+    data: f.row,
+    isCurrent: true,
+    contextCurrent: true,
+  });
+  render(<PublicControlHumanReview {...props} />);
+  await screen.findByText(/Retained human review request/);
+  expect(send).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByText('Reconcile retained human review'));
+  const link = await screen.findByRole('link', {
+    name: 'Request assessment from this recorded human review',
+  });
+  expect(link.getAttribute('href')).toContain('reviewId=' + f.row.id);
+  expect(link.getAttribute('href')).toContain('snapshotSha256=' + f.row.snapshot_sha256);
+  expect(readControlReviewOperations(localStorage, ids.tenant, ids.actor)).toHaveLength(0);
+  expect(send).toHaveBeenCalledTimes(1);
+});

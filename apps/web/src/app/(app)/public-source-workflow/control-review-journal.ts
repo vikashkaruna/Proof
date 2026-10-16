@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { canonicalJson } from '@axiom/ledger';
 import {
-  parsePublicControlReviewSetRequestText,
+  parsePublicControlReviewSetAnyRequestText as parsePublicControlReviewSetRequestText,
   PUBLIC_CONTROL_REVIEW_MAX_BYTES,
 } from '@axiom/types';
 
