@@ -124,14 +124,32 @@ insert into public.mfa_session_attestations(id,user_id,session_id,factor_id,expi
 create function pg_temp.authority() returns jsonb language sql as $$select jsonb_build_object(
  'actor_id',pg_temp.id(1),'session_id',pg_temp.id(95),'workload_id',pg_temp.id(98),'registration_version',1,
  'subject','spiffe://local.axiomproof.test/agent/prativedan','svid_expires_at',clock_timestamp()+interval '4 minutes')$$;
-select set_config('request.jwt.claims',jsonb_build_object('role','axiom_prativedan_controller','sub',pg_temp.id(99),
- 'tenant_id',pg_temp.id(11),'iat',floor(extract(epoch from clock_timestamp())),
- 'exp',floor(extract(epoch from clock_timestamp()))+3600)::text,true);
+-- One observed issuance instant binds both claims. Independent clock reads can
+-- straddle a second and produce a forbidden 3601-second fixture credential.
+create function pg_temp.controller_claims() returns text language plpgsql as $$
+declare issued_epoch bigint:=floor(extract(epoch from clock_timestamp()));
+begin
+ return jsonb_build_object('role','axiom_prativedan_controller','sub',pg_temp.id(99),
+  'tenant_id',pg_temp.id(11),'iat',issued_epoch,'exp',issued_epoch+3600)::text;
+end$$;
+-- Deterministic boundary regression: a second clock read advances into the
+-- next second. The original helper fails both the lifetime and read-count gate.
+-- Everything here is newly created inside this test's owned transaction.
+savepoint controller_claim_clock_contract;
+create schema p123_clock_fixture;
+create sequence p123_clock_fixture.calls;
+create function p123_clock_fixture.clock_timestamp() returns timestamptz language sql volatile as $$
+ select to_timestamp(2000000000+case when nextval('p123_clock_fixture.calls')=1 then 0.999999 else 1.000001 end)
+$$;
+set local search_path=p123_clock_fixture,pg_catalog,public;
+do $$declare claims jsonb:=pg_temp.controller_claims()::jsonb;begin
+ if (claims->>'exp')::bigint-(claims->>'iat')::bigint<>3600
+  or currval('p123_clock_fixture.calls')<>1
+ then raise exception 'Controller fixture must bind claims to one issuance instant';end if;
+end$$;
+rollback to controller_claim_clock_contract;
+select set_config('request.jwt.claims',pg_temp.controller_claims(),true);
 grant select,update on p123_context to axiom_prativedan_controller;
-
-create function pg_temp.controller_claims() returns text language sql as $$select jsonb_build_object('role','axiom_prativedan_controller','sub',pg_temp.id(99),
- 'tenant_id',pg_temp.id(11),'iat',floor(extract(epoch from clock_timestamp())),
- 'exp',floor(extract(epoch from clock_timestamp()))+3600)::text$$;
 
 -- P123_CONCURRENCY_FIXTURE_END: reviewed request, no claim.
 set local role axiom_prativedan_controller;
