@@ -32,6 +32,9 @@ sql() {
   fi
 }
 sql < tests/database/bootstrap.sql
+# Explicit privileged role bootstrap only for this owned disposable fixture.
+python3 tests/database/lib/preprovision-local-custody-verifier.py --container "$container" --image "$image"
+
 python3 scripts/migrate-database.py --container "$container" --user postgres --database axiom_policy_test
 bash tests/database/migration-runner.sh "$container"
 # Prove the ordinary managed service role, not the Supabase image's implicit

@@ -43,3 +43,5 @@ export * from './assessment-source-operation';
 
 export * from './public-website-assets';
 export * from './public-website-asset-console';
+
+export * from './local-custody-policy';

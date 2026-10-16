@@ -56,6 +56,8 @@ echo '  ✓ Minted a JWT secret and its anon/service keys'
 # ─── An empty managed database, as Cloud SQL is ──────────────────────
 DB_PASSWORD='sh-test-password'
 docker run --rm -d --name "$DB" --network "$NET" -p 127.0.0.1:0:5432 \
+  --label com.axiom.fixture=database-policy-test --label com.axiom.fixture.project=axiom-db-tests \
+  --label "com.axiom.owner-worktree=$(pwd -P)" \
   -e POSTGRES_PASSWORD="$DB_PASSWORD" "$PG_IMAGE" >/dev/null
 for _ in $(seq 1 60); do
   docker exec "$DB" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1 && break
@@ -118,6 +120,9 @@ enum_schema="$(PGPASSWORD="$DB_PASSWORD" psql -w "$HOST_DSN" -Atqc \
   "select n.nspname from pg_type t join pg_namespace n on n.oid=t.typnamespace where t.typname='factor_type'")"
 [ "$enum_schema" = "auth" ] || { echo "FAIL: factor_type was created in '${enum_schema}', not auth"; exit 1; }
 echo '  ✓ GoTrue created its enums in auth, not public'
+
+# Explicit privileged role bootstrap only for this owned disposable fixture.
+python3 tests/database/lib/preprovision-local-custody-verifier.py --container "$DB" --image "$PG_IMAGE"
 
 # ─── Our series, over GoTrue's schema ────────────────────────────────
 python3 scripts/migrate-database.py --dsn "$HOST_DSN" >/dev/null
