@@ -427,7 +427,7 @@ export async function requestLocalKeyMtls(options: {
     await endpoint(options.endpoint, false);
     const body = checked(requestSchema, options.request);
     request = frame(body);
-    return await options.source.withPublication(
+    const result = await options.source.withPublication(
       options.deadline,
       async (material, _lease, signal) => {
         const connected = new Promise<TLSSocket>((resolve, reject) => {
@@ -480,6 +480,12 @@ export async function requestLocalKeyMtls(options: {
         }
       },
     );
+    // The server leaf can expire while the final local health read awaits.
+    // Revalidate the pinned peer immediately before releasing received bytes;
+    // a legitimate completed peer close is allowed, but no new IO occurs here.
+    if (!socket || Date.now() >= options.deadline) throw new X509Refused();
+    options.identities.require(socket, 'server', options.serverIdentity);
+    return result;
   } catch {
     throw new X509Refused();
   } finally {

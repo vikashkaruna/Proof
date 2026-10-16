@@ -158,7 +158,7 @@ beforeAll(() => {
   sign('foreign-client', `URI:${uri('producer')}`, 'clientAuth', 'foreign');
 });
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
-function source(name: string, purpose: 'client' | 'server') {
+function source(name: string, purpose: 'client' | 'server', certificate = name) {
   let emit: (value: unknown) => void = () => {},
     fail = () => {};
   const health = vi.fn(async (): Promise<number | null> => Date.now() + 10000);
@@ -167,8 +167,8 @@ function source(name: string, purpose: 'client' | 'server') {
     svids: [
       {
         spiffeId: uri(name),
-        x509Svid: new X509Certificate(pem(name)).raw,
-        x509SvidKey: Buffer.from(generateKeyDer(name)),
+        x509Svid: new X509Certificate(pem(certificate)).raw,
+        x509SvidKey: Buffer.from(generateKeyDer(certificate)),
         bundle: new X509Certificate(pem('root')).raw,
       },
     ],
@@ -201,8 +201,12 @@ function generateKeyDer(name: string) {
     { stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000 },
   );
 }
-function fixture(window = 1500, endpoint: LocalKeyTlsEndpoint = { host: '127.0.0.1', port: 0 }) {
-  const server = source('server', 'server'),
+function fixture(
+  window = 1500,
+  endpoint: LocalKeyTlsEndpoint = { host: '127.0.0.1', port: 0 },
+  serverCertificate = 'server',
+) {
+  const server = source('server', 'server', serverCertificate),
     client = source('producer', 'client');
   const service = {
     wrap: vi.fn<LocalKeyService['wrap']>(async () => ({
@@ -303,6 +307,94 @@ describe('unmounted real TLS, owned loopback ephemeral generation only', () => {
     } finally {
       f.server.fail();
       f.client.fail();
+      await f.done.catch(() => {});
+    }
+  });
+  it('refuses release if a real server leaf expires during deferred final client health', async () => {
+    const name = 'short-server';
+    key(name);
+    openssl([
+      'req',
+      '-new',
+      '-key',
+      name + '.key',
+      '-subj',
+      '/CN=Owned local mTLS fixture',
+      '-out',
+      name + '.csr',
+    ]);
+    writeFileSync(join(directory, 'short-index.txt'), '');
+    writeFileSync(join(directory, 'short-serial.txt'), '1000\n');
+    writeFileSync(
+      join(directory, 'short-ca.cnf'),
+      `[ca]\ndefault_ca=owned\n[owned]\ndatabase=short-index.txt\nserial=short-serial.txt\nnew_certs_dir=.\ncertificate=root.pem\nprivate_key=root.key\ndefault_md=sha256\npolicy=policy\n[policy]\ncommonName=supplied\n[leaf]\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=clientAuth,serverAuth\nsubjectAltName=URI:${uri('server')}\n`,
+      { mode: 0o600 },
+    );
+    const now = Date.now(),
+      date = (ms: number) => new Date(ms).toISOString().replace(/\D/g, '').slice(0, 14) + 'Z';
+    openssl([
+      'ca',
+      '-config',
+      'short-ca.cnf',
+      '-batch',
+      '-notext',
+      '-in',
+      name + '.csr',
+      '-out',
+      name + '.pem',
+      '-extensions',
+      'leaf',
+      '-startdate',
+      date(now - 3600000),
+      '-enddate',
+      date(now + 2500),
+    ]);
+    const expiresAt = Date.parse(new X509Certificate(pem(name)).validTo);
+    const f = fixture(4500, { host: '127.0.0.1', port: 0 }, name);
+    let enter: () => void = () => {},
+      release: (value: number) => void = () => {},
+      clock: ReturnType<typeof vi.spyOn> | undefined;
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve;
+    });
+    let reads = 0;
+    f.client.health.mockImplementation(async () =>
+      ++reads === 3
+        ? new Promise<number>((resolve) => {
+            release = resolve;
+            enter();
+          })
+        : Date.now() + 10000,
+    );
+    let response: Promise<unknown> | undefined;
+    try {
+      response = requestLocalKeyMtls({
+        source: f.client.value,
+        identities: mappings,
+        serverIdentity: uri('server'),
+        endpoint: await f.listening,
+        deadline: f.deadline,
+        request,
+      });
+      void response.catch(() => {});
+      await Promise.race([
+        entered,
+        response.then(() => {
+          throw new Error('Final health not reached');
+        }),
+      ]);
+      await f.done;
+      expect(expiresAt + 1).toBeLessThan(f.deadline);
+      clock = vi.spyOn(Date, 'now').mockReturnValue(expiresAt + 1);
+      release(expiresAt + 10000);
+      await expect(response).rejects.toThrow();
+      expect(f.service.wrap).toHaveBeenCalledOnce();
+    } finally {
+      release(Date.now() + 10000);
+      clock?.mockRestore();
+      f.server.fail();
+      f.client.fail();
+      await response?.catch(() => {});
       await f.done.catch(() => {});
     }
   });
