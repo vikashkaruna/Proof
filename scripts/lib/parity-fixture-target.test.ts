@@ -2,7 +2,7 @@ import test from 'node:test';
 import childProcess from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import assert from 'node:assert/strict';
 import {
   selectParityFixture,
@@ -184,6 +184,45 @@ test('rejects a symlinked status before reading credentials or inspecting Docker
     });
     assert.throws(() => loadParityFixture(directory, {}), /canonical paths refused/);
     assert.equal(inspect.mock.callCount(), 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+// Exercise Playwright's real CommonJS TypeScript config loader, not tsx's ESM loader.
+test('registered browser helper loads in Playwright CommonJS config without CLI side effects', () => {
+  const repo = process.cwd();
+  const parent = join(repo, '.axiom-runtime');
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const directory = mkdtempSync(join(parent, 'parity-config-import-'));
+  try {
+    const config = join(directory, 'playwright.config.ts');
+    writeFileSync(
+      config,
+      `import { registeredBrowserRequested } from ${JSON.stringify(resolve(repo, 'scripts/lib/acceptance-public-asset-browser.ts'))};\nif (registeredBrowserRequested({})) throw new Error('unexpected fixture mode');\nexport default { testDir: ${JSON.stringify(directory)}, testMatch: 'absent.spec.ts' };\n`,
+      { mode: 0o600 },
+    );
+    const result = childProcess.spawnSync(
+      process.execPath,
+      [
+        resolve(repo, 'tests/e2e/node_modules/@playwright/test/cli.js'),
+        'test',
+        '--list',
+        '--pass-with-no-tests',
+        '--config',
+        config,
+      ],
+      {
+        cwd: repo,
+        encoding: 'utf8',
+        timeout: 10000,
+        env: { ...process.env, AXIOM_REGISTERED_WEBSITE_BROWSER: '' },
+      },
+    );
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Total: 0 tests/);
+    assert.equal(result.stderr.includes('Owned parity fixture refused'), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

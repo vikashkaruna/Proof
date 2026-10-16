@@ -14,7 +14,7 @@ import {
 import { isAbsolute, join, relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { loadParityFixture } from './parity-fixture-target.js';
+import { loadParityFixture } from './parity-fixture-target-core.js';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { z } from 'zod';
