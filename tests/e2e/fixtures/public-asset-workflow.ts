@@ -28,6 +28,38 @@ import {
   AssessmentRequestReceiptSchema,
 } from '../../../packages/types/src/index';
 
+/** Record one matching response body inside a pass-through route. A later
+ * Response.json() races the UI: once the page re-renders or navigates,
+ * Chromium may already have discarded the body. The bytes are the real
+ * server's; the route only reads them before fulfilling unchanged. */
+async function retainBody(
+  page: Page,
+  pathname: (path: string) => boolean,
+  method: 'GET' | 'POST',
+): Promise<() => Promise<unknown>> {
+  let text: string | undefined;
+  const glob = '**/api/bff/v1/**';
+  const handler = async (route: import('@playwright/test').Route) => {
+    const request = route.request();
+    if (
+      request.method() !== method ||
+      !pathname(new URL(request.url()).pathname) ||
+      text !== undefined
+    )
+      return route.fallback();
+    const response = await route.fetch();
+    const body = await response.text();
+    text = body;
+    await route.fulfill({ response, body });
+  };
+  await page.route(glob, handler);
+  return async () => {
+    await expect.poll(() => text !== undefined, { timeout: 15_000 }).toBe(true);
+    await page.unroute(glob, handler);
+    return JSON.parse(text!) as unknown;
+  };
+}
+
 const operationPath = '/api/bff/v1/public-website-assets/operations';
 /** Fixed diagnostic labels and public status/equality booleans; never identifiers or response text. */
 function targetSelectionCheckpoint(
@@ -283,6 +315,7 @@ export async function registeredWebsiteSourceInBrowser(
     .getByLabel('I reviewed this exact retained request and authorize its retry.')
     .check({ timeout: 15_000 });
   process.stdout.write('[registered-website-stage] capture-exact-replay\n');
+  const replayResponseBody = await retainBody(page, (p) => p === operationPath, 'POST');
   const replayResponse = page.waitForResponse(
     (r) => new URL(r.url()).pathname === operationPath && r.request().method() === 'POST',
     { timeout: 15_000 },
@@ -298,7 +331,9 @@ export async function registeredWebsiteSourceInBrowser(
   expect(replay.request().headers()['x-expected-actor-id']).toBe(
     firstHeaders['x-expected-actor-id'],
   );
-  const association = publicWebsiteAssetOperationSchema.parse((await replay.json()).data);
+  const association = publicWebsiteAssetOperationSchema.parse(
+    ((await replayResponseBody()) as { data: unknown }).data,
+  );
   expect({ ...association, replayed: false }).toEqual(committed);
   expect(association.replayed).toBe(true);
   await expect(restored).toHaveCount(0);
@@ -326,6 +361,11 @@ export async function registeredWebsiteSourceInBrowser(
     workflow.getByRole('button', { name: 'Record source binding', exact: true }),
   ).toBeEnabled();
   process.stdout.write('[registered-website-stage] source-binding\n');
+  const bindingResponseBody = await retainBody(
+    page,
+    (p) => p === '/api/bff/v1/public-source-bindings',
+    'POST',
+  );
   const bindingResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname === '/api/bff/v1/public-source-bindings' &&
@@ -337,10 +377,17 @@ export async function registeredWebsiteSourceInBrowser(
     .click({ timeout: 15_000 });
   const bindingSaved = await bindingResponse;
   expect(bindingSaved.status()).toBe(201);
-  const binding = recordedPublicSourceBindingSchema.parse((await bindingSaved.json()).data);
+  const binding = recordedPublicSourceBindingSchema.parse(
+    ((await bindingResponseBody()) as { data: unknown }).data,
+  );
   expect(binding.runtime_binding.tenant_id).toBe(config.tenantId);
   expect(binding.runtime_binding.check_id).toBe(associationSnapshot.checkId);
   process.stdout.write('[registered-website-stage] drishti\n');
+  const drishtiResponseBody = await retainBody(
+    page,
+    (p) => p.endsWith('/agents/drishti/run'),
+    'POST',
+  );
   const drishtiResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname.endsWith('/agents/drishti/run') && r.request().method() === 'POST',
@@ -351,7 +398,9 @@ export async function registeredWebsiteSourceInBrowser(
     .click({ timeout: 15_000 });
   const drishtiSaved = await drishtiResponse;
   expect(drishtiSaved.status()).toBe(201);
-  const drishti = publicAgentObservationSchema.parse((await drishtiSaved.json()).data);
+  const drishti = publicAgentObservationSchema.parse(
+    ((await drishtiResponseBody()) as { data: unknown }).data,
+  );
   if (drishti.agent !== 'drishti') throw new Error('Actual Drishti output refused');
   expect(drishti.binding_id).toBe(binding.binding_id);
   expect(drishti.output.observation.private_facts).toEqual({
@@ -375,6 +424,11 @@ export async function registeredWebsiteSourceInBrowser(
     .click({ timeout: 15_000 });
   await expect(workflow).toContainText('Selected Drishti observation: ' + drishti.observation_id);
   process.stdout.write('[registered-website-stage] vibhaag\n');
+  const vibhaagResponseBody = await retainBody(
+    page,
+    (p) => p.endsWith('/agents/vibhaag/run'),
+    'POST',
+  );
   const vibhaagResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname.endsWith('/agents/vibhaag/run') && r.request().method() === 'POST',
@@ -385,7 +439,9 @@ export async function registeredWebsiteSourceInBrowser(
     .click({ timeout: 15_000 });
   const vibhaagSaved = await vibhaagResponse;
   expect(vibhaagSaved.status()).toBe(201);
-  const vibhaag = publicAgentObservationSchema.parse((await vibhaagSaved.json()).data);
+  const vibhaag = publicAgentObservationSchema.parse(
+    ((await vibhaagResponseBody()) as { data: unknown }).data,
+  );
   if (vibhaag.agent !== 'vibhaag') throw new Error('Actual Vibhaag output refused');
   expect(vibhaag.binding_id).toBe(binding.binding_id);
   expect(vibhaag.output.indicators).toHaveLength(1);
@@ -404,6 +460,7 @@ export async function registeredWebsiteSourceInBrowser(
     workflow.getByRole('heading', { name: 'Vibhaag structural indicators', exact: true }),
   ).toBeVisible();
   process.stdout.write('[registered-website-stage] control-evidence\n');
+  const reviewResponseBody = await retainBody(page, (p) => p.endsWith('/control-review'), 'GET');
   const reviewResponse = page.waitForResponse(
     (r) => new URL(r.url()).pathname.endsWith('/control-review') && r.request().method() === 'GET',
     { timeout: 15_000 },
@@ -414,7 +471,7 @@ export async function registeredWebsiteSourceInBrowser(
   const evidenceResponse = await reviewResponse;
   expect(evidenceResponse.status()).toBe(200);
   const evidence = publicControlAssessmentV2Schema.parse(
-    (await evidenceResponse.json()).data.assessment,
+    ((await reviewResponseBody()) as { data: { assessment: unknown } }).data.assessment,
   );
   const evidenceUi = page.getByRole('region', { name: 'Website source control review' });
   await expect(evidenceUi).toContainText('Human review required');
@@ -488,6 +545,11 @@ export async function registeredWebsiteSourceInBrowser(
     .getByLabel(/I reviewed these declarations and authorise recording/)
     .check({ timeout: 15_000 });
   process.stdout.write('[registered-website-stage] human-review\n');
+  const humanResponseBody = await retainBody(
+    page,
+    (p) => p === '/api/bff/v1/public-control-review-sets',
+    'POST',
+  );
   const humanResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname === '/api/bff/v1/public-control-review-sets' &&
@@ -501,7 +563,7 @@ export async function registeredWebsiteSourceInBrowser(
   expect(humanSaved.status()).toBe(201);
   const review = publicControlReviewSetAnyRowSchema
     .safeExtend({ snapshot: publicControlReviewSetAnySnapshotSchema })
-    .parse((await humanSaved.json()).data.review);
+    .parse(((await humanResponseBody()) as { data: { review: unknown } }).data.review);
   expect(review.snapshot.version).toBe(2);
   expect(review.snapshot.request.version).toBe(2);
   if (review.snapshot.request.version !== 2) throw new Error('Registered review downgrade refused');
@@ -522,6 +584,11 @@ export async function registeredWebsiteSourceInBrowser(
     .getByLabel(/I request Parikshan using this exact recorded human review/)
     .check({ timeout: 15_000 });
   process.stdout.write('[registered-website-stage] assessment-submit\n');
+  const requestResponseBody = await retainBody(
+    page,
+    (p) => p === '/api/bff/v1/assessment/jobs',
+    'POST',
+  );
   const requestResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname === '/api/bff/v1/assessment/jobs' &&
@@ -533,7 +600,7 @@ export async function registeredWebsiteSourceInBrowser(
     .click({ timeout: 15_000 });
   const acceptedResponse = await requestResponse;
   expect(acceptedResponse.status()).toBe(202);
-  const accepted = AssessmentRequestReceiptSchema.parse(await acceptedResponse.json());
+  const accepted = AssessmentRequestReceiptSchema.parse(await requestResponseBody());
   const requestText = acceptedResponse.request().postData()!;
   const submission = validateRegisteredSubmission(config, {
     version: 1,
