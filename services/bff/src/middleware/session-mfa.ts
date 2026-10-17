@@ -1,6 +1,6 @@
 import { createMiddleware } from 'hono/factory';
 import { isAuthBypassEnabled } from '@axiom/config';
-import type { MfaService } from '../services/mfa.js';
+import type { MfaService, SessionAccess } from '../services/mfa.js';
 import type { Variables } from '../types.js';
 import { logger } from '../lib/logger.js';
 
@@ -46,11 +46,38 @@ const QUARANTINE_EXEMPT_ROOT = '/v1/mfa';
  */
 const authBypass = isAuthBypassEnabled();
 
+/**
+ * While an account is under founder-led recovery (0152) its fresh session may
+ * reach only these: read its own status, and bind/enrol through the recovery
+ * grant. Ordinary enrolment, challenges and every product route are closed so
+ * nothing can race the reset.
+ */
+const RECOVERY_SUBJECT_ROUTES = ['/v1/mfa/status', '/v1/mfa/recovery/beneficiary'];
+
 export function requireSessionMfa(mfa: MfaService) {
   return createMiddleware<{ Variables: Variables }>(async (c, next) => {
     if (authBypass) return next();
 
     const path = c.req.path;
+    const user = c.get('user');
+
+    const access = c.get('sessionAccess');
+    if (access?.recovery) {
+      if (RECOVERY_SUBJECT_ROUTES.some((r) => path === r || path.startsWith(`${r}/`))) {
+        return next();
+      }
+      return c.json(
+        {
+          error: {
+            code: 'mfa_recovery_in_progress',
+            message: 'Your account is being recovered. Complete the recovery steps first.',
+            details: { recovery: access.recovery },
+          },
+        },
+        403,
+      );
+    }
+
     if (path === QUARANTINE_EXEMPT_ROOT || path.startsWith(`${QUARANTINE_EXEMPT_ROOT}/`))
       return next();
 
@@ -65,8 +92,6 @@ export function requireSessionMfa(mfa: MfaService) {
 
     const required = await mfa.requiresLoginMfa({ tenantId, role });
     if (!required) return next();
-
-    const user = c.get('user');
 
     if (!(await mfa.isEnrolled(user.id))) {
       logger.warn({ userId: user.id, tenantId, role }, 'MFA required but no factor enrolled');
@@ -101,6 +126,43 @@ export function requireSessionMfa(mfa: MfaService) {
       );
     }
 
+    return next();
+  });
+}
+
+/**
+ * The account fence (0152), mounted directly after authentication so that it
+ * precedes tenant resolution and every exemption, including /mfa and the
+ * tenantless routes. A JWT minted before a recovery cutoff stays
+ * cryptographically valid until it expires; this is what ends it. The result
+ * is kept for `requireSessionMfa`, which confines an account under recovery.
+ */
+export function requireCurrentSession(mfa: MfaService) {
+  return createMiddleware<{ Variables: Variables }>(async (c, next) => {
+    if (authBypass) return next();
+    const user = c.get('user');
+    let access: SessionAccess;
+    try {
+      access = await mfa.sessionAccess({ userId: user.id, sessionId: c.get('sessionId') ?? null });
+    } catch (err) {
+      logger.error({ userId: user.id, err: (err as Error).message }, 'session access unreadable');
+      return c.json(
+        { error: { code: 'session_access_unavailable', message: 'Try again shortly.' } },
+        503,
+      );
+    }
+    if (!access.sessionCurrent) {
+      return c.json(
+        {
+          error: {
+            code: 'session_superseded',
+            message: 'This session was ended by an account recovery. Sign in again.',
+          },
+        },
+        401,
+      );
+    }
+    c.set('sessionAccess', access);
     return next();
   });
 }

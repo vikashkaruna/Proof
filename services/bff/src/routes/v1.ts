@@ -1,3 +1,4 @@
+import { mfaRecoveryRoutes } from './mfa-recovery.js';
 import { localCustodyPolicyRoutes } from './local-custody-policy.js';
 import { engagementIntakeRoutes } from './engagement-intake.js';
 import { monitoringOutcomeRoutes } from './monitoring-outcomes.js';
@@ -262,6 +263,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', catalogueReferenceRoutes());
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', localCustodyPolicyRoutes({ mfa: deps.mfa }));
+  app.route('/', mfaRecoveryRoutes({ mfa: deps.mfa }));
   app.route('/', publicWebsiteAssetRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', publicWebsiteControlReviewRoutes());
   app.route('/', publicControlReviewSetRoutes());
