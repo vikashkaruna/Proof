@@ -4,6 +4,7 @@ import { moduleBarProps } from '@/lib/module-bar';
 import { redirect } from 'next/navigation';
 import { authorize } from '@axiom/types';
 import { requireTenantContext, Capability } from '@/lib/tenant-context';
+import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +13,8 @@ export default async function ApprovalPage() {
   // decided per action (its action_type is the action class, as the BFF
   // approve route uses), so out-of-scope actions are shown but not offered.
   const { supabase, tenantId, role, approvalScopes } = await requireTenantContext();
-  if (!authorize(Capability.PLAN_APPROVE, { role }).allowed) redirect('/portal?error=forbidden');
+  if (!authorize(routeCapability('/approval'), { role }).allowed)
+    redirect('/portal?error=forbidden');
   const scoped = (approvalScopes ?? []).length > 0;
   const inScope = (actionClass: string | null) =>
     authorize(Capability.PLAN_APPROVE, {
