@@ -1,4 +1,5 @@
 'use client';
+import { formatDateTime } from '@/lib/display-time';
 
 import Link from 'next/link';
 import {
@@ -171,7 +172,8 @@ function CheckResult({
       </div>
       <p className="break-all text-slate-700">{check.finalUrl}</p>
       <p className="text-slate-600">
-        Fetched <time dateTime={check.checkedAt}>{check.checkedAt}</time> · {check.bytes} bytes
+        Fetched <time dateTime={check.checkedAt}>{formatDateTime(check.checkedAt)}</time> ·{' '}
+        {check.bytes} bytes
       </p>
       {canOpenDiscovery && (
         <Link

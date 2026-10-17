@@ -132,6 +132,7 @@ services:
     ports:
       - '0.0.0.0:${WEB_PORT:-3001}:3001'
     environment:
+      - AXIOM_DISPLAY_TIMEZONE=${AXIOM_DISPLAY_TIMEZONE:-Asia/Kolkata}
       - NODE_ENV=production
       - ENVIRONMENT=staging
       - NEXT_PUBLIC_BFF_URL=${NEXT_PUBLIC_BFF_URL:-http://${HOST_IP:-localhost}:4000}

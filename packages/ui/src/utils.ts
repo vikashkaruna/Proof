@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { formatInDisplayZone, type Instant } from './display-time';
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
@@ -39,29 +40,29 @@ export function formatPercent(value: number | null | undefined, digits = 0): str
   return `${value.toFixed(digits)}%`;
 }
 
-export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '—';
-  return new Intl.DateTimeFormat('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(d);
+/**
+ * Calendar date in the deployment display zone (default IST), never the
+ * browser's or the server's own. Storage stays UTC; see display-time.ts.
+ */
+export function formatDate(value: Instant, zone?: string): string {
+  return formatInDisplayZone(value, { day: '2-digit', month: 'short', year: 'numeric' }, zone);
 }
 
-export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '—';
-  return new Intl.DateTimeFormat('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(d);
+/** Date and 24-hour time in the display zone, with the zone named (e.g. IST). */
+export function formatDateTime(value: Instant, zone?: string): string {
+  return formatInDisplayZone(
+    value,
+    {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+      timeZoneName: 'short',
+    },
+    zone,
+  );
 }
 
 export function relativeTime(iso: string | null | undefined): string {

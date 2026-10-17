@@ -1,4 +1,5 @@
 'use client';
+import { formatDateTime } from '@/lib/display-time';
 
 import {
   cloneElement,
@@ -949,7 +950,7 @@ function Panel({
                     : `Policy ${row.payload.decision}`}
             </h3>
             <p className="mt-1 break-all text-xs text-slate-500">
-              Record {row.id} · audit receipt {row.receipt_id} · {row.created_at}
+              Record {row.id} · audit receipt {row.receipt_id} · {formatDateTime(row.created_at)}
             </p>
             {row.kind !== 'policy_review' && (
               <details className="mt-3">

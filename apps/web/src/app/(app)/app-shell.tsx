@@ -1,5 +1,6 @@
 'use client';
 
+import { formatTime } from '@/lib/display-time';
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -739,10 +740,7 @@ export function AppShell({
                             {alert.severity}
                           </span>
                           <span className="text-[10px] text-slate-400">
-                            {new Date(alert.created_at).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                            {formatTime(alert.created_at)}
                           </span>
                         </div>
                         <p className="font-medium text-slate-800 line-clamp-1">{alert.title}</p>
