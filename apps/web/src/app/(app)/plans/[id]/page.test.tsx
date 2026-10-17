@@ -38,6 +38,7 @@ vi.mock('@/lib/tenant-context', async () => {
       approvalScopes: [],
       isAxiomInternal: false,
       supabase: {
+        rpc: async () => ({ data: null, error: null }),
         from: () => {
           const q: Record<string, unknown> = {};
           for (const m of ['select', 'eq', 'order', 'limit']) q[m] = () => q;

@@ -14,6 +14,7 @@ vi.mock('@/lib/tenant-context', async (importOriginal) => ({
     userId: '89180000-0000-4000-8000-000000000002',
     role: state.role,
     supabase: {
+      rpc: async () => ({ data: [], error: null }),
       from: (table: string) => {
         const q = {
           select: () => q,

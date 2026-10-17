@@ -1,8 +1,15 @@
 import Link from 'next/link';
-import { can } from '@axiom/types';
+import {
+  PlanDecisionSummarySchema,
+  can,
+  summariseDryRuns,
+  summariseRollbacks,
+  type PlanDecisionSummary,
+  type SummaryTone,
+} from '@axiom/types';
 import { ProposalPanel } from './proposal-panel';
 import { OwnedTargetPanel } from './owned-target-panel';
-import { DataPlaceholder, PageHeader } from '@axiom/ui';
+import { DataPlaceholder, PageHeader, formatDateTime } from '@axiom/ui';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
 import { routeCapability } from '@/app/(app)/nav';
@@ -18,6 +25,17 @@ export default async function PlansListPage() {
     .select('id, title, status, version, created_at, library_version, purpose')
     .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false });
+
+  // Per-plan approval, dry-run and rollback state from the RECORDED runs and the
+  // decision records (migration 0157), read under RLS. If it cannot be read the
+  // list says so rather than inferring readiness from plan status.
+  const summariesRes = await supabase.rpc('plan_decision_summaries', { p_tenant_id: tenantId });
+  const summariesParsed = summariesRes.error
+    ? null
+    : PlanDecisionSummarySchema.array().safeParse(summariesRes.data);
+  const summaries = summariesParsed?.success
+    ? new Map(summariesParsed.data.map((row) => [row.plan_id, row]))
+    : null;
 
   const ownedEnabled =
     process.env.AXIOM_OWNED_SYNTHETIC_ENABLED === 'true' &&
@@ -84,6 +102,12 @@ export default async function PlansListPage() {
                     Status {plan.status} · Version {plan.version} · Library{' '}
                     {plan.library_version ?? 'not recorded'}
                   </p>
+                  {plan.purpose !== 'source_review' && (
+                    <PlanStatusGrid
+                      status={plan.status}
+                      summary={summaries?.get(plan.id) ?? null}
+                    />
+                  )}
                 </div>
                 <Link
                   href={`/plans/${plan.id}`}
@@ -97,5 +121,61 @@ export default async function PlansListPage() {
         </ul>
       )}
     </section>
+  );
+}
+
+const TONE_CLASS: Record<SummaryTone, string> = {
+  ok: 'text-teal-800',
+  warn: 'text-amber-800',
+  bad: 'text-ember-700',
+  none: 'text-slate-500',
+};
+
+/** Approval, dry-run and rollback state plus decision times, for one plan row. */
+function PlanStatusGrid({
+  status,
+  summary,
+}: {
+  status: string;
+  summary: PlanDecisionSummary | null;
+}) {
+  if (!summary) {
+    return (
+      <p className="mt-2 text-xs text-ember-700">
+        Approval, dry-run and rollback status are unavailable for this plan.
+      </p>
+    );
+  }
+  const dryRuns = summariseDryRuns(summary);
+  const rollbacks = summariseRollbacks(summary);
+  const approval = `${status.replace(/_/g, ' ')} · ${summary.approved_actions}/${summary.action_count} actions approved`;
+  return (
+    <dl
+      aria-label="Plan approval status"
+      className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-xs sm:grid-cols-2 lg:grid-cols-5"
+    >
+      <Cell term="Approval" value={approval} tone={status === 'approved' ? 'ok' : 'none'} />
+      <Cell term="Dry runs (recorded)" value={dryRuns.label} tone={dryRuns.tone} />
+      <Cell term="Rollback" value={rollbacks.label} tone={rollbacks.tone} />
+      <Cell
+        term="Approved at"
+        value={summary.last_approved_at ? formatDateTime(summary.last_approved_at) : '—'}
+        tone="none"
+      />
+      <Cell
+        term="Rejected at"
+        value={summary.last_rejected_at ? formatDateTime(summary.last_rejected_at) : '—'}
+        tone="none"
+      />
+    </dl>
+  );
+}
+
+function Cell({ term, value, tone }: { term: string; value: string; tone: SummaryTone }) {
+  return (
+    <div>
+      <dt className="text-[10px] font-medium uppercase tracking-wider text-slate-500">{term}</dt>
+      <dd className={TONE_CLASS[tone]}>{value}</dd>
+    </div>
   );
 }

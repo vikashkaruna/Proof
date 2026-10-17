@@ -244,6 +244,83 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     return [{ revoked_factor_id: args['p_factor_id'] }];
   });
 
+  /**
+   * `action_row_approval_blockers` / `plan_approval_readiness` (migration 0157),
+   * minus the content-hash comparison the database suite owns: a recorded,
+   * successful, unexpired run linked from the action, and a validated rollback.
+   */
+  function actionBlockers(a: Row): string[] {
+    const blockers: string[] = [];
+    if (
+      ['executing', 'succeeded', 'failed', 'rolled_back'].includes(
+        String(a['execution_status'] ?? ''),
+      )
+    )
+      blockers.push('already_executed');
+    const run = (tables['dry_runs'] ?? []).find(
+      (d) =>
+        d['id'] === a['latest_dry_run_id'] &&
+        d['tenant_id'] === a['tenant_id'] &&
+        d['action_id'] === a['id'],
+    );
+    const fresh = (v: unknown) => typeof v === 'string' && Date.parse(v) > Date.now();
+    if (!run) {
+      blockers.push('no_recorded_dry_run');
+      if (a['dry_run_status'] !== 'dry_run_complete') blockers.push('dry_run_not_complete');
+    } else if (run['status'] === 'refused') blockers.push('dry_run_refused');
+    else if (run['status'] === 'failed') blockers.push('dry_run_failed');
+    else {
+      if (a['dry_run_status'] !== 'dry_run_complete') blockers.push('dry_run_not_complete');
+      if (!fresh(run['expires_at']) || !fresh(a['dry_run_expires_at']))
+        blockers.push('dry_run_expired');
+    }
+    if (a['rollback_validated'] !== true) blockers.push('rollback_not_validated');
+    return blockers;
+  }
+
+  rpcHandlers.set('plan_approval_readiness', (args) => {
+    const tenantId = args['p_tenant_id'];
+    const plan = (tables['remediation_plans'] ?? []).find(
+      (r) => r['id'] === args['p_plan_id'] && r['tenant_id'] === tenantId,
+    );
+    if (!plan) return null;
+    const approvable = ['draft', 'review', 'approved', 'cancelled'];
+    const actions = (tables['remediation_actions'] ?? [])
+      .filter((a) => a['tenant_id'] === tenantId && a['plan_id'] === plan['id'])
+      .sort((x, y) => Number(x['sequence'] ?? 0) - Number(y['sequence'] ?? 0));
+    return {
+      planId: plan['id'],
+      planStatus: plan['status'],
+      planApprovable: approvable.includes(String(plan['status'])),
+      approvableStatuses: approvable,
+      evaluatedAt: new Date().toISOString(),
+      actions: actions.map((a, i) => {
+        const blockers = actionBlockers(a);
+        const run = (tables['dry_runs'] ?? []).find((d) => d['id'] === a['latest_dry_run_id']);
+        return {
+          actionId: a['id'],
+          sequence: Number(a['sequence'] ?? i + 1),
+          actionType: String(a['action_type'] ?? 'data.mask'),
+          approvalStatus: String(a['approval_status'] ?? 'awaiting_approval'),
+          executionStatus: (a['execution_status'] as string | undefined) ?? null,
+          ready: blockers.length === 0,
+          blockers,
+          rollbackValidated: (a['rollback_validated'] as boolean | undefined) ?? null,
+          rollbackValidatedAt: (a['rollback_validated_at'] as string | undefined) ?? null,
+          dryRun: run
+            ? {
+                id: run['id'],
+                status: run['status'],
+                refusalReason: run['refusal_reason'] ?? null,
+                createdAt: run['created_at'],
+                expiresAt: run['expires_at'],
+              }
+            : null,
+        };
+      }),
+    };
+  });
+
   rpcHandlers.set('issue_reviewed_plan_approval', (args) => {
     const tenantId = args['p_tenant_id'] as string;
     const planId = args['p_plan_id'] as string;
@@ -315,6 +392,11 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
       )
     ) {
       return { decision: 'actions_not_ready' };
+    }
+    // The 0157 trigger: marking an action approved without a recorded run raises.
+    const unrecorded = actions.find((a) => actionBlockers(a).length > 0);
+    if (unrecorded) {
+      throw Object.assign(new Error('approval_requires_recorded_dry_run'), { code: 'P0001' });
     }
 
     if ((args['p_signed_payload'] as Row)?.['contentDigest'] !== args['p_expected_digest']) {
@@ -569,7 +651,11 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     try {
       return { data: handler(args), error: null };
     } catch (error) {
-      if (error instanceof Error && 'code' in error && error.code === 'PT409')
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        (error.code === 'PT409' || error.code === 'P0001')
+      )
         return { data: null, error: { code: error.code, message: error.message } };
       throw error;
     }
@@ -587,4 +673,32 @@ export function createFakeDb(initial: Record<string, Row[]> = {}): FakeDb {
     },
     failNext: (name) => failing.add(name),
   };
+}
+
+/**
+ * Record a dry run for a seeded action the way `record_dry_run` would leave it:
+ * a `dry_runs` row, linked from the action. Without one, 0157 refuses approval
+ * however the action's inline cache reads.
+ */
+export function seedRecordedDryRun(
+  db: FakeDb,
+  action: Record<string, unknown>,
+  opts: { status?: 'succeeded' | 'refused' | 'failed'; expiresAt?: string } = {},
+): Record<string, unknown> {
+  const status = opts.status ?? 'succeeded';
+  const run = db.seed('dry_runs', {
+    tenant_id: action['tenant_id'],
+    plan_id: action['plan_id'],
+    action_id: action['id'],
+    status,
+    diff: status === 'succeeded' ? { changes: [] } : null,
+    refusal_reason: status === 'succeeded' ? null : 'action_type_not_simulable',
+    expires_at:
+      opts.expiresAt ??
+      (typeof action['dry_run_expires_at'] === 'string'
+        ? action['dry_run_expires_at']
+        : new Date(Date.now() + 60 * 60_000).toISOString()),
+  });
+  action['latest_dry_run_id'] = run['id'];
+  return run;
 }

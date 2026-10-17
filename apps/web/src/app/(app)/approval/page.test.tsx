@@ -27,6 +27,7 @@ beforeEach(() => {
   state.capability.mockReset().mockImplementation(async () => ({
     tenantId: 'tenant-1',
     supabase: {
+      rpc: async () => ({ data: [], error: null }),
       from: (table: string) => {
         const query = {
           select: () => query,

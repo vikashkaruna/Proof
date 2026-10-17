@@ -41,6 +41,7 @@ vi.mock('@/lib/tenant-context', () => {
     tenantId: 'tenant-alpha',
     tenantName: 'Alpha Org',
     supabase: {
+      rpc: async () => ({ data: [], error: null }),
       from: () => {
         const query = {
           select: () => query,
