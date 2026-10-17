@@ -40,6 +40,8 @@ vi.mock('@/lib/tenant-context', () => {
   const context = {
     tenantId: 'tenant-alpha',
     tenantName: 'Alpha Org',
+    role: 'approver',
+    approvalScopes: [] as string[],
     supabase: {
       from: () => {
         const query = {
