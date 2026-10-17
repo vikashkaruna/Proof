@@ -9,11 +9,11 @@
 import { createHash } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { canonicalJson } from '@axiom/ledger';
+import { canonicalJson } from '../../packages/ledger/src/canonicalise.js';
 import {
   buildQuestionnaireEvidenceReport,
   encodeQuestionnaireEvidenceSource,
-} from '../../packages/report-kit/src/questionnaire-evidence-report';
+} from '../../packages/report-kit/src/questionnaire-evidence-report.js';
 
 const sha = (t: string) => createHash('sha256').update(t, 'utf8').digest('hex');
 export const PARITY_SQL_PATH = join(
