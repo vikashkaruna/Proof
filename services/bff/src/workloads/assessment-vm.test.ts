@@ -516,3 +516,66 @@ it('refuses a service-role gateway key even with a scoped bearer credential', as
     controllerBackendCredentials(f.filename, backendEnvironment, tenant),
   ).rejects.toThrow('Controller backend credentials refused');
 });
+it('composes local custody without cloud policy reads and claims through the local RPC', async () => {
+  const f = fixture();
+  const pins = {
+    custodyPolicyId: randomUUID(),
+    custodyPolicySha256: 'a'.repeat(64),
+    keyPolicySha256: 'b'.repeat(64),
+    activationEventId: randomUUID(),
+    activationEpoch: 1,
+    deploymentBindingSha256: 'c'.repeat(64),
+  };
+  const workloadId = randomUUID();
+  const bindings: unknown[] = [];
+  const wrapper = { wrap: vi.fn(), unwrap: vi.fn() };
+  const service = await composeVmAssessmentController(
+    {
+      ...config,
+      keys: {
+        provider: 'local',
+        workloadId,
+        custody: pins,
+        keyService: {
+          spiffeId: 'spiffe://local.axiomproof.test/service/local-key-service',
+          endpoint: { host: '127.0.0.1', port: 7443 },
+        },
+        workload: {
+          socketPath: '/run/workload/api.sock',
+          spiffeId: 'spiffe://local.axiomproof.test/controller/assessment',
+          issuerNodeId: config.issuerNodeId,
+        },
+      },
+    },
+    f.db,
+    {
+      localWrapper: ((_c: unknown, binding: unknown) => {
+        bindings.push(binding);
+        return wrapper;
+      }) as never,
+    },
+  );
+  expect(f.from).not.toHaveBeenCalledWith('assessment_dispatch_key_policies');
+  expect(bindings).toEqual([{ tenantId: tenant, workloadId, role: 'controller' }]);
+  vi.spyOn(AssessmentDispatch.prototype, 'resolve').mockResolvedValue({
+    expected: {
+      tenantId: tenant,
+      runId: randomUUID(),
+      engagementId: randomUUID(),
+      correlationId: randomUUID(),
+      inputHash: 'a'.repeat(64),
+    },
+    claimed: false,
+  });
+  vi.spyOn(AssessmentConfirmation.prototype, 'confirm').mockRejectedValue(new Error('no'));
+  f.rpc.mockResolvedValue({ data: null, error: { message: 'refused' } } as never);
+  await service.controller.run(tenant, randomUUID()).catch(() => {});
+  const calls = f.rpc.mock.calls as unknown as [string, Record<string, unknown>][];
+  const claim = calls.find((c) => c[0].startsWith('claim_'));
+  expect(claim?.[0]).toBe('claim_local_assessment_dispatch');
+  expect(claim?.[1]).toMatchObject({
+    p_custody_policy_id: pins.custodyPolicyId,
+    p_key_policy_sha256: pins.keyPolicySha256,
+  });
+  expect(wrapper.unwrap).not.toHaveBeenCalled();
+});

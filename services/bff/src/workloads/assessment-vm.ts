@@ -28,6 +28,7 @@ import { issuerNodeId, IssuerSyncHealth, SyncedWorkloadTrust } from './issuer-sy
 import { WorkloadAuthenticator, SupabaseWorkloadRegistrationStore } from './registration.js';
 import { WorkloadTaskAuthority, SupabaseWorkloadTaskStore } from './tasks.js';
 import { GoogleSchedulerIdentity, schedulerIdentityConfiguration } from './scheduler-identity.js';
+import { localCustodyKeysConfiguration, localDispatchKeyWrapper } from './local-custody-client.js';
 
 export const vmControllerConfiguration = z
   .object({
@@ -43,13 +44,17 @@ export const vmControllerConfiguration = z
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/)
       .refine((s) => s.trim() === s),
     launcher: assessmentContainerConfiguration,
-    keys: z
-      .object({
-        provider: z.enum(['aws', 'gcp']),
-        primary: z.string().max(500),
-        retiring: z.array(z.string().max(500)).max(9),
-      })
-      .strict(),
+    keys: z.union([
+      z
+        .object({
+          provider: z.enum(['aws', 'gcp']),
+          primary: z.string().max(500),
+          retiring: z.array(z.string().max(500)).max(9),
+        })
+        .strict(),
+      // Operator-run local key service; the controller only unwraps.
+      localCustodyKeysConfiguration.extend({ workloadId: z.uuid() }).strict(),
+    ]),
     scheduler: schedulerIdentityConfiguration,
   })
   .strict();
@@ -65,15 +70,21 @@ export async function composeVmAssessmentController(
     awsKms?: DispatchAwsKmsPort;
     gcpKms?: DispatchGcpKmsPort;
     schedulerKeys?: JWTVerifyGetKey;
+    localWrapper?: typeof localDispatchKeyWrapper;
   } = {},
 ) {
   try {
     const config = vmControllerConfiguration.parse(configuration);
     const tenant = config.tenantId as TenantId;
-    const policy = new DispatchKeyPolicy(
-      config.keys.provider,
-      new Map([[tenant, { primary: config.keys.primary, retiring: config.keys.retiring }]]),
-    );
+    const keys = config.keys;
+    // Cloud key references are validated before any backend access.
+    const policy =
+      keys.provider === 'local'
+        ? undefined
+        : new DispatchKeyPolicy(
+            keys.provider,
+            new Map([[tenant, { primary: keys.primary, retiring: keys.retiring }]]),
+          );
     const launch = assessmentContainerFactory(config.launcher);
     const identity = new GoogleSchedulerIdentity(config.scheduler, ports.schedulerKeys);
     const health = new IssuerSyncHealth(config.issuerNodeId);
@@ -92,12 +103,24 @@ export async function composeVmAssessmentController(
       { socketPath: config.workloadSocket, trustDomain: config.trustDomain },
       trust,
     );
-    const revision = await new DispatchPolicyStore(db).currentRevision(policy, tenant);
-    const wrapper =
-      config.keys.provider === 'aws'
-        ? new AwsDispatchKeyWrapper(policy, ports.awsKms)
-        : new GcpDispatchKeyWrapper(policy, ports.gcpKms);
-    const dispatch = new AssessmentDispatch(db, wrapper, new Map([[tenant, revision]]));
+    let dispatch: AssessmentDispatch;
+    if (keys.provider === 'local') {
+      const wrapper = (ports.localWrapper ?? localDispatchKeyWrapper)(keys, {
+        tenantId: tenant,
+        workloadId: keys.workloadId.toLowerCase(),
+        role: 'controller',
+      });
+      // Claims go through claim_local_assessment_dispatch with these pins.
+      dispatch = new AssessmentDispatch(db, wrapper, new Map(), undefined, keys.custody);
+    } else {
+      if (!policy) throw new Error('key policy refused');
+      const revision = await new DispatchPolicyStore(db).currentRevision(policy, tenant);
+      const wrapper =
+        keys.provider === 'aws'
+          ? new AwsDispatchKeyWrapper(policy, ports.awsKms)
+          : new GcpDispatchKeyWrapper(policy, ports.gcpKms);
+      dispatch = new AssessmentDispatch(db, wrapper, new Map([[tenant, revision]]));
+    }
     const requireTenant = (value: string) => {
       if (z.uuid().parse(value).toLowerCase() !== tenant) throw new Error('tenant refused');
     };
