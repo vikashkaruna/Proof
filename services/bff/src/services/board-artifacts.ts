@@ -1,4 +1,5 @@
 import { renderReviewedCoverageFirstReport } from '@axiom/report-kit/coverage-first-report';
+import { renderReviewedQuestionnaireEvidenceReport } from '@axiom/report-kit/questionnaire-evidence-report';
 /** Exact-version, reviewed board publication. Provider uncertainty stays pending. */
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -356,11 +357,17 @@ export class BoardArtifactService {
     let html: string;
     try {
       const header = JSON.parse(source.source_text);
-      if (header.schema_version === 4 && header.report_kind !== 'board') throw Error();
+      if (
+        (header.schema_version === 4 || header.schema_version === 5) &&
+        header.report_kind !== 'board'
+      )
+        throw Error();
       html = (
-        JSON.parse(source.source_text).schema_version === 4
-          ? renderReviewedCoverageFirstReport
-          : renderReviewedBoardHtml
+        header.schema_version === 5
+          ? renderReviewedQuestionnaireEvidenceReport
+          : header.schema_version === 4
+            ? renderReviewedCoverageFirstReport
+            : renderReviewedBoardHtml
       )({
         sourceText: source.source_text,
         sourceSha256: source.source_sha256,
@@ -587,9 +594,11 @@ export class BoardArtifactService {
           content_sha256: report.content_sha256,
           review_sha256: review.review_sha256,
           renderer_version:
-            JSON.parse(source.source_text).schema_version === 4
-              ? 'chromium-board-evidence-v5'
-              : 'chromium-board-v1',
+            JSON.parse(source.source_text).schema_version === 5
+              ? 'chromium-board-questionnaire-evidence-v6'
+              : JSON.parse(source.source_text).schema_version === 4
+                ? 'chromium-board-evidence-v5'
+                : 'chromium-board-v1',
           artifacts,
         },
         p_correlation_id: randomUUID(),

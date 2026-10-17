@@ -25,6 +25,7 @@ import { moduleBarProps } from '@/lib/module-bar';
 import { BoardWorkflow } from './board-workflow';
 import { AuditorWorkflow } from './auditor-workflow';
 import { CoverageFirstPreview } from './coverage-first-preview';
+import { QuestionnaireEvidencePreview } from './questionnaire-evidence-preview';
 
 const date = (value: string) => new Date(value).toLocaleString();
 
@@ -726,6 +727,7 @@ export function ReportProof({ report }: { report: ReportDetail }) {
         <p className="break-all font-mono text-xs">Content SHA-256: {report.contentHash}</p>
       )}
       <CoverageFirstPreview report={report} />
+      <QuestionnaireEvidencePreview report={report} />
       {preview?.success && (
         <>
           <h4 className="font-medium">Evidence inventory</h4>

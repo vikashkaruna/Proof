@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
+import { unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
+import { buildPramaanAuditorArchive, buildPramaanBoardArchive } from './pramaan-archive';
 import { canonicalJson } from '@axiom/ledger';
 import { packetHash, sourcePacket } from './board-v2.fixture';
 import {
@@ -186,5 +189,43 @@ describe('questionnaire evidence report (source5/document6)', () => {
     expect(
       QuestionnaireEvidenceDocumentV6Schema.safeParse({ ...d, schema_version: 5 }).success,
     ).toBe(false);
+  });
+});
+
+describe.each(['board', 'auditor'] as const)('Pramaan source5 %s exact provider bytes', (kind) => {
+  it('validates the questionnaire source and retains the complete policy wrapper', () => {
+    const frozen = envelope(kind);
+    const pdfBytes = Buffer.concat([Buffer.from('%PDF-'), Buffer.alloc(600)]);
+    const reportId = '77777777-7777-4777-8777-777777777777';
+    const input = {
+      tenantId: ids.tenantId,
+      engagementId: ids.engagementId,
+      reportId,
+      requestId: ids.requestId,
+      title: 'Evidence review',
+      sourceBytes: Buffer.from(frozen.text),
+      pdfBytes,
+      source: { id: ids.requestId, versionId: 'exact-source5', sha256: frozen.sha256 },
+      pdf: { id: reportId, versionId: 'exact-reviewed6-pdf', sha256: '' },
+    };
+    input.pdf.sha256 = createHash('sha256').update(pdfBytes).digest('hex');
+    const build = kind === 'board' ? buildPramaanBoardArchive : buildPramaanAuditorArchive;
+    const files = unzipSync(build(input).archive);
+    expect(Buffer.from(files['source/assessment.json']!).toString()).toBe(frozen.text);
+    expect(() => build({ ...input, tenantId: ids.engagementId })).toThrow();
+    for (const change of ['policy', 'nested-hash', 'kind'] as const) {
+      const raw = JSON.parse(frozen.text);
+      if (change === 'policy') raw.presentation_policy.metrics = 'published';
+      if (change === 'nested-hash') raw.retained_source.sha256 = 'f'.repeat(64);
+      if (change === 'kind') raw.report_kind = kind === 'board' ? 'auditor' : 'board';
+      const text = canonicalJson(raw);
+      expect(() =>
+        build({
+          ...input,
+          sourceBytes: Buffer.from(text),
+          source: { ...input.source, sha256: packetHash(text) },
+        }),
+      ).toThrow();
+    }
   });
 });
