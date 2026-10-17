@@ -26,7 +26,8 @@
     "./test-fixtures/public-control-report-v4": "./src/public-control-report-v4.test-helper.ts",
     "./coverage-first-source": "./src/coverage-first-source.ts",
     "./coverage-first-report": "./src/coverage-first-report.ts",
-    "./questionnaire-evidence-report": "./src/questionnaire-evidence-report.ts"
+    "./questionnaire-evidence-report": "./src/questionnaire-evidence-report.ts",
+    "./test-fixtures/board-v2": "./src/board-v2.fixture.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

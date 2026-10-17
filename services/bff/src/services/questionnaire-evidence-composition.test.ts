@@ -4,7 +4,7 @@ import {
   buildQuestionnaireEvidenceReport,
   encodeQuestionnaireEvidenceSource,
 } from '@axiom/report-kit/questionnaire-evidence-report';
-import { sourcePacket } from '../../../../packages/report-kit/src/board-v2.fixture';
+import { sourcePacket } from '@axiom/report-kit/test-fixtures/board-v2';
 import { BoardReportService } from './board-reports.js';
 import { StatutoryReportService } from './statutory-reports.js';
 import { evidenceFixture } from '../test/evidence-fixture.js';
