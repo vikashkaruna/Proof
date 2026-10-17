@@ -49,6 +49,7 @@ vi.mock('../services/approval.js', () => ({ createApprovalEngine: () => ({}) }))
 vi.mock('../services/ledger.js', () => ({ createLedgerService: () => ({}) }));
 vi.mock('../services/mfa.js', () => ({
   createMfaService: () => ({
+    sessionAccess: async () => ({ sessionCurrent: true, recovery: null }),
     requiresLoginMfa: async () => state.mfaRequired,
     isEnrolled: async () => false,
   }),
