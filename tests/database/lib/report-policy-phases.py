@@ -118,6 +118,10 @@ def plan(root: Path = ROOT) -> dict:
         <= set(files),
         "questionnaire155_parity_suite_required",
     )
+    need(
+        versions[-1] < 156 or "founder-recovers-owners.test.sql" in files,
+        "owner_recovery156_suite_required",
+    )
     return {
         "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),
