@@ -21,6 +21,7 @@ const props = {
   ],
   canRequest: false,
   founder: false,
+  canList: false,
 };
 
 describe('technical recorded register browser surface', () => {
@@ -33,5 +34,10 @@ describe('technical recorded register browser surface', () => {
     const html = renderToStaticMarkup(<TechnicalReviewsClient {...props} canRequest />);
     expect(html).toContain('Recorded plan');
     expect(html).toContain('Freeze source');
+  });
+  it('states that the role cannot list requests instead of claiming none exist', () => {
+    const html = renderToStaticMarkup(<TechnicalReviewsClient {...props} />);
+    expect(html).toContain('Your role cannot list technical register requests');
+    expect(html).not.toContain('No technical register requests are recorded');
   });
 });

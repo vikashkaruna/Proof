@@ -8,7 +8,11 @@ import { mkdtemp, writeFile, chmod, symlink, rm, realpath } from 'node:fs/promis
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { TenantId } from '@axiom/types';
 import { afterEach, expect, it, vi } from 'vitest';
-import { composeVmAssessmentController, vmControllerConfiguration } from './assessment-vm.js';
+import {
+  composeLocalAssessmentController,
+  composeVmAssessmentController,
+  vmControllerConfiguration,
+} from './assessment-vm.js';
 import * as controllerIdentity from './controller-identity.js';
 import * as containerRuntime from './assessment-container.js';
 import { WorkloadApiJwtTrust } from './workload-api-trust.js';
@@ -515,4 +519,128 @@ it('refuses a service-role gateway key even with a scoped bearer credential', as
   await expect(
     controllerBackendCredentials(f.filename, backendEnvironment, tenant),
   ).rejects.toThrow('Controller backend credentials refused');
+});
+it('composes local custody without cloud policy reads and claims through the local RPC', async () => {
+  const f = fixture();
+  const pins = {
+    custodyPolicyId: randomUUID(),
+    custodyPolicySha256: 'a'.repeat(64),
+    keyPolicySha256: 'b'.repeat(64),
+    activationEventId: randomUUID(),
+    activationEpoch: 1,
+    deploymentBindingSha256: 'c'.repeat(64),
+  };
+  const workloadId = randomUUID();
+  const bindings: unknown[] = [];
+  const wrapper = { wrap: vi.fn(), unwrap: vi.fn() };
+  const service = await composeVmAssessmentController(
+    {
+      ...config,
+      keys: {
+        provider: 'local',
+        workloadId,
+        custody: pins,
+        keyService: {
+          spiffeId: 'spiffe://local.axiomproof.test/service/local-key-service',
+          endpoint: { host: '127.0.0.1', port: 7443 },
+        },
+        workload: {
+          socketPath: '/run/workload/api.sock',
+          spiffeId: 'spiffe://local.axiomproof.test/controller/assessment',
+          issuerNodeId: config.issuerNodeId,
+        },
+      },
+    },
+    f.db,
+    {
+      localWrapper: ((_c: unknown, binding: unknown) => {
+        bindings.push(binding);
+        return wrapper;
+      }) as never,
+    },
+  );
+  expect(f.from).not.toHaveBeenCalledWith('assessment_dispatch_key_policies');
+  expect(bindings).toEqual([{ tenantId: tenant, workloadId, role: 'controller' }]);
+  vi.spyOn(AssessmentDispatch.prototype, 'resolve').mockResolvedValue({
+    expected: {
+      tenantId: tenant,
+      runId: randomUUID(),
+      engagementId: randomUUID(),
+      correlationId: randomUUID(),
+      inputHash: 'a'.repeat(64),
+    },
+    claimed: false,
+  });
+  vi.spyOn(AssessmentConfirmation.prototype, 'confirm').mockRejectedValue(new Error('no'));
+  f.rpc.mockResolvedValue({ data: null, error: { message: 'refused' } } as never);
+  await service.controller.run(tenant, randomUUID()).catch(() => {});
+  const calls = f.rpc.mock.calls as unknown as [string, Record<string, unknown>][];
+  const claim = calls.find((c) => c[0].startsWith('claim_'));
+  expect(claim?.[0]).toBe('claim_local_assessment_dispatch');
+  expect(claim?.[1]).toMatchObject({
+    p_custody_policy_id: pins.custodyPolicyId,
+    p_key_policy_sha256: pins.keyPolicySha256,
+  });
+  expect(wrapper.unwrap).not.toHaveBeenCalled();
+});
+it('composes the local co-located controller without scheduler identity, local custody only', async () => {
+  const f = fixture();
+  const { scheduler: _scheduler, keys: _keys, ...base } = config;
+  const local = {
+    ...base,
+    keys: {
+      provider: 'local' as const,
+      workloadId: randomUUID(),
+      custody: {
+        custodyPolicyId: randomUUID(),
+        custodyPolicySha256: 'a'.repeat(64),
+        keyPolicySha256: 'b'.repeat(64),
+        activationEventId: randomUUID(),
+        activationEpoch: 1,
+        deploymentBindingSha256: 'c'.repeat(64),
+      },
+      keyService: {
+        spiffeId: 'spiffe://local.axiomproof.test/service/local-key-service',
+        endpoint: { host: '127.0.0.1' as const, port: 7443 },
+      },
+      workload: {
+        socketPath: '/run/workload/api.sock',
+        spiffeId: 'spiffe://local.axiomproof.test/controller/assessment',
+        issuerNodeId: config.issuerNodeId,
+      },
+    },
+  };
+  const ports = { localWrapper: (() => ({ wrap: vi.fn(), unwrap: vi.fn() })) as never };
+  const service = await composeLocalAssessmentController(local, f.db, ports);
+  expect(service.controller).toBeDefined();
+  expect(service).not.toHaveProperty('identity');
+  expect(f.from).not.toHaveBeenCalledWith('assessment_dispatch_key_policies');
+  // Cloud keys and a scheduler block both belong to the VM entrypoint only.
+  await expect(
+    composeLocalAssessmentController({ ...base, keys: config.keys }, f.db, ports),
+  ).rejects.toThrow('Local assessment controller configuration refused');
+  await expect(
+    composeLocalAssessmentController({ ...local, scheduler: config.scheduler }, f.db, ports),
+  ).rejects.toThrow('Local assessment controller configuration refused');
+});
+it('accepts plain HTTP backends only for the local controller and only on this machine or network', async () => {
+  const f = await protectedFile();
+  await writeFile(f.filename, JSON.stringify(backendCredential()));
+  for (const url of ['http://127.0.0.1:54321', 'http://supabase_kong_axiom-owner-test:8000']) {
+    const env = { ...backendEnvironment, SUPABASE_URL: url };
+    await expect(controllerBackendCredentials(f.filename, env, tenant)).rejects.toThrow();
+    expect(
+      (await controllerBackendCredentials(f.filename, env, tenant, { localHttp: true })).url,
+    ).toBe(url);
+  }
+  for (const url of ['http://db.example.test', 'http://user:pw@127.0.0.1', 'ftp://127.0.0.1']) {
+    await expect(
+      controllerBackendCredentials(
+        f.filename,
+        { ...backendEnvironment, SUPABASE_URL: url },
+        tenant,
+        { localHttp: true },
+      ),
+    ).rejects.toThrow(/^Controller backend credentials refused$/);
+  }
 });

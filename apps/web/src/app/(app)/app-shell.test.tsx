@@ -825,6 +825,7 @@ it.each([
         plans={[]}
         canRequest={false}
         founder={false}
+        canList={false}
       />
     ),
     null,

@@ -18,6 +18,7 @@ import {
 } from './assessment-producer.js';
 import type { DispatchAwsKmsPort, DispatchGcpKmsPort } from './dispatch-key-wrappers.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { DispatchKeyWrapper } from './dispatch-payload.js';
 
 const T = 'aaaaaaaa-1111-4111-8111-111111111111',
   A = 'bbbbbbbb-2222-4222-8222-222222222222',
@@ -633,4 +634,89 @@ it('does not wrap or create a plain request when the generic SQL recovery fences
   await expect(p.request(T, A, parsed())).rejects.toThrow();
   expect(send).not.toHaveBeenCalled();
   expect(enqueue).not.toHaveBeenCalled();
+});
+
+describe('local custody producer', () => {
+  const pins = {
+    custodyPolicyId: '12121212-1212-4212-8212-121212121212',
+    custodyPolicySha256: 'a'.repeat(64),
+    keyPolicySha256: 'b'.repeat(64),
+    activationEventId: '13131313-1313-4313-8313-131313131313',
+    activationEpoch: 1,
+    deploymentBindingSha256: 'c'.repeat(64),
+  };
+  const localRef = `axiom-local-dispatch://${T}/${pins.custodyPolicyId}/versions/1`;
+  const localConfig = {
+    schemaVersion: 1,
+    tenants: [
+      {
+        tenantId: T,
+        workloadId: W,
+        trustDomain: 'local.axiomproof.test',
+        keys: {
+          provider: 'local',
+          custody: pins,
+          keyService: {
+            spiffeId: 'spiffe://local.axiomproof.test/service/local-key-service',
+            endpoint: { host: '127.0.0.1', port: 7443 },
+          },
+          workload: {
+            socketPath: '/run/spire/agent.sock',
+            spiffeId: 'spiffe://local.axiomproof.test/service/assessment-dispatch-producer',
+            issuerNodeId: 'spiffe://local.axiomproof.test/spire/agent/join_token/local',
+          },
+        },
+      },
+    ],
+  };
+  function localProducer(wrapper: DispatchKeyWrapper, bindings: unknown[] = []) {
+    return composeAssessmentProducer(localConfig, fake.client as unknown as SupabaseClient, {
+      awsKms: { send } as DispatchAwsKmsPort,
+      writer: () => human.client as unknown as SupabaseClient,
+      localWrapper: ((_c: unknown, binding: unknown) => {
+        bindings.push(binding);
+        return wrapper;
+      }) as never,
+    });
+  }
+  const wrapper = () => ({
+    wrap: vi.fn(async () => ({ keyRef: localRef, wrappedKey: new Uint8Array(61) })),
+    unwrap: vi.fn(async () => new Uint8Array(32)),
+  });
+
+  it('wraps through the local key service and enqueues reviewed work with the custody pins', async () => {
+    const { request } = reviewSourceFixture();
+    const localEnqueue = vi.fn((_args: Record<string, unknown>) => ({
+      job_id: J,
+      run_id: R,
+      expires_at: '2026-10-05T20:00:00Z',
+    }));
+    human.onRpc('enqueue_local_public_control_assessment_dispatch', localEnqueue);
+    const w = wrapper(),
+      bindings: unknown[] = [];
+    const p = await localProducer(w, bindings);
+    expect(bindings).toEqual([{ tenantId: T, workloadId: W, role: 'producer' }]);
+    await p.request(T, A, request);
+    expect(w.wrap).toHaveBeenCalledTimes(1);
+    expect(w.unwrap).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(localEnqueue.mock.calls[0]![0]).toMatchObject({
+      p_custody_policy_id: pins.custodyPolicyId,
+      p_activation_epoch: 1,
+      p_review_id: R,
+      p_key_ref: localRef,
+    });
+  });
+  it('refuses unreviewed requests before any wrap in local mode', async () => {
+    const w = wrapper();
+    const p = await localProducer(w);
+    await expect(p.request(T, A, parsed())).rejects.toThrow();
+    expect(w.wrap).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+  it('refuses a local tenant whose Parikshan registration is not active', async () => {
+    fake.rows('workload_identities')[0]!.status = 'revoked';
+    await expect(localProducer(wrapper())).rejects.toThrow();
+  });
 });
