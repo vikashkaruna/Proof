@@ -12,6 +12,12 @@ import { z } from 'zod';
 import { canonicalJson } from '@axiom/ledger';
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  buildQuestionnaireEvidenceReport,
+  renderQuestionnaireEvidenceDraft,
+  renderReviewedQuestionnaireEvidenceReport,
+  QuestionnaireEvidenceDocumentV6Schema,
+} from '@axiom/report-kit/questionnaire-evidence-report';
+import {
   buildCoverageFirstReport,
   renderCoverageFirstDraft,
   renderReviewedCoverageFirstReport,
@@ -177,9 +183,21 @@ export class StatutoryReportService {
     if (!frozen.success) throw new EvidenceError('assessment_source_incomplete', 409);
     let content;
     try {
-      const coverage = JSON.parse(frozen.data.source_text).schema_version === 4;
-      if (coverage && JSON.parse(frozen.data.source_text).report_kind !== 'auditor') throw Error();
-      content = (coverage ? buildCoverageFirstReport : buildAuditorAssessmentPack)({
+      const version = JSON.parse(frozen.data.source_text).schema_version;
+      const coverage = version === 4;
+      const questionnaireOnly = version === 5;
+      if (
+        (coverage || questionnaireOnly) &&
+        JSON.parse(frozen.data.source_text).report_kind !== 'auditor'
+      )
+        throw Error();
+      content = (
+        questionnaireOnly
+          ? buildQuestionnaireEvidenceReport
+          : coverage
+            ? buildCoverageFirstReport
+            : buildAuditorAssessmentPack
+      )({
         sourceText: frozen.data.source_text,
         sourceSha256: frozen.data.source_sha256,
         requestId,
@@ -200,8 +218,8 @@ export class StatutoryReportService {
         p_request_id: requestId,
         p_content_text: JSON.stringify(content),
         p_html_text:
-          content.schema_version === 5
-            ? renderCoverageFirstDraft({
+          content.schema_version === 6
+            ? renderQuestionnaireEvidenceDraft({
                 sourceText: frozen.data.source_text,
                 sourceSha256: frozen.data.source_sha256,
                 requestId,
@@ -211,7 +229,18 @@ export class StatutoryReportService {
                 title: requestRow.data.title,
                 generatedAt: content.generated_at,
               })
-            : renderAuditorAssessmentPackHtml(content),
+            : content.schema_version === 5
+              ? renderCoverageFirstDraft({
+                  sourceText: frozen.data.source_text,
+                  sourceSha256: frozen.data.source_sha256,
+                  requestId,
+                  tenantId,
+                  engagementId: requestRow.data.engagement_id,
+                  assessmentRunId: requestRow.data.assessment_run_id,
+                  title: requestRow.data.title,
+                  generatedAt: content.generated_at,
+                })
+              : renderAuditorAssessmentPackHtml(content),
         p_correlation_id: correlationId,
       },
       signal,
@@ -295,7 +324,7 @@ export class StatutoryReportService {
     validatedContent: unknown;
     html: string;
   } {
-    if (rawContent.schema_version === 5)
+    if (rawContent.schema_version === 5 || rawContent.schema_version === 6)
       throw new EvidenceError('source_bound_workflow_required', 409);
     switch (kind) {
       case 'board': {
@@ -402,7 +431,9 @@ export class StatutoryReportService {
       throw new EvidenceError('source_bound_workflow_required', 409);
     }
     const raw = report.content_text ? JSON.parse(report.content_text) : report.content;
-    if ((raw as Record<string, unknown>)?.schema_version === 5) {
+    const rawVersion = (raw as Record<string, unknown>)?.schema_version;
+    if (rawVersion === 5 || rawVersion === 6) {
+      const questionnaireOnly = rawVersion === 6;
       if (report.status === 'published') throw new EvidenceError('retained_pdf_required', 409);
       if (report.kind !== 'board' && report.kind !== 'auditor')
         throw new EvidenceError('source_bound_workflow_required', 409);
@@ -413,9 +444,9 @@ export class StatutoryReportService {
             report.content_sha256
         )
           throw Error();
-        const document = CoverageFirstDocumentV5Schema.parse(
-          parseCoverageFirstJson(report.content_text, 4 * 1024 * 1024),
-        );
+        const document = (
+          questionnaireOnly ? QuestionnaireEvidenceDocumentV6Schema : CoverageFirstDocumentV5Schema
+        ).parse(parseCoverageFirstJson(report.content_text, 4 * 1024 * 1024));
         const requestQuery = this.db
           .from(report.kind === 'board' ? 'board_report_requests' : 'statutory_report_requests')
           .select('id,engagement_id,assessment_run_id,title')
@@ -470,9 +501,13 @@ export class StatutoryReportService {
           sourceSha256: source.source_sha256,
           generatedAt: document.generated_at,
         };
-        if (canonicalJson(document) !== canonicalJson(buildCoverageFirstReport(input)))
-          throw Error();
-        let html = renderCoverageFirstDraft(input);
+        const rebuilt = questionnaireOnly
+          ? buildQuestionnaireEvidenceReport(input)
+          : buildCoverageFirstReport(input);
+        if (canonicalJson(document) !== canonicalJson(rebuilt)) throw Error();
+        let html = questionnaireOnly
+          ? renderQuestionnaireEvidenceDraft(input)
+          : renderCoverageFirstDraft(input);
         if (report.status === 'approved') {
           const reviewQuery = this.db
             .from('report_reviews')
@@ -487,7 +522,11 @@ export class StatutoryReportService {
             .object({ review_text: z.string(), review_sha256: z.string() })
             .parse(result.data);
           const { generatedAt: _generatedAt, ...reviewedInput } = input;
-          html = renderReviewedCoverageFirstReport({
+          html = (
+            questionnaireOnly
+              ? renderReviewedQuestionnaireEvidenceReport
+              : renderReviewedCoverageFirstReport
+          )({
             ...reviewedInput,
             reportId: report.id,
             documentText: report.content_text,

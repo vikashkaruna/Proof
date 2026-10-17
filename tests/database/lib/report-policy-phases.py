@@ -17,6 +17,11 @@ ROOT = Path(__file__).resolve().parents[3]
 HISTORICAL = (
     "public-control-report-provenance.test.sql",
     "public-control-asset-report-provenance.test.sql",
+    # Legacy questionnaire-only (source1) lifecycle; 0155 moved NEW requests
+    # to source5, covered by questionnaire-evidence-lifecycle.test.sql.
+    "board-artifact-versions.test.sql",
+    "board-report-generation.test.sql",
+    "statutory-source-artifacts.test.sql",
 )
 CURRENT = "coverage-first-public-reports.test.sql"
 MIGRATION = "0144_coverage_first_public_report_presentation.sql"
@@ -102,6 +107,16 @@ def plan(root: Path = ROOT) -> dict:
     need(
         versions[-1] < 154 or "mfa-recovery-delegation.test.sql" in files,
         "delegation154_suite_required",
+    )
+    need(
+        versions[-1] < 155
+        or {
+            "questionnaire-evidence-parity.test.sql",
+            "questionnaire-evidence-lifecycle.test.sql",
+            "questionnaire-evidence-auditor-lifecycle.test.sql",
+        }
+        <= set(files),
+        "questionnaire155_parity_suite_required",
     )
     return {
         "currentVersion": versions[-1],
