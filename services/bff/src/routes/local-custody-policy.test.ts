@@ -649,19 +649,28 @@ describe('operator-staged manifest pre-fill', () => {
     expect((await stagedApp('owner', null)()).status).toBe(404);
     const tampered = JSON.stringify({ policyText, policySha256: 'f'.repeat(64) });
     expect((await stagedApp('owner', tampered)()).status).toBe(422);
-    const other = encodeLocalCustodyPolicy({
+    const ot = '99999999-9999-4999-8999-999999999999';
+    const oref = ref.replace(t, ot);
+    const otherPolicy = {
       ...p,
-      tenantId: '99999999-9999-4999-8999-999999999999',
-      keyPolicy: {
-        primary: ref.replace(t, '99999999-9999-4999-8999-999999999999'),
-        readable: [ref.replace(t, '99999999-9999-4999-8999-999999999999')],
-      },
-    } as never);
+      tenantId: ot,
+      keyPolicy: { primary: oref, readable: [oref] },
+      keyPolicySha256: new LocalKeyPolicy({
+        tenantId: ot,
+        revision: op,
+        mode: 'operator_managed',
+        validity: { kind: 'until_revoked', reviewDueAt: 1 },
+        primary: oref,
+        readable: [oref],
+      }).fingerprint,
+    };
+    const other = encodeLocalCustodyPolicy(otherPolicy);
+    // A fully valid manifest for ANOTHER tenant is not offered here.
     const res = await stagedApp(
       'owner',
       JSON.stringify({ policyText: other, policySha256: sha(other) }),
     )();
-    expect([404, 422]).toContain(res.status);
+    expect(res.status).toBe(404);
   });
   it('reads only <tenantId>.json from an absolute directory', async () => {
     const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
@@ -674,7 +683,9 @@ describe('operator-staged manifest pre-fill', () => {
       expect(
         await readStagedCustodyManifest('99999999-9999-4999-8999-999999999999', dir),
       ).toBeNull();
-      expect(await readStagedCustodyManifest(t, 'relative/dir')).toBeNull();
+      const { relative } = await import('node:path');
+      // Even a relative path that does point at the staged file is refused.
+      expect(await readStagedCustodyManifest(t, relative(process.cwd(), dir))).toBeNull();
       expect(await readStagedCustodyManifest(t, undefined)).toBeNull();
       await expect(readStagedCustodyManifest('../etc/passwd', dir)).rejects.toThrow();
     } finally {
