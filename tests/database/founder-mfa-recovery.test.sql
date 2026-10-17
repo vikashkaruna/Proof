@@ -152,6 +152,19 @@ select pg_temp.refused(format($q$select public.bind_mfa_recovery_session(%L, %L,
 select public.bind_mfa_recovery_session('00000000-0000-0000-0000-0000000152f2',
   '00000000-0000-0000-0000-0000000152e1', (select case_id from rc));
 
+-- 0153: the subject reads their own open case on the fresh session only.
+set local role authenticated;
+select pg_temp.as_session('00000000-0000-0000-0000-0000000152f2', '00000000-0000-0000-0000-0000000152e1');
+select pg_temp.assert_true(
+  (select public.read_my_mfa_recovery() ->> 'state' = 'bound'
+      and (public.read_my_mfa_recovery() ->> 'bound_here')::boolean),
+  'subject reads own bound case');
+select pg_temp.as_session('00000000-0000-0000-0000-0000000152f2', '00000000-0000-0000-0000-0000000152c2');
+select pg_temp.assert_true(public.read_my_mfa_recovery() is null, 'pre-cutoff session reads no case');
+select pg_temp.as_session('00000000-0000-0000-0000-0000000152f1', '00000000-0000-0000-0000-0000000152c1');
+select pg_temp.assert_true(public.read_my_mfa_recovery() is null, 'the actor does not read the subject case');
+reset role;
+
 -- Binding alone grants nothing.
 select pg_temp.refused(format($q$select public.begin_recovery_totp_enrolment(%L, %L, %L, 'enc-new', 'phone')$q$,
   '00000000-0000-0000-0000-0000000152f2', '00000000-0000-0000-0000-0000000152e1', (select case_id from rc)));

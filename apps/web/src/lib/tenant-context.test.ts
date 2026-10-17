@@ -38,7 +38,10 @@ const state = vi.hoisted(() => ({
   authThrows: false,
 }));
 
-const database = vi.hoisted(() => ({ from: vi.fn() }));
+const database = vi.hoisted(() => ({
+  from: vi.fn(),
+  recovery: null as unknown,
+}));
 vi.mock('@axiom/supabase', () => ({
   createSupabaseServerClient: async () => ({
     auth: {
@@ -49,6 +52,10 @@ vi.mock('@axiom/supabase', () => ({
       getSession: async () => ({ data: { session: state.session } }),
     },
     from: database.from,
+    rpc: async (name: string) => {
+      if (name !== 'read_my_mfa_recovery') throw new Error('unexpected rpc');
+      return { data: database.recovery, error: null };
+    },
   }),
   sessionIdFromAccessToken: () => 'session-1',
 }));
@@ -70,6 +77,7 @@ import {
 } from './tenant-context';
 
 beforeEach(() => {
+  database.recovery = null;
   state.user = { id: 'user-1', email: 'reader@example.invalid' };
   state.memberships = [
     {
@@ -250,4 +258,12 @@ it('requires both internal employment and Workbench role authority', async () =>
   await expect(requireInternalContext()).rejects.toThrow('redirect:/portal');
   state.internal = true;
   await expect(requireInternalContext()).rejects.toThrow('redirect:/portal');
+});
+
+it('sends an account under founder-led recovery to the recovery panel, not the code prompt', async () => {
+  database.recovery = { case_id: 'case-1', state: 'opened' };
+  state.attestations = [{ expires_at: new Date(Date.now() + 60000).toISOString() }];
+  await expect(requireTenantContext()).rejects.toThrow('redirect:/settings/security?recovery=1');
+  database.recovery = null;
+  await expect(requireTenantContext()).resolves.toMatchObject({ tenantId: 'tenant-a' });
 });

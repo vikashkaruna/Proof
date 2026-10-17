@@ -31,7 +31,7 @@ class PolicyPhases(unittest.TestCase):
         self.assertEqual(len(plan["all"]), len(set(plan["all"])))
         self.assertEqual(sorted(plan["historical143"] + plan["current"]), plan["all"])
         self.assertIn(PHASES.CURRENT, plan["current"])
-        self.assertEqual(plan["currentVersion"], 152)
+        self.assertEqual(plan["currentVersion"], 153)
         self.assertIn(
             "local-public-control-assessment-dispatch.test.sql", plan["current"]
         )
@@ -55,7 +55,7 @@ class PolicyPhases(unittest.TestCase):
             (root / "infra/supabase/migrations" / source.name).write_text(
                 "-- offline inventory only"
             )
-        self.assertEqual(PHASES.plan(root)["currentVersion"], 152)
+        self.assertEqual(PHASES.plan(root)["currentVersion"], 153)
         custody = root / "tests/database/local-custody-operator-context.test.sql"
         custody.unlink()
         with self.assertRaisesRegex(ValueError, "custody148_context_suite_required"):

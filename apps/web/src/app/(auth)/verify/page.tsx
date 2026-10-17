@@ -40,6 +40,12 @@ export default async function VerifyPage({ searchParams }: PageProps) {
       ? target
       : '/start';
 
+  // Under founder-led recovery the active factor is the lost one; send the
+  // account to the recovery panel instead of a prompt it cannot satisfy.
+  const { data: recovery, error: recoveryError } = await supabase.rpc('read_my_mfa_recovery');
+  if (recoveryError) throw new Error('Recovery status is unavailable');
+  if (recovery) redirect('/settings/security?recovery=1');
+
   // Someone who reaches this page with no factor cannot satisfy anything here.
   const { data: factors, error: factorsError } = await supabase
     .from('user_mfa_factors')
