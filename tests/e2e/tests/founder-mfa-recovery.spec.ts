@@ -8,7 +8,6 @@ import {
   signInAs,
   state,
 } from '../fixtures';
-import { acceptanceTarget } from '../target';
 
 /**
  * Founder-led MFA recovery (0152/0153) through real GoTrue sessions.
@@ -22,10 +21,9 @@ import { acceptanceTarget } from '../target';
  * login MFA.
  *
  * It designates two fresh internal accounts as platform founders, so it runs
- * only against the harness-owned stack, never a deployed acceptance target.
+ * only against the harness-owned stack (playwright.config testIgnore excludes it
+ * from deployed acceptance, which forbids skipped journeys).
  */
-
-test.skip(Boolean(acceptanceTarget), 'Designates platform founders; harness-owned stack only');
 
 async function designateFounder(userId: string): Promise<void> {
   const res = await fetch(`${state.supabaseUrl}/rest/v1/rpc/designate_platform_founder`, {
