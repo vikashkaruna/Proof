@@ -3,6 +3,7 @@
  * payload for `bulk insert` into the `controls` table.
  */
 
+import type { Control } from './types';
 import {
   CONTROL_LIBRARY_COUNT,
   controls,
@@ -12,31 +13,37 @@ import {
   LIBRARY_CHANGELOG,
 } from './controls';
 
+/** Supabase `controls` row for one control at an explicit library version. */
+export function controlSeedRow(c: Control, libraryVersion: string) {
+  return {
+    id: c.id,
+    library_version: libraryVersion,
+    title: c.title,
+    obligation: c.obligation,
+    domain: c.domain,
+    severity: c.severity,
+    citations: c.citations,
+    evidence_required: c.evidenceRequired,
+    assessment_questions: c.assessmentQuestions,
+    scoring: c.scoring,
+    remediation_patterns: c.remediationPatterns,
+    tags: c.tags,
+    sdf_only: c.sdfOnly,
+    children_only: c.childrenOnly,
+    introduced_in_version: c.introducedInVersion,
+    revised_in_version: c.revisedInVersion ?? null,
+    notes: c.notes ?? null,
+  };
+}
+
+/** Seed for the default (published, current) library. Byte-stable for 0.1.1. */
 export function buildLibrarySeed() {
   return {
     version: LIBRARY_VERSION,
     publishedAt: LIBRARY_PUBLISHED_AT,
     publishedBy: LIBRARY_PUBLISHER,
     changeLog: LIBRARY_CHANGELOG,
-    controls: controls.map((c) => ({
-      id: c.id,
-      library_version: LIBRARY_VERSION,
-      title: c.title,
-      obligation: c.obligation,
-      domain: c.domain,
-      severity: c.severity,
-      citations: c.citations,
-      evidence_required: c.evidenceRequired,
-      assessment_questions: c.assessmentQuestions,
-      scoring: c.scoring,
-      remediation_patterns: c.remediationPatterns,
-      tags: c.tags,
-      sdf_only: c.sdfOnly,
-      children_only: c.childrenOnly,
-      introduced_in_version: c.introducedInVersion,
-      revised_in_version: c.revisedInVersion ?? null,
-      notes: c.notes ?? null,
-    })),
+    controls: controls.map((c) => controlSeedRow(c, LIBRARY_VERSION)),
   };
 }
 

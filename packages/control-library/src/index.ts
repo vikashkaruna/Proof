@@ -30,7 +30,39 @@ export type {
   RegulatoryInstrument,
   RegulatoryProvision,
 } from './regulatory-baseline';
-export { buildLibrarySeed } from './seed';
+export { buildLibrarySeed, controlSeedRow } from './seed';
+export {
+  DEFAULT_LIBRARY_VERSION,
+  KNOWN_LIBRARY_VERSIONS,
+  UnknownLibraryVersionError,
+  buildLibrarySeedForVersion,
+  commencementStatusAsOf,
+  deriveCommencement,
+  resolveControlLibrary,
+} from './library-versions';
+export type {
+  CommencementStatus,
+  ControlCommencement,
+  LibraryVersionStatus,
+  ResolvedControlLibrary,
+} from './library-versions';
+export { CORRECTED_CONTROL_IDS_0_2_0, LIBRARY_VERSION_0_2_0 } from './versions/v0_2_0/controls';
+export {
+  CORRECTED_CONTROL_RECORDS_0_2_0,
+  LEGAL_REVIEW_0_2_0,
+  OFFICIAL_SOURCES_0_2_0,
+  actSectionCommencement,
+  citationCommencement,
+  ruleCommencement,
+} from './versions/v0_2_0/legal-registry';
+export type {
+  ApplicabilityCondition,
+  CommencementGroup,
+  ControlLegalRecord,
+  LegalBasis,
+  OfficialSource,
+} from './versions/v0_2_0/legal-registry';
+export { buildRuntimeMirror, runtimeMirrorFileName } from './runtime-mirror';
 export { GAP_SCAN_QUESTIONS, GAP_SCAN_QUESTION_SET_VERSION } from './gap-scan-questions';
 export type { GapScanQuestion } from './gap-scan-questions';
 export {
