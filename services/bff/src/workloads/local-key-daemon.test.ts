@@ -244,22 +244,28 @@ describe('role-routed authority', () => {
 describe('generation loop', () => {
   it('restarts after idle windows, pauses after fast failures, and stops', async () => {
     const stop = new AbortController();
-    let calls = 0;
+    const starts: number[] = [];
+    const ends: number[] = [];
     const serve = vi.fn(async (deadline: number) => {
-      calls++;
-      if (calls === 1) return;
-      if (calls === 2) {
-        await new Promise((r) => setTimeout(r, Math.max(0, deadline - Date.now())));
-        throw new Error('idle');
+      starts.push(Date.now());
+      try {
+        if (starts.length === 1) return;
+        if (starts.length === 2) {
+          await new Promise((r) => setTimeout(r, Math.max(0, deadline - Date.now())));
+          throw new Error('idle');
+        }
+        if (starts.length === 3) throw new Error('fast');
+        stop.abort();
+      } finally {
+        ends.push(Date.now());
       }
-      if (calls === 3) throw new Error('fast');
-      stop.abort();
     });
     const refused = vi.fn();
-    const started = Date.now();
-    await runGenerations(serve, stop.signal, { windowMs: 60, pauseMs: 120, onRefused: refused });
-    expect(calls).toBe(4);
+    await runGenerations(serve, stop.signal, { windowMs: 60, pauseMs: 200, onRefused: refused });
+    expect(starts).toHaveLength(4);
     expect(refused).toHaveBeenCalledTimes(2);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(170);
+    // Idle window: immediate restart. Fast failure: a pause before the next.
+    expect(starts[2]! - ends[1]!).toBeLessThan(100);
+    expect(starts[3]! - ends[2]!).toBeGreaterThanOrEqual(190);
   });
 });
