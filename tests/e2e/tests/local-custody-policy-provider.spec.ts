@@ -262,7 +262,7 @@ async function prepare(
       .fill(JSON.stringify(manifest));
   if (action === 'review')
     await person.page
-      .getByLabel('Next periodic review (review action only)')
+      .getByLabel(/^Next periodic review \(review action only/)
       .fill(new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16));
   await person.page
     .getByLabel('I reviewed the exact non-secret policy, selected action and reason.', {

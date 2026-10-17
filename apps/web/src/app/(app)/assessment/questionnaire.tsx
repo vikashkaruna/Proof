@@ -1,4 +1,5 @@
 'use client';
+import { buttonVariants } from '@axiom/ui';
 import React, { useEffect, useState } from 'react';
 import {
   AssessmentQuestionnaireSchema,
@@ -101,6 +102,7 @@ export function AssessmentQuestionnaireEditor({
       <div role="alert">
         {error}{' '}
         <button
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
           type="button"
           onClick={() => {
             setError(null);
@@ -201,7 +203,12 @@ export function AssessmentQuestionnaireEditor({
             Review the declarations above, then explicitly confirm submission below. Unknown answers
             and unsupported inputs remain unresolved.
           </p>
-          <button type="button" disabled={disabled} onClick={invalidate}>
+          <button
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            type="button"
+            disabled={disabled}
+            onClick={invalidate}
+          >
             Edit questionnaire declarations
           </button>
         </>

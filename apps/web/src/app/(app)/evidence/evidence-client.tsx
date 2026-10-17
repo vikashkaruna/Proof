@@ -18,11 +18,22 @@ import {
   type EvidenceOperation,
 } from './evidence-contract';
 
-const field = 'w-full min-w-0 max-w-full rounded border border-slate-300 px-3 py-2 text-sm';
-const button =
-  'max-w-full whitespace-normal break-words rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50';
+// The Evidence Vault theme: indigo-titled rounded panels on mist, mono
+// identifiers and digests, teal for actions, and gold only on records whose
+// sealed object version has a provider receipt.
+const field =
+  'block w-full min-w-0 max-w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus-visible:border-teal-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 disabled:cursor-not-allowed disabled:opacity-50';
+const buttonBase =
+  'inline-flex max-w-full items-center justify-center gap-1.5 whitespace-normal break-words rounded-md px-3.5 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
+const button = `${buttonBase} border border-slate-300 bg-white text-slate-700 hover:bg-mist-100`;
+const primaryButton = `${buttonBase} bg-indigo-500 text-white shadow-sm hover:bg-indigo-400`;
+const accentButton = `${buttonBase} bg-teal-500 text-white shadow-sm hover:bg-teal-600`;
 const panel =
-  'min-w-0 max-w-full break-words rounded-xl border border-slate-200 bg-white p-5 space-y-4';
+  'min-w-0 max-w-full break-words rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4';
+const panelTitle = 'font-heading text-sm font-semibold text-indigo-500';
+const factLabel = 'text-[10px] font-semibold uppercase tracking-wider text-slate-500';
+const shortHash = (hash: string) =>
+  hash.length > 16 ? `${hash.slice(0, 8)}…${hash.slice(-6)}` : hash;
 const listSchema = z.object({ data: z.array(evidenceRowSchema), meta: pageMetaSchema });
 const operationsSchema = z.object({ data: z.array(operationSchema), meta: pageMetaSchema });
 const operationResponse = z.object({ data: operationSchema });
@@ -310,18 +321,35 @@ export function EvidenceClient({
         title="Evidence Explorer"
         description="Inspect recorded evidence, check exact stored versions, or compare a local file against its recorded SHA-256."
       />
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-xs shadow-sm">
+        <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-mist-50 px-3 py-1 font-semibold text-slate-700">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-sm bg-indigo-500" />
+          Evidence Vault
+        </span>
+        <span className="text-slate-500">
+          Exact-version receipts · COMPLIANCE retention recorded per object · records without a
+          receipt are marked unverified
+        </span>
+      </div>
       {stagedWorkflow}
       {error && (
-        <p role="alert" className="rounded border border-red-200 bg-red-50 p-3">
+        <p
+          role="alert"
+          className="rounded-xl border border-ember-200 bg-ember-50 p-3 text-sm text-ember-700"
+        >
           {error}
         </p>
       )}
       {message && (
-        <p role="status" className="rounded border border-teal-200 bg-teal-50 p-3 break-all">
+        <p
+          role="status"
+          className="rounded-xl border border-teal-300 bg-teal-50 p-3 text-sm text-teal-900 break-all"
+        >
           {message}
         </p>
       )}
       <form onSubmit={filter} className={panel} aria-label="Evidence filters">
+        <h2 className={panelTitle}>Find evidence</h2>
         <div className="grid gap-3 md:grid-cols-3">
           <label className="min-w-0">
             Search description or evidence ID
@@ -344,41 +372,71 @@ export function EvidenceClient({
             <input name="to" type="date" className={field} />
           </label>
         </div>
-        <button className={button}>Apply filters</button>{' '}
-        <button type="button" className={button} onClick={() => refresh()}>
-          Refresh records
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button className={primaryButton}>Apply filters</button>
+          <button type="button" className={button} onClick={() => refresh()}>
+            Refresh records
+          </button>
+        </div>
       </form>
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         <section className={panel} aria-label="Evidence records">
-          <h2 className="font-semibold">Recorded evidence</h2>
+          <h2 className={panelTitle}>Recorded evidence</h2>
           {recordsError && <p role="alert">{recordsError} Use Refresh records to retry.</p>}
           {loading ? (
             <p role="status">Loading evidence…</p>
           ) : !recordsError ? (
-            <p>{meta.total} matching records</p>
+            <p className="font-mono text-xs text-slate-500">{meta.total} matching records</p>
           ) : null}
           {!loading && !recordsError && rows.length === 0 && (
             <DataPlaceholder title="No evidence matches these filters." />
           )}
-          {rows.map((row) => (
-            <button
-              type="button"
-              key={row.id}
-              onClick={() => choose(row)}
-              aria-pressed={selected?.id === row.id}
-              className="block w-full min-w-0 rounded border border-slate-200 p-3 text-left hover:border-teal-600"
-            >
-              <strong className="break-all">{row.filename || row.description || row.id}</strong>
-              <span className="block break-all text-xs">{row.id}</span>
-              <span className="block text-sm">
-                {row.assurance === 'verified_at_ingest'
-                  ? 'Provider receipt recorded'
-                  : 'Legacy record — storage unverified'}{' '}
-                · {date(row.collected_at)}
-              </span>
-            </button>
-          ))}
+          <div className="grid min-w-0 gap-3 md:grid-cols-2">
+            {rows.map((row) => (
+              <button
+                type="button"
+                key={row.id}
+                onClick={() => choose(row)}
+                aria-pressed={selected?.id === row.id}
+                className={`flex w-full min-w-0 flex-col gap-1.5 rounded-xl border bg-white p-4 text-left transition-colors hover:border-teal-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 ${
+                  selected?.id === row.id
+                    ? 'border-teal-500 ring-1 ring-teal-500'
+                    : 'border-slate-200'
+                }`}
+              >
+                <span className="flex min-w-0 items-center justify-between gap-2">
+                  <span className="min-w-0 truncate font-mono text-[11px] font-semibold text-indigo-500">
+                    {row.id}
+                  </span>
+                  <span className="shrink-0 font-mono text-[10px] text-slate-400">
+                    {date(row.collected_at)}
+                  </span>
+                </span>
+                <strong className="break-all text-sm font-semibold text-indigo-500">
+                  {row.filename || row.description || row.id}
+                </strong>
+                {row.description && row.filename && (
+                  <span className="line-clamp-2 text-xs leading-snug text-slate-600">
+                    {row.description}
+                  </span>
+                )}
+                <span className="mt-1 flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2 text-[10.5px]">
+                  <span className="font-mono text-slate-400">{shortHash(row.content_hash)}</span>
+                  <span
+                    className={
+                      row.assurance === 'verified_at_ingest'
+                        ? 'rounded border border-gold-500 bg-gold-50 px-2 py-0.5 font-semibold text-gold-700'
+                        : 'rounded border border-amber-300 bg-amber-50 px-2 py-0.5 font-semibold text-amber-800'
+                    }
+                  >
+                    {row.assurance === 'verified_at_ingest'
+                      ? 'Provider receipt recorded'
+                      : 'Legacy record — storage unverified'}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
           <div className="flex flex-wrap gap-2">
             <button
               className={button}
@@ -397,26 +455,41 @@ export function EvidenceClient({
           </div>
         </section>
         {selected ? (
-          <section className={panel} aria-label="Evidence inspector">
-            <h2 className="font-semibold break-all">{selected.filename || selected.id}</h2>
-            <p className="break-all">{selected.description || 'No description recorded.'}</p>
-            <dl className="space-y-2 text-sm break-all">
-              <dt>Evidence ID</dt>
-              <dd>{selected.id}</dd>
-              <dt>SHA-256</dt>
-              <dd className="font-mono">{selected.content_hash}</dd>
-              <dt>Recorded size</dt>
+          <section className={`${panel} lg:sticky lg:top-4`} aria-label="Evidence inspector">
+            {selected.object_version ? (
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-gold-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-gold-700">
+                <span aria-hidden>✦</span> Sealed object version
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-amber-800">
+                Storage unverified
+              </span>
+            )}
+            <h2 className="font-heading text-base font-bold leading-tight text-indigo-500 break-all">
+              {selected.filename || selected.id}
+            </h2>
+            <p className="text-sm text-slate-600 break-all">
+              {selected.description || 'No description recorded.'}
+            </p>
+            <dl className="space-y-3 text-sm break-all">
+              <dt className={factLabel}>Evidence ID</dt>
+              <dd className="font-mono text-xs text-indigo-500">{selected.id}</dd>
+              <dt className={factLabel}>SHA-256</dt>
+              <dd className="rounded-md bg-mist-100 p-2 font-mono text-[11px] text-indigo-500">
+                {selected.content_hash}
+              </dd>
+              <dt className={factLabel}>Recorded size</dt>
               <dd>{selected.byte_size === null ? 'Unknown' : `${selected.byte_size} bytes`}</dd>
-              <dt>Source</dt>
+              <dt className={factLabel}>Source</dt>
               <dd>{selected.collected_by_agent || 'Unspecified'}</dd>
-              <dt>Collected</dt>
+              <dt className={factLabel}>Collected</dt>
               <dd>{date(selected.collected_at)}</dd>
-              <dt>Linked controls</dt>
-              <dd>
+              <dt className={factLabel}>Linked controls</dt>
+              <dd className="flex flex-wrap gap-1.5">
                 {selected.demonstrates_control_ids.length
                   ? selected.demonstrates_control_ids.map((id) => (
                       <Link
-                        className="mr-3 underline"
+                        className="rounded bg-teal-50 px-2 py-0.5 font-mono text-[11px] font-medium text-teal-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500"
                         key={id}
                         href={`/controls?q=${encodeURIComponent(id)}`}
                       >
@@ -427,7 +500,7 @@ export function EvidenceClient({
               </dd>
             </dl>
             {selected.object_version ? (
-              <div className="rounded bg-slate-50 p-3 text-sm break-all">
+              <div className="space-y-1 rounded-xl border border-slate-200 bg-mist-50 p-3 text-xs text-slate-700 break-all">
                 <p>
                   Provider: {selected.object_version.provider} · Encryption:{' '}
                   {selected.object_version.encryption}
@@ -446,14 +519,14 @@ export function EvidenceClient({
                 </p>
               </div>
             ) : (
-              <p>
+              <p className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
                 Legacy record: no immutable object-version receipt. Retention and stored-byte
                 integrity are unverified.
               </p>
             )}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
               <button
-                className={button}
+                className={primaryButton}
                 disabled={busy || !selected.object_version}
                 onClick={() =>
                   void action(async () => {
@@ -498,21 +571,24 @@ export function EvidenceClient({
               )}
             </div>
             {providerResult && (
-              <p role="status">
+              <p
+                role="status"
+                className="rounded-lg border border-teal-300 bg-teal-50 p-2.5 text-xs text-teal-900 break-all"
+              >
                 Stored-byte integrity and provider retention verified at{' '}
                 {date(providerResult.verifiedAt)} for version {providerResult.versionId}.
               </p>
             )}
-            <div className="border-t pt-4 space-y-2">
-              <h3 className="font-semibold">Compare a local file</h3>
-              <p className="text-sm">
+            <div className="space-y-2 border-t border-slate-100 pt-4">
+              <h3 className={panelTitle}>Compare a local file</h3>
+              <p className="text-xs text-slate-600">
                 Read locally only; this file is never uploaded. A hash match does not prove storage
                 retention. Maximum 32 MiB.
               </p>
               <input
                 key={selected.id}
                 aria-label="Local file to verify"
-                className="w-full min-w-0 max-w-full text-sm"
+                className="w-full min-w-0 max-w-full text-sm file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-slate-700 hover:file:bg-mist-100"
                 type="file"
                 disabled={busy}
                 onChange={(event) => {
@@ -527,7 +603,14 @@ export function EvidenceClient({
                 }}
               />
               {localResult && (
-                <div role="status" className="break-all text-sm">
+                <div
+                  role="status"
+                  className={`rounded-lg border p-2.5 text-xs break-all ${
+                    localResult.hashMatches
+                      ? 'border-teal-300 bg-teal-50 text-teal-900'
+                      : 'border-ember-200 bg-ember-50 text-ember-700'
+                  }`}
+                >
                   <p>SHA-256: {localResult.computedHash}</p>
                   <p>
                     {localResult.hashMatches
@@ -547,8 +630,11 @@ export function EvidenceClient({
             </div>
           </section>
         ) : (
-          <section className={panel}>
-            <p>Select a record to inspect its metadata and verification evidence.</p>
+          <section className={`${panel} lg:sticky lg:top-4`}>
+            <h2 className={panelTitle}>Inspector</h2>
+            <p className="text-sm text-slate-600">
+              Select a record to inspect its metadata and verification evidence.
+            </p>
           </section>
         )}
       </div>
@@ -559,8 +645,8 @@ export function EvidenceClient({
             className={panel}
             aria-label="Upload evidence"
           >
-            <h2 className="font-semibold">Upload evidence</h2>
-            <p className="text-sm">
+            <h2 className={panelTitle}>Upload evidence</h2>
+            <p className="text-sm text-slate-600">
               Human-submitted evidence is retained under the product’s seven-year policy. COMPLIANCE
               retention cannot be shortened or the object deleted before expiry.
             </p>
@@ -608,8 +694,9 @@ export function EvidenceClient({
                 Engagement ID (optional)
                 <input name="engagementId" className={field} onChange={() => setConfirmed(false)} />
               </label>
-              <label className="flex min-w-0 items-center gap-2">
+              <label className="flex min-w-0 items-start gap-2.5 rounded-lg border border-slate-200 bg-mist-50 px-3 py-2.5 font-normal md:col-span-2">
                 <input
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-teal-600"
                   type="checkbox"
                   required
                   checked={confirmed}
@@ -618,13 +705,13 @@ export function EvidenceClient({
                 I reviewed this file and authorize its seven-year retention.
               </label>
             </fieldset>
-            <button className={button} disabled={busy || !uploadFile || !confirmed}>
+            <button className={accentButton} disabled={busy || !uploadFile || !confirmed}>
               Upload evidence
             </button>
           </form>
           <section className={panel} aria-label="Upload operations" aria-busy={operationsLoading}>
-            <h2 className="font-semibold">Upload operations</h2>
-            <p className="text-sm">
+            <h2 className={panelTitle}>Upload operations</h2>
+            <p className="text-sm text-slate-600">
               Pending operations are not verified evidence. Reconciliation checks whether the exact
               uploaded version exists; it never uploads another copy.
             </p>
@@ -643,9 +730,24 @@ export function EvidenceClient({
             {!operationsLoading &&
               !operationsError &&
               operations.map((operation) => (
-                <div key={operation.operationKey} className="rounded border p-3 text-sm break-all">
-                  <p>
-                    {operation.operationKey} · {operation.status} · {date(operation.createdAt)}
+                // The bare `rounded` class is what the ingestion E2E spec selects an
+                // operation row by; `rounded-xl` sets the visible radius.
+                <div
+                  key={operation.operationKey}
+                  className="rounded space-y-1.5 rounded-xl border border-slate-200 p-3 text-sm break-all"
+                >
+                  <p className="font-mono text-xs text-slate-700">
+                    {operation.operationKey} ·{' '}
+                    <span
+                      className={
+                        operation.status === 'pending'
+                          ? 'font-semibold text-amber-800'
+                          : 'font-semibold text-teal-700'
+                      }
+                    >
+                      {operation.status}
+                    </span>{' '}
+                    · {date(operation.createdAt)}
                   </p>
                   {operation.errorCode && <p>Last outcome: {operation.errorCode}</p>}
                   {operation.errorCode === 'object_version_not_found' && (
@@ -658,7 +760,7 @@ export function EvidenceClient({
                   {operation.evidenceId && <p>Evidence: {operation.evidenceId}</p>}
                   {operation.status === 'pending' && (
                     <button
-                      className={button}
+                      className={accentButton}
                       disabled={busy || operationsLoading}
                       onClick={() =>
                         void action(async () => {

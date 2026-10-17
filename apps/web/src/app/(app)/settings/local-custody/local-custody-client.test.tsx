@@ -551,3 +551,15 @@ it('an in-flight old-scope prepare cannot strand or clear the new-scope busy own
     true,
   );
 });
+it('explains when approve and activate appear and names the manifest file as text, not a link', async () => {
+  render(<LocalCustodyClient tenantId={tenant} actorId={actor} tenantSlug="kosha" />);
+  await screen.findByText('No unresolved request in this organisation and account.');
+  expect(screen.getByText('Approve and activate appear only after an owner request.')).toBeTruthy();
+  const path = screen.getByText('docs/private-docs/custody-manifests/kosha.json');
+  expect(path.tagName).toBe('CODE');
+  expect(path.closest('a')).toBeNull();
+  const manifestField = screen.getByLabelText('Operator-reviewed non-secret manifest JSON');
+  expect(manifestField.getAttribute('aria-describedby')).toBe('custody-manifest-hint');
+  expect(document.getElementById('custody-manifest-hint')?.textContent).toContain('kosha.json');
+  expect(screen.queryAllByRole('link')).toHaveLength(0);
+});

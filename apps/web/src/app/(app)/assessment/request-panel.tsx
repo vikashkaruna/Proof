@@ -1,5 +1,5 @@
 'use client';
-import { generateUUID } from '@axiom/ui';
+import { buttonVariants, generateUUID } from '@axiom/ui';
 import React, {
   useCallback,
   useEffect,
@@ -681,6 +681,7 @@ function RequestPanel({
                     }}
                   />
                   <button
+                    className={buttonVariants({ variant: 'outline', size: 'sm' })}
                     type="button"
                     disabled={busy || !ready}
                     onClick={() => {

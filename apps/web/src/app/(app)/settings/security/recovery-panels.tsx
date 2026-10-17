@@ -14,6 +14,7 @@ import {
   Input,
   Label,
 } from '@axiom/ui';
+import { Notice, selectClass } from '@/components/workflow-blocks';
 
 /**
  * Founder-led MFA recovery (0152/0153).
@@ -141,10 +142,14 @@ export function RecoveryBeneficiary({
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
+        <RecoveryProgress
+          steps={['Bind this sign-in', 'Read your code to them', 'Set up new authenticator']}
+          at={recoveryCodes ? 3 : !recovery.boundHere ? 0 : !authorized ? 1 : 2}
+        />
         {error && (
-          <div className="rounded-md border border-ember-500 bg-ember-50 p-3 text-sm text-ember-700">
+          <Notice tone="error" role="alert">
             {error}
-          </div>
+          </Notice>
         )}
 
         {recoveryCodes ? (
@@ -173,9 +178,11 @@ export function RecoveryBeneficiary({
               Step 1 of 3. Bind this sign-in to the recovery so the person recovering your account
               can confirm it is you.
             </p>
-            <Button variant="accent" onClick={bind} loading={busy}>
-              Bind this sign-in
-            </Button>
+            <div>
+              <Button variant="accent" onClick={bind} loading={busy}>
+                Bind this sign-in
+              </Button>
+            </div>
           </div>
         ) : !authorized ? (
           <div className="flex flex-col gap-2">
@@ -186,24 +193,31 @@ export function RecoveryBeneficiary({
             {recovery.sessionId && (
               <p
                 data-testid="session-fingerprint"
-                className="font-mono text-2xl tracking-widest text-slate-900"
+                className="w-fit rounded-lg border-2 border-indigo-200 bg-indigo-50 px-4 py-2 font-mono text-2xl tracking-widest text-indigo-500"
               >
                 {sessionFingerprint(recovery.sessionId)}
               </p>
             )}
-            <Button variant="ghost" onClick={() => act(refresh)} loading={busy}>
-              Check for confirmation
-            </Button>
+            <div>
+              <Button variant="outline" onClick={() => act(refresh)} loading={busy}>
+                Check for confirmation
+              </Button>
+            </div>
           </div>
         ) : pending ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-slate-700">
               Step 3 of 3. Add this key to your new authenticator, then enter the code it shows.
             </p>
-            <a className="text-sm text-teal-700 underline" href={pending.provisioningUri}>
-              Open in authenticator app
-            </a>
-            <p data-testid="recovery-setup-key" className="font-mono text-sm text-slate-900">
+            <div>
+              <Button asChild variant="outline" size="sm">
+                <a href={pending.provisioningUri}>Open in authenticator app</a>
+              </Button>
+            </div>
+            <p
+              data-testid="recovery-setup-key"
+              className="w-fit max-w-full break-all rounded-md border border-slate-200 bg-mist-50 px-3 py-2 font-mono text-sm tracking-wider text-slate-900"
+            >
               {pending.secret.match(/.{1,4}/g)?.join(' ')}
             </p>
             <div className="flex flex-wrap items-end gap-3">
@@ -228,9 +242,11 @@ export function RecoveryBeneficiary({
               Step 3 of 3. Your sign-in was confirmed. Set up your new authenticator within 15
               minutes.
             </p>
-            <Button variant="accent" onClick={enrol} loading={busy}>
-              Set up new authenticator
-            </Button>
+            <div>
+              <Button variant="accent" onClick={enrol} loading={busy}>
+                Set up new authenticator
+              </Button>
+            </div>
           </div>
         )}
       </CardContent>
@@ -357,36 +373,49 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
   return (
     <Card data-testid="mfa-recovery-console">
       <CardHeader>
-        <CardTitle>Recover another founder&apos;s authenticator</CardTitle>
+        <CardTitle>Recover someone&apos;s authenticator</CardTitle>
         <CardDescription>
-          For a founder who has lost their authenticator and recovery codes. Verify who they are
-          through a channel you trust before starting; every step is recorded. You cannot recover
-          your own account here.
+          For another founder, or an organisation owner or admin, who has lost their authenticator
+          and recovery codes. Verify who they are through a channel you trust before starting; every
+          step is recorded. You cannot recover your own account here.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {notice && (
-          <p role="status" className="text-sm text-slate-700">
+          <Notice tone="success" role="status">
             {notice}
-          </p>
+          </Notice>
         )}
         {error && (
-          <div className="rounded-md border border-ember-500 bg-ember-50 p-3 text-sm text-ember-700">
+          <Notice tone="error" role="alert">
             {error}
-          </div>
+          </Notice>
         )}
         {!overview ? (
-          <Button variant="ghost" onClick={() => act(load)} loading={busy}>
-            Open recovery console
-          </Button>
+          <div className="flex flex-col gap-3">
+            <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
+              <li>Open the console, choose the account and record how you verified them.</li>
+              <li>They sign in with their password and bind that sign-in.</li>
+              <li>They read you a code; confirm only if it matches the one shown here.</li>
+              <li>They set up a new authenticator within 15 minutes.</li>
+            </ol>
+            <div>
+              <Button variant="primary" onClick={() => act(load)} loading={busy}>
+                Open recovery console
+              </Button>
+            </div>
+          </div>
         ) : (
           <>
-            <div className="flex flex-col gap-3 rounded-md border border-slate-300 bg-slate-50 p-4">
+            <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-mist-50 p-4">
+              <h4 className="font-heading text-sm font-semibold text-indigo-500">
+                Start a recovery
+              </h4>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="recoverySubject">Account to recover</Label>
                 <select
                   id="recoverySubject"
-                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  className={selectClass}
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
                 >
@@ -444,17 +473,17 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
                 <div
                   key={c.case_id}
                   data-testid="mfa-recovery-case"
-                  className="flex flex-col gap-2 rounded-md border border-indigo-300 bg-indigo-50 p-4"
+                  className="flex flex-col gap-2 rounded-lg border border-indigo-200 bg-white p-4 shadow-sm"
                 >
-                  <p className="text-sm font-medium text-indigo-900">
+                  <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-indigo-500">
                     {emailOf(c.subject_user_id)} · <Badge variant="warning">{c.state}</Badge>
                   </p>
-                  <p className="text-xs text-indigo-800">{c.reason}</p>
+                  <p className="text-xs text-slate-600">{c.reason}</p>
                   {c.state === 'bound' && c.beneficiary_session ? (
                     <>
-                      <p className="text-sm text-indigo-900">
+                      <p className="text-sm text-slate-700">
                         Ask them to read their code. Confirm only if it matches:{' '}
-                        <span className="font-mono text-lg tracking-widest">
+                        <span className="rounded-md bg-indigo-50 px-2 py-0.5 font-mono text-lg tracking-widest text-indigo-500">
                           {sessionFingerprint(c.beneficiary_session.session_id)}
                         </span>
                       </p>
@@ -482,18 +511,19 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
                       </div>
                     </>
                   ) : c.state === 'opened' ? (
-                    <p className="text-sm text-indigo-900">
+                    <p className="text-sm text-slate-700">
                       Waiting for them to sign in with their password and bind that sign-in.
                     </p>
                   ) : (
-                    <p className="text-sm text-indigo-900">Confirmed; waiting for enrolment.</p>
+                    <p className="text-sm text-slate-700">Confirmed; waiting for enrolment.</p>
                   )}
-                  <div className="flex gap-2">
-                    <Button variant="ghost" size="sm" onClick={() => act(load)} loading={busy}>
+                  <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                    <Button variant="outline" size="sm" onClick={() => act(load)} loading={busy}>
                       Refresh
                     </Button>
                     <Button
-                      variant="ghost"
+                      variant="outline"
+                      className="border-ember-500/40 text-ember-700 hover:bg-ember-50"
                       size="sm"
                       onClick={() => cancel(c.case_id)}
                       loading={busy}
@@ -507,5 +537,46 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/** Where a recovery stands, as a row of steps. Display only. */
+function RecoveryProgress({ steps, at }: { steps: string[]; at: number }) {
+  return (
+    <ol aria-label="Recovery progress" className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-3">
+      {steps.map((label, i) => {
+        const done = i < at;
+        const current = i === at;
+        return (
+          <li
+            key={label}
+            aria-current={current ? 'step' : undefined}
+            className={
+              'flex items-center gap-2 rounded-lg border px-3 py-2 ' +
+              (current
+                ? 'border-teal-300 bg-teal-50 font-semibold text-teal-900'
+                : done
+                  ? 'border-slate-200 bg-white text-slate-600'
+                  : 'border-slate-200 bg-mist-50 text-slate-500')
+            }
+          >
+            <span
+              aria-hidden
+              className={
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ' +
+                (done
+                  ? 'bg-teal-500 text-white'
+                  : current
+                    ? 'border-2 border-teal-500 text-teal-700'
+                    : 'border border-slate-300')
+              }
+            >
+              {done ? '✓' : i + 1}
+            </span>
+            {label}
+          </li>
+        );
+      })}
+    </ol>
   );
 }

@@ -24,8 +24,12 @@ const optionsSchema = z
   .object({ enabled: z.boolean(), retention: stagedRetentionConfiguration.nullable() })
   .strict()
   .refine((value) => value.enabled === Boolean(value.retention));
-const field = 'w-full rounded border border-slate-300 px-3 py-2 text-sm';
-const button = 'rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50';
+const field =
+  'mt-1 block w-full min-w-0 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus-visible:border-teal-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500';
+const buttonBase =
+  'inline-flex max-w-full items-center justify-center whitespace-normal break-words rounded-md px-3.5 py-2 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
+const button = `${buttonBase} border border-slate-300 bg-white text-slate-700 hover:bg-mist-100`;
+const accentButton = `${buttonBase} bg-teal-500 text-white shadow-sm hover:bg-teal-600`;
 /** Human-approved, source-bound agent workflow, separate from legacy direct human ingestion. */
 export function StagedEvidencePanel(props: { tenantId: string; actorId: string }) {
   return <StagedEvidenceSessionPanel key={`${props.tenantId}:${props.actorId}`} {...props} />;
@@ -269,10 +273,13 @@ function StagedEvidenceSessionPanel({ tenantId, actorId }: { tenantId: string; a
   return (
     <section
       aria-labelledby="staged-evidence-title"
-      className="min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-5"
+      className="min-w-0 space-y-4 rounded-2xl border border-slate-200 border-l-4 border-l-teal-500 bg-white p-5 shadow-sm"
     >
       <div>
-        <h2 id="staged-evidence-title" className="text-lg font-semibold">
+        <h2
+          id="staged-evidence-title"
+          className="font-heading text-base font-semibold text-indigo-500"
+        >
           Collect evidence with Saakshi
         </h2>
         <p className="text-sm text-slate-600">
@@ -282,7 +289,10 @@ function StagedEvidenceSessionPanel({ tenantId, actorId }: { tenantId: string; a
         </p>
       </div>
       {error && (
-        <p role="alert" className="text-sm text-red-700">
+        <p
+          role="alert"
+          className="rounded-xl border border-ember-200 bg-ember-50 p-3 text-sm text-ember-700"
+        >
           {error}
         </p>
       )}
@@ -300,13 +310,17 @@ function StagedEvidenceSessionPanel({ tenantId, actorId }: { tenantId: string; a
             bytes). Uploaded bytes are not retained in your browser. An unconfirmed attempt must not
             be replaced or uploaded again.
           </p>
-          <p className="break-all text-xs">Request: {journal.operationKey}</p>
-          <button type="button" className={button} disabled={busy} onClick={recover}>
-            Check retained evidence result
-          </button>
-          <button type="button" className={button} disabled={busy} onClick={() => inspect()}>
-            Inspect original collection attempt
-          </button>
+          <p className="break-all font-mono text-xs text-slate-500">
+            Request: {journal.operationKey}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={accentButton} disabled={busy} onClick={recover}>
+              Check retained evidence result
+            </button>
+            <button type="button" className={button} disabled={busy} onClick={() => inspect()}>
+              Inspect original collection attempt
+            </button>
+          </div>
         </div>
       ) : (
         options?.enabled &&
@@ -357,7 +371,7 @@ function StagedEvidenceSessionPanel({ tenantId, actorId }: { tenantId: string; a
               The temporary upload is encrypted and expires after fifteen minutes. Expiry does not
               delete an object that may already have reached the retention vault.
             </p>
-            <label className="flex items-start gap-2 text-sm">
+            <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-mist-50 px-3 py-2.5 text-sm font-normal">
               <input
                 type="checkbox"
                 checked={acknowledged}
@@ -368,7 +382,11 @@ function StagedEvidenceSessionPanel({ tenantId, actorId }: { tenantId: string; a
               object versions cannot be shortened or deleted before retention expires, and an
               enabled legal hold may extend preservation.
             </label>
-            <button type="submit" className={button} disabled={busy || !file || !acknowledged}>
+            <button
+              type="submit"
+              className={accentButton}
+              disabled={busy || !file || !acknowledged}
+            >
               Approve and collect file
             </button>
           </form>
@@ -377,7 +395,7 @@ function StagedEvidenceSessionPanel({ tenantId, actorId }: { tenantId: string; a
       {accepted && (
         <div
           role="status"
-          className="space-y-2 rounded border border-emerald-200 bg-emerald-50 p-3 text-sm"
+          className="space-y-2 rounded-xl border border-teal-300 bg-teal-50 p-3 text-sm text-teal-900"
         >
           <p>Evidence accepted with matching storage and runtime receipts.</p>
           <p className="break-all">Evidence: {accepted.evidenceId}</p>
@@ -392,7 +410,7 @@ function StagedEvidenceSessionPanel({ tenantId, actorId }: { tenantId: string; a
         </div>
       )}
       {unconfirmed && (
-        <div className="space-y-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm">
+        <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
           <p>
             Collection remains unaccepted. Runtime outcome:{' '}
             {unconfirmed.runtimeOutcome === 'runtime_reported_failure'
