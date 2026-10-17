@@ -27,6 +27,11 @@ export default async function TechnicalReviewsPage() {
           (role === UserRole.FOUNDER && isAxiomInternal))
       }
       founder={role === UserRole.FOUNDER && isAxiomInternal}
+      canList={
+        role === UserRole.OWNER ||
+        role === UserRole.ADMIN ||
+        (role === UserRole.FOUNDER && isAxiomInternal)
+      }
     />
   );
 }
