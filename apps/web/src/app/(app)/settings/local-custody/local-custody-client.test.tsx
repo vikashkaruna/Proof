@@ -344,9 +344,12 @@ it('prepares an exact review predecessor and new future reminder without changin
   fireEvent.change(screen.getByLabelText('Reason'), {
     target: { value: 'Periodic review performed' },
   });
-  fireEvent.change(screen.getByLabelText(/^Next periodic review \(review action only, Asia\/Kolkata\)/), {
-    target: { value: '2030-10-16T12:00' },
-  });
+  fireEvent.change(
+    screen.getByLabelText(/^Next periodic review \(review action only, Asia\/Kolkata\)/),
+    {
+      target: { value: '2030-10-16T12:00' },
+    },
+  );
   fireEvent.click(
     screen.getByLabelText('I reviewed the exact non-secret policy, selected action and reason.'),
   );
