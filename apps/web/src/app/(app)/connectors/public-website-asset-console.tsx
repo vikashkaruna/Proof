@@ -1,4 +1,5 @@
 'use client';
+import { formatDateTime } from '@/lib/display-time';
 import {
   useCallback,
   useEffect,
@@ -857,7 +858,7 @@ function WebsiteAssetConsoleView(props: WebsiteAssetConsoleProps) {
                 .filter((c) => c.requestedUrl === target?.snapshot.url)
                 .map((c) => (
                   <option key={c.checkId} value={c.checkId}>
-                    {c.checkedAt} · {c.checkId}
+                    {formatDateTime(c.checkedAt)} · {c.checkId}
                   </option>
                 ))}
             </select>

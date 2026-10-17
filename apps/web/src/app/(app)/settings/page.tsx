@@ -1,3 +1,4 @@
+import { formatDate } from '@/lib/display-time';
 import { redirect } from 'next/navigation';
 import { requireTenantContext } from '@/lib/tenant-context';
 import Link from 'next/link';
@@ -89,9 +90,7 @@ export default async function SettingsPage() {
             <div className="grid min-w-0 grid-cols-1 gap-1 py-2.5 sm:grid-cols-2 sm:gap-3">
               <span className="text-[12.5px] text-[#5b6270]">Last Authentication</span>
               <span className="min-w-0 text-[11.5px] text-[#1E2A4A] sm:text-right">
-                {user.last_sign_in_at
-                  ? new Date(user.last_sign_in_at).toLocaleDateString('en-IN')
-                  : 'Unavailable'}
+                {user.last_sign_in_at ? formatDate(user.last_sign_in_at) : 'Unavailable'}
               </span>
             </div>
           </div>

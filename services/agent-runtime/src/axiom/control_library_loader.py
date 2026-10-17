@@ -1,8 +1,13 @@
 """Control library loader.
 
-Loads the v0.1.0 control library from a generated JSON file (built by
+Loads control libraries from generated JSON mirrors (built by
 `pnpm tsx scripts/build-controls-json.mjs` from the TypeScript source
-of truth at packages/control-library/src/controls.ts).
+of truth in packages/control-library/src).
+
+Mirrors are per version: the default version keeps its historical
+`data/controls.json`; other versions are `data/controls-<version>.json`.
+`load_library(version)` resolves an explicit version and refuses an unknown
+one; it never substitutes the latest. `load_default_library()` is unchanged.
 """
 
 from __future__ import annotations
@@ -179,8 +184,12 @@ def _parse_control(raw: RawControl) -> Control:
 
 
 class ControlLibrary:
-    def __init__(self, version: str, controls: list[Control]):
+    def __init__(
+        self, version: str, controls: list[Control], legal: dict[str, object] | None = None,
+    ):
         self.version = version
+        # Version legal metadata (commencement, classification); None for 0.1.1.
+        self.legal = legal
         self._controls: tuple[Control, ...] = tuple(controls)
         self._by_id: dict[str, Control] = {c.id: c for c in controls}
 
@@ -192,6 +201,19 @@ class ControlLibrary:
 
     def get(self, control_id: str) -> Control | None:
         return self._by_id.get(control_id)
+
+    def effective_from(self, control_id: str) -> str | None:
+        """Phased commencement date for a control, if this version records it."""
+        if not self.legal:
+            return None
+        entries = self.legal.get("commencement")
+        if not isinstance(entries, list):
+            return None
+        for entry in entries:
+            if isinstance(entry, dict) and entry.get("control_id") == control_id:
+                value = entry.get("effective_from")
+                return value if isinstance(value, str) else None
+        return None
 
     def filter(
         self,
@@ -222,12 +244,56 @@ def load_library_from_file(path: str | os.PathLike[str]) -> ControlLibrary:
     if not version:
         raise ValueError(f"Library file {path} missing version")
     parsed = [_parse_control(c) for c in data.get("controls", [])]
-    return ControlLibrary(version=version, controls=parsed)
+    legal = data.get("legal")
+    if legal is not None and not isinstance(legal, dict):
+        raise ValueError(f"Library file {path} has malformed legal metadata")
+    return ControlLibrary(version=version, controls=parsed, legal=legal)
 
 
 _DEFAULT_LIB_PATH = (
     Path(__file__).parent / "data" / "controls.json"
 )
+
+
+_DATA_DIR = Path(__file__).parent / "data"
+_VERSION_RE = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,4}")
+
+
+class UnknownLibraryVersionError(LookupError):
+    """Raised when no bundled mirror exists for the requested version."""
+
+
+def bundled_library_versions() -> tuple[str, ...]:
+    """Versions with a bundled mirror, sorted by semver."""
+    found: set[str] = set()
+    if _DEFAULT_LIB_PATH.exists():
+        with open(_DEFAULT_LIB_PATH, encoding="utf-8") as f:
+            found.add(str(json.load(f).get("version")))
+    for p in _DATA_DIR.glob("controls-*.json"):
+        v = p.name[len("controls-"):-len(".json")]
+        if _VERSION_RE.fullmatch(v):
+            found.add(v)
+    return tuple(sorted(found, key=lambda v: tuple(int(x) for x in v.split("."))))
+
+
+def load_library(version: str) -> ControlLibrary:
+    """Load exactly `version` from the bundled mirrors, or refuse.
+
+    Historical assessments and reports must verify against the version they
+    recorded; this never falls back to the default or to the latest.
+    """
+    if not isinstance(version, str) or not _VERSION_RE.fullmatch(version):
+        raise UnknownLibraryVersionError("control library version refused")
+    candidates = [_DATA_DIR / f"controls-{version}.json", _DEFAULT_LIB_PATH]
+    for path in candidates:
+        if not path.exists():
+            continue
+        lib = load_library_from_file(path)
+        if lib.version == version:
+            if any(c.library_version != version for c in lib):
+                raise ValueError("control library row version mismatch")
+            return lib
+    raise UnknownLibraryVersionError(f"no bundled control library {version}")
 
 
 def load_default_library() -> ControlLibrary:

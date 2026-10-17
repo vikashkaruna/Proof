@@ -1,4 +1,5 @@
 'use client';
+import { formatDateTime } from '@/lib/display-time';
 
 import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -576,7 +577,7 @@ function Workflow({
             )}
             {checks.map((row) => (
               <option key={row.id} value={row.id} disabled={row.status !== 'checked'}>
-                {row.finalUrl} · {row.checkedAt}
+                {row.finalUrl} · {formatDateTime(row.checkedAt)}
               </option>
             ))}
           </select>
@@ -845,7 +846,7 @@ function Workflow({
                 className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 p-2"
               >
                 <span>
-                  {row.agent} · {row.created_at} · receipt {row.completion_receipt}
+                  {row.agent} · {formatDateTime(row.created_at)} · receipt {row.completion_receipt}
                 </span>
                 <button
                   type="button"

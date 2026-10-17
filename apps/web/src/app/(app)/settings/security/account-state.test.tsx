@@ -18,14 +18,25 @@ vi.mock('@/lib/tenant-context', () => ({
     tenantName: 'Test tenant',
     role: 'approver',
     supabase: {
-      from: () => ({
-        select: async () => ({
-          data: state.enrolled
-            ? [{ id: 'factor-a', factor_type: 'totp', status: 'active', label: 'First factor' }]
-            : [],
-          error: null,
-        }),
-      }),
+      rpc: async () => ({ data: null, error: null }),
+      from: (table: string) =>
+        table === 'platform_founders'
+          ? { select: () => ({ eq: () => ({ is: async () => ({ data: [], error: null }) }) }) }
+          : {
+              select: async () => ({
+                data: state.enrolled
+                  ? [
+                      {
+                        id: 'factor-a',
+                        factor_type: 'totp',
+                        status: 'active',
+                        label: 'First factor',
+                      },
+                    ]
+                  : [],
+                error: null,
+              }),
+            },
     },
   }),
 }));

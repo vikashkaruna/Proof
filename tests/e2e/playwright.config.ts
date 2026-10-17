@@ -168,6 +168,9 @@ export default defineConfig({
   // deployed acceptance forbids skipped journeys, so do not discover that
   // fixture-only spec unless the explicit storage launcher enables it.
   testIgnore: [
+    // Designates platform founders; runs only against the harness-owned stack.
+    // Deployed acceptance forbids skipped journeys, so it is not discovered there.
+    ...(acceptanceTarget ? ['**/founder-mfa-recovery.spec.ts'] : []),
     ...(process.env.AXIOM_LOCAL_CUSTODY_BROWSER_ACCEPTANCE === 'true'
       ? []
       : ['**/local-custody-policy-provider.spec.ts']),

@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDate } from '@/lib/display-time';
 import React, { useCallback, useEffect, useState } from 'react';
 import type { PramaanDossier } from '@axiom/types';
 import {
@@ -411,9 +412,7 @@ export function ClosureDossiersTab({
                 </div>
                 <p className="mt-1 text-sm text-slate-600">
                   {dossierKind(dossier.dossierType)}
-                  {dossier.sealedAt
-                    ? ` · Sealed ${new Date(dossier.sealedAt).toLocaleDateString()}`
-                    : ''}
+                  {dossier.sealedAt ? ` · Sealed ${formatDate(dossier.sealedAt)}` : ''}
                 </p>
                 <p className="mt-1 break-all font-mono text-[11px] text-slate-500">
                   Merkle root {dossier.merkleRoot} · Proof seal {dossier.proofSealHash}
@@ -429,7 +428,7 @@ export function ClosureDossiersTab({
                   <p className="break-words font-medium text-slate-900">{dossier.title}</p>
                   <p className="mt-1 text-sm text-slate-600">
                     {dossierKind(dossier.dossierType)} · Recorded status: {dossier.status} ·{' '}
-                    {new Date(dossier.createdAt).toLocaleDateString()}
+                    {formatDate(dossier.createdAt)}
                   </p>
                 </div>
                 <button

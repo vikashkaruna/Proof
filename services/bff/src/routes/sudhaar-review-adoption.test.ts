@@ -44,6 +44,7 @@ function app(role: UserRole = UserRole.OWNER, killed = false, mfa = false) {
     a.use(
       '*',
       requireSessionMfa({
+        sessionAccess: async () => ({ sessionCurrent: true, recovery: null }),
         requiresLoginMfa: async () => true,
         isEnrolled: async () => false,
       } as unknown as MfaService),

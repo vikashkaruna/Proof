@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDateTime } from '@/lib/display-time';
 import React, { useEffect, useRef } from 'react';
 import type { PramaanDossier } from '@axiom/types';
 
@@ -15,7 +16,7 @@ export interface DossierViewerModalProps {
   onRetryMissing: (dossier: PramaanDossier) => void;
 }
 
-const date = (value: string) => new Date(value).toLocaleString();
+const date = (value: string) => formatDateTime(value);
 
 export function DossierViewerModal({
   dossier,

@@ -1,4 +1,6 @@
 'use client';
+
+import { formatDate } from '@/lib/display-time';
 import { useEffect, useState } from 'react';
 import { z } from 'zod';
 import { Card, CardContent, CardHeader, CardTitle } from '@axiom/ui';
@@ -249,8 +251,7 @@ export function GrantReview({
                 <p>
                   {g.agentName} · {g.scope === 'connector.write' ? 'write' : 'read'} ·{' '}
                   {g.connectorName} · review {g.overdue ? 'overdue since' : 'due'}{' '}
-                  {new Date(g.dueAt).toLocaleDateString()} · expires{' '}
-                  {new Date(g.expiresAt).toLocaleDateString()}
+                  {formatDate(g.dueAt)} · expires {formatDate(g.expiresAt)}
                 </p>
                 {canManage && (
                   <div className="flex gap-3">

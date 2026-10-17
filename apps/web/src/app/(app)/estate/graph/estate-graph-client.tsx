@@ -1,4 +1,7 @@
 'use client';
+import { formatDateTime } from '@/lib/display-time';
+
+import { formatDate } from '@/lib/display-time';
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { AgentIcon, Button, Card, CardContent } from '@axiom/ui';
@@ -199,8 +202,8 @@ export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: 
         </Button>
       </div>
       <p className="text-sm text-muted-foreground" role="status">
-        Snapshot: <time dateTime={snapshot.capturedAt}>{snapshot.capturedAt}</time>. Refreshes every
-        minute while this page is visible and when you return to it.
+        Snapshot: <time dateTime={snapshot.capturedAt}>{formatDateTime(snapshot.capturedAt)}</time>.
+        Refreshes every minute while this page is visible and when you return to it.
       </p>
       {exportError && <p role="alert">{exportError}</p>}
       <p className="text-sm" data-testid="graph-summary">
@@ -371,9 +374,7 @@ function NodeDetail({
           {related.map((e) => (
             <li key={e.id}>
               {e.kind === 'write' ? 'WRITE' : e.kind} {label(e.from)} → {label(e.to)}
-              {e.detail.expiresAt
-                ? ` (expires ${new Date(e.detail.expiresAt).toLocaleDateString()})`
-                : ''}
+              {e.detail.expiresAt ? ` (expires ${formatDate(e.detail.expiresAt)})` : ''}
             </li>
           ))}
         </ul>

@@ -1,3 +1,4 @@
+import { formatTime } from '@/lib/display-time';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { can } from '@axiom/types';
 import { isSafeLedgerSearch, ledgerPageNumber } from '@/lib/ledger-search';
@@ -168,9 +169,7 @@ export default async function LedgerPage({
     type: e.action_type || 'system.audit',
     actor: e.actor_id || e.actor_type || 'system',
     actorType: e.actor_type,
-    time: e.occurred_at
-      ? new Date(e.occurred_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })
-      : 'Unknown time',
+    time: e.occurred_at ? formatTime(e.occurred_at) : 'Unknown time',
     corr: e.correlation_id ? `cr-${e.correlation_id.slice(0, 4)}` : 'No correlation ID',
     fullCorr: e.correlation_id || '',
     target: e.target_ref || 'No target recorded',

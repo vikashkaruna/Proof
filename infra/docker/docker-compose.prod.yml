@@ -61,6 +61,7 @@ services:
   web:
     image: axiom-web:prod
     environment:
+      - AXIOM_DISPLAY_TIMEZONE=${AXIOM_DISPLAY_TIMEZONE:-Asia/Kolkata}
       - NODE_ENV=production
       - ENVIRONMENT=production
     restart: always

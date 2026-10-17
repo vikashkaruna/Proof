@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDateTime } from '@/lib/display-time';
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
@@ -352,8 +353,7 @@ export function TechnicalReviewsClient({
                     <h3 className="font-medium">Internal reference: {item.title}</h3>
                     <p className="text-xs text-slate-600">
                       {planById.get(item.planId)?.title ?? item.planId} · Requested{' '}
-                      {new Date(item.createdAt).toLocaleString()} ·{' '}
-                      {item.reportStatus ?? item.status}
+                      {formatDateTime(item.createdAt)} · {item.reportStatus ?? item.status}
                     </p>
                   </div>
                   {item.contentHash && (

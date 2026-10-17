@@ -123,7 +123,8 @@ export type MfaChallengePurpose =
   | 'enrolment'
   | 'factor_revocation'
   | 'catalogue_adoption'
-  | 'local_custody_policy';
+  | 'local_custody_policy'
+  | 'mfa_recovery';
 
 export interface ApprovalBinding {
   planId: string;
@@ -350,6 +351,19 @@ export interface SessionAttestation {
 export type RevokeFactorResult =
   { ok: true; factorId: string } | { ok: false; reason: 'factor_not_found' };
 
+/** Account fence and founder-led recovery state for one session (0152). */
+export interface SessionAccess {
+  /** False when the session predates the account's recovery cutoff. */
+  sessionCurrent: boolean;
+  recovery: {
+    caseId: string;
+    state: 'opened' | 'bound' | 'authorized' | 'enrolling';
+    boundHere: boolean;
+    grantExpiresAt: string | null;
+    expiresAt: string;
+  } | null;
+}
+
 export interface MfaService {
   beginTotpEnrolment(opts: {
     userId: string;
@@ -397,6 +411,28 @@ export interface MfaService {
   }): Promise<SessionAttestation | null>;
   /** The user's active TOTP factor id, or null. Used to bind factor challenges. */
   activeFactorId(userId: string): Promise<string | null>;
+  /**
+   * Whether this exact session survives the account fence, and whether the
+   * account is under founder-led recovery. Read on every request; a read
+   * failure must be treated as a refusal, never as access.
+   */
+  sessionAccess(opts: { userId: string; sessionId: string | null }): Promise<SessionAccess>;
+  /** Begin the one enrolment an authorized recovery grant permits. */
+  beginRecoveryEnrolment(opts: {
+    userId: string;
+    sessionId: string;
+    caseId: string;
+    accountName: string;
+    label?: string | null;
+  }): Promise<BeginEnrolmentResult | { ok: false; reason: 'recovery_refused' }>;
+  /** Verify the new authenticator and complete the recovery atomically. */
+  activateRecoveryEnrolment(opts: {
+    userId: string;
+    sessionId: string;
+    caseId: string;
+    code: string;
+    atMs?: number;
+  }): Promise<ActivateEnrolmentResult | { ok: false; reason: 'recovery_refused' }>;
 }
 
 interface FactorRow {
@@ -748,6 +784,97 @@ export function createMfaService(
             lastUsedAt: r.last_used_at,
           })),
       };
+    },
+
+    async sessionAccess({ userId, sessionId }) {
+      const { data, error } = await clientFactory().rpc('read_mfa_session_access', {
+        p_user_id: userId,
+        p_session_id: sessionId,
+      });
+      if (error || !data) {
+        throw new Error(`Could not read session access: ${error?.message ?? 'no result'}`);
+      }
+      const raw = data as {
+        session_current: boolean;
+        recovery: {
+          case_id: string;
+          state: NonNullable<SessionAccess['recovery']>['state'];
+          bound_here: boolean | null;
+          grant_expires_at: string | null;
+          expires_at: string;
+        } | null;
+      };
+      return {
+        sessionCurrent: raw.session_current === true,
+        recovery: raw.recovery
+          ? {
+              caseId: raw.recovery.case_id,
+              state: raw.recovery.state,
+              boundHere: raw.recovery.bound_here === true,
+              grantExpiresAt: raw.recovery.grant_expires_at,
+              expiresAt: raw.recovery.expires_at,
+            }
+          : null,
+      };
+    },
+
+    async beginRecoveryEnrolment({ userId, sessionId, caseId, accountName, label }) {
+      const secret = generateSecret(20);
+      const { data, error } = await clientFactory().rpc('begin_recovery_totp_enrolment', {
+        p_subject_id: userId,
+        p_session_id: sessionId,
+        p_case_id: caseId,
+        p_secret_encrypted: encryptSecret(secret, requireRing()),
+        p_label: label ?? null,
+      });
+      if (error || typeof data !== 'string') {
+        logger.warn({ userId, caseId, code: error?.code }, 'recovery enrolment refused');
+        return { ok: false, reason: 'recovery_refused' };
+      }
+      return {
+        factorId: data,
+        secret,
+        provisioningUri: provisioningUri({ secretBase32: secret, accountName, issuer: BRAND.name }),
+      };
+    },
+
+    async activateRecoveryEnrolment({ userId, sessionId, caseId, code, atMs }) {
+      const ring = requireRing();
+      const supabase = clientFactory();
+      const { data: pending } = await supabase
+        .from('user_mfa_factors')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('factor_type', 'totp')
+        .eq('status', 'pending')
+        .maybeSingle();
+      const row = pending as FactorRow | null;
+      if (!row?.secret_encrypted) return { ok: false, reason: 'no_pending_factor' };
+      let pendingSecret: string;
+      try {
+        pendingSecret = openSecret(row.secret_encrypted, ring).secret;
+      } catch (err) {
+        if (err instanceof MfaSecretUnreadableError)
+          return { ok: false, reason: 'secret_unreadable' };
+        throw err;
+      }
+      const result = verifyTotp(pendingSecret, code, { lastUsedCounter: null, atMs });
+      if (!result.valid) return { ok: false, reason: 'code_rejected', detail: result.reason };
+      const codes = generateRecoveryCodes();
+      const hashed = await Promise.all(codes.map((c) => hashRecoveryCode(c)));
+      const { error } = await supabase.rpc('finalize_recovery_totp_enrolment', {
+        p_subject_id: userId,
+        p_session_id: sessionId,
+        p_case_id: caseId,
+        p_factor_id: row.id,
+        p_last_used_counter: Number(result.counter),
+        p_recovery_hashes: hashed,
+      });
+      if (error) {
+        logger.warn({ userId, caseId, code: error.code }, 'recovery activation refused');
+        return { ok: false, reason: 'recovery_refused' };
+      }
+      return { ok: true, factorId: row.id, recoveryCodes: codes };
     },
 
     async isEnrolled(userId) {

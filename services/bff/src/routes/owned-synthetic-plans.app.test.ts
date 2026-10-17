@@ -48,6 +48,7 @@ vi.mock('../middleware/tenant.js', async () => {
 });
 vi.mock('../services/mfa.js', () => ({
   createMfaService: () => ({
+    sessionAccess: async () => ({ sessionCurrent: true, recovery: null }),
     requiresLoginMfa: async () => true,
     isEnrolled: async () => true,
     sessionAttestation: async () =>

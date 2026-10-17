@@ -31,7 +31,7 @@ class PolicyPhases(unittest.TestCase):
         self.assertEqual(len(plan["all"]), len(set(plan["all"])))
         self.assertEqual(sorted(plan["historical143"] + plan["current"]), plan["all"])
         self.assertIn(PHASES.CURRENT, plan["current"])
-        self.assertEqual(plan["currentVersion"], 151)
+        self.assertEqual(plan["currentVersion"], 154)
         self.assertIn(
             "local-public-control-assessment-dispatch.test.sql", plan["current"]
         )
@@ -55,7 +55,7 @@ class PolicyPhases(unittest.TestCase):
             (root / "infra/supabase/migrations" / source.name).write_text(
                 "-- offline inventory only"
             )
-        self.assertEqual(PHASES.plan(root)["currentVersion"], 151)
+        self.assertEqual(PHASES.plan(root)["currentVersion"], 154)
         custody = root / "tests/database/local-custody-operator-context.test.sql"
         custody.unlink()
         with self.assertRaisesRegex(ValueError, "custody148_context_suite_required"):
@@ -154,6 +154,15 @@ class PolicyPhases(unittest.TestCase):
             shutil.copytree(PHASES.ROOT / "tests/database", root / "tests/database")
             (root / "tests/database/platform-founder-authority.test.sql").unlink()
             with self.assertRaisesRegex(ValueError, "founder151_authority_suite_required"):
+                PHASES.plan(root)
+
+    def test_latest152_requires_founder_recovery_suite(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            shutil.copytree(PHASES.ROOT / "infra", root / "infra")
+            shutil.copytree(PHASES.ROOT / "tests/database", root / "tests/database")
+            (root / "tests/database/founder-mfa-recovery.test.sql").unlink()
+            with self.assertRaisesRegex(ValueError, "recovery152_suite_required"):
                 PHASES.plan(root)
 
     def test_legacy_rows_commit_before_canonical144_and_then_replay(self):

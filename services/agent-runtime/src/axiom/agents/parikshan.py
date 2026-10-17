@@ -19,7 +19,12 @@ from typing import Any, ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..assessment_scoring import AssessmentInput, score_assessment
-from ..control_library_loader import ControlLibrary, load_default_library
+from ..control_library_loader import (
+    ControlLibrary,
+    UnknownLibraryVersionError,
+    load_default_library,
+    load_library,
+)
 from .base import AgentName, AutonomyLevel, BaseAgent
 
 
@@ -106,6 +111,18 @@ class ParikshanOutput(BaseModel):
     questionnaire_provenance: QuestionnaireProvenance | None = None
 
 
+def _bundled_library(version: str) -> ControlLibrary:
+    """Resolve the requested version; an unknown one keeps the old refusal path.
+
+    score_assessment refuses any library whose version differs from the input,
+    so falling back to the default never scores against a substituted version.
+    """
+    try:
+        return load_library(version)
+    except UnknownLibraryVersionError:
+        return load_default_library()
+
+
 class ParikshanAgent(BaseAgent[ParikshanInput, ParikshanOutput]):
     name: ClassVar[AgentName] = AgentName.PARIKSHAN
     writes_axiom_state: ClassVar[bool] = True
@@ -124,7 +141,7 @@ class ParikshanAgent(BaseAgent[ParikshanInput, ParikshanOutput]):
     async def _run(
         self, *, correlation_id: str, input: ParikshanInput, **deps: Any
     ) -> ParikshanOutput:
-        lib: ControlLibrary = deps.get("library") or load_default_library()
+        lib: ControlLibrary = deps.get("library") or _bundled_library(input.library_version)
         return ParikshanOutput.model_validate(
             score_assessment(
                 lib,
