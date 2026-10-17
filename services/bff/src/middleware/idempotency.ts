@@ -25,6 +25,9 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     return next();
   }
 
+  const durableLocalCustody =
+    c.req.method === 'POST' &&
+    /^\/v1\/local-custody-policy\/(?:challenge|verify|record|recover)$/.test(c.req.path);
   const durableIntake = c.req.method === 'POST' && c.req.path === '/v1/engagements';
   const durablePublicControlReviewSet =
     c.req.method === 'POST' &&
@@ -77,6 +80,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
         c.req.path,
       ));
   if (
+    durableLocalCustody ||
     durableIntake ||
     durablePublicControlReviewSet ||
     durablePublicWebsiteAsset ||
@@ -127,6 +131,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   // Cached responses would skip live authority/context and cancellation checks
   // or freeze structural-review currency. Keep key checks above.
   if (
+    durableLocalCustody ||
     durableIntake ||
     durablePublicControlReviewSet ||
     durablePublicWebsiteAsset ||

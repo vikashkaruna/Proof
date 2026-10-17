@@ -651,6 +651,88 @@ describe('atomic activation and recovery set', () => {
 
 describe('local custody dedicated step-up', () => {
   const binding = 'e'.repeat(64);
+  let custodyDbNow: number | null;
+  let custodyRpcCalls: { name: string; args: Record<string, unknown> }[];
+  const scopeKeys = [
+    'p_tenant_id',
+    'p_actor_id',
+    'p_session_id',
+    'p_factor_id',
+    'p_operation_key',
+    'p_bound_payload_sha256',
+  ];
+  beforeEach(() => {
+    custodyDbNow = null;
+    custodyRpcCalls = [];
+    const clock = () => custodyDbNow ?? Date.now();
+    // Clock/CAS fixture only: native SQL separately proves session/role/lock authority.
+    const scope = (name: string, args: Record<string, unknown>, extra: string[]) => {
+      custodyRpcCalls.push({ name, args });
+      expect(Object.keys(args).sort()).toEqual([...scopeKeys, ...extra].sort());
+      expect(args).toMatchObject({
+        p_tenant_id: TENANT,
+        p_actor_id: USER,
+        p_session_id: PLAN,
+        p_operation_key: ACTION_A,
+        p_bound_payload_sha256: binding,
+      });
+      expect(args.p_factor_id).toBe(
+        db
+          .rows('user_mfa_factors')
+          .find(
+            (row) => row.user_id === USER && row.status === 'active' && row.factor_type === 'totp',
+          )?.id,
+      );
+    };
+    db.onRpc('issue_local_custody_mfa_challenge', (args) => {
+      scope('issue', args, ['p_ttl_ms']);
+      const row = db.seed('mfa_challenges', {
+        user_id: args.p_actor_id,
+        tenant_id: args.p_tenant_id,
+        factor_id: args.p_factor_id,
+        purpose: 'local_custody_policy',
+        bound_resource_ref: args.p_operation_key,
+        bound_payload_sha256: args.p_bound_payload_sha256,
+        created_at: new Date(clock()).toISOString(),
+        expires_at: new Date(clock() + Number(args.p_ttl_ms)).toISOString(),
+        attempts: 0,
+        max_attempts: 5,
+      });
+      return { id: row.id, expires_at: row.expires_at, max_attempts: row.max_attempts };
+    });
+    db.onRpc('satisfy_local_custody_mfa_challenge', (args) => {
+      scope('satisfy', args, ['p_challenge_id', 'p_expected_attempts', 'p_satisfied_with']);
+      const row = db.rows('mfa_challenges').find((r) => r.id === args.p_challenge_id)!;
+      if (
+        row.satisfied_at ||
+        row.attempts !== args.p_expected_attempts ||
+        Date.parse(String(row.expires_at)) <= clock()
+      )
+        throw Object.assign(new Error('refused'), { code: 'PT409' });
+      row.satisfied_at = new Date(clock()).toISOString();
+      row.satisfied_with = args.p_satisfied_with;
+      return { id: row.id, satisfied_at: row.satisfied_at, satisfied_with: row.satisfied_with };
+    });
+    db.onRpc('consume_local_custody_mfa_challenge', (args) => {
+      scope('consume', args, ['p_challenge_id', 'p_expected_attempts', 'p_consumed_for']);
+      const row = db.rows('mfa_challenges').find((r) => r.id === args.p_challenge_id)!;
+      if (
+        !row.satisfied_at ||
+        row.consumed_at ||
+        row.attempts !== args.p_expected_attempts ||
+        Date.parse(String(row.expires_at)) <= clock()
+      )
+        throw Object.assign(new Error('refused'), { code: 'PT409' });
+      row.consumed_at = new Date(clock()).toISOString();
+      row.consumed_for = args.p_consumed_for;
+      return {
+        id: row.id,
+        satisfied_at: row.satisfied_at,
+        expires_at: row.expires_at,
+        factor_id: row.factor_id,
+      };
+    });
+  });
   const issue = () =>
     mfa.issueChallenge({
       userId: USER,
@@ -666,10 +748,193 @@ describe('local custody dedicated step-up', () => {
       userId: USER,
       tenantId,
       purpose: 'local_custody_policy',
+      sessionId: PLAN,
       challengeId,
       boundResourceRef: ACTION_A,
       boundPayloadSha256: binding,
     });
+  for (const phase of ['issue', 'satisfy', 'consume'] as const) {
+    it(`uses database time for custody ${phase} despite an ahead host clock`, async () => {
+      // Model the independent DB clock explicitly. Real Postgres supplies created_at;
+      // the legacy service supplies the other three instants from the host clock.
+      const databaseNow = T0 + STEP;
+      custodyDbNow = databaseNow;
+      vi.useFakeTimers();
+      vi.setSystemTime(databaseNow + 2000);
+      try {
+        const { secret } = await enrol();
+        const issued = await mfa.issueChallenge({
+          userId: USER,
+          tenantId: TENANT,
+          sessionId: PLAN,
+          purpose: 'local_custody_policy',
+          boundResourceRef: ACTION_A,
+          boundPayloadSha256: binding,
+          ttlMs: 300000,
+        });
+        if (!issued.ok) throw new Error('fixture');
+        const row = db.rows('mfa_challenges').find((r) => r.id === issued.challengeId)!;
+        row.created_at = new Date(databaseNow).toISOString();
+        if (phase === 'issue') {
+          expect(Date.parse(String(row.expires_at)) - databaseNow).toBe(300000);
+          return;
+        }
+        expect(
+          await mfa.verifyChallenge({
+            challengeId: issued.challengeId,
+            userId: USER,
+            tenantId: TENANT,
+            sessionId: PLAN,
+            boundResourceRef: ACTION_A,
+            boundPayloadSha256: binding,
+            code: generateTotp(secret, databaseNow),
+            atMs: databaseNow,
+          }),
+        ).toMatchObject({ ok: true });
+        if (phase === 'satisfy') {
+          expect(Date.parse(String(row.satisfied_at))).toBe(databaseNow);
+          return;
+        }
+        // Isolate consumption from the separately tested satisfaction defect.
+        row.satisfied_at = new Date(databaseNow).toISOString();
+        expect(await consume(issued.challengeId)).toMatchObject({ ok: true });
+        expect(Date.parse(String(row.consumed_at))).toBe(databaseNow);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
+  it('requires a trusted live-session input for custody consumption only', async () => {
+    const { secret } = await enrol();
+    const issued = await issue();
+    if (!issued.ok) throw new Error('fixture');
+    await mfa.verifyChallenge({
+      challengeId: issued.challengeId,
+      userId: USER,
+      tenantId: TENANT,
+      sessionId: PLAN,
+      boundResourceRef: ACTION_A,
+      boundPayloadSha256: binding,
+      code: generateTotp(secret, T0 + STEP),
+      atMs: T0 + STEP,
+    });
+    const calls = custodyRpcCalls.length;
+    expect(
+      await mfa.consumeChallenge({
+        userId: USER,
+        tenantId: TENANT,
+        purpose: 'local_custody_policy',
+        challengeId: issued.challengeId,
+        boundResourceRef: ACTION_A,
+        boundPayloadSha256: binding,
+      }),
+    ).toMatchObject({ ok: false, reason: 'binding_mismatch' });
+    expect(custodyRpcCalls).toHaveLength(calls);
+    expect(db.rows('mfa_challenges')[0]?.consumed_at).toBeUndefined();
+  });
+  it('never falls back to host writes when custody database-clock RPCs fail', async () => {
+    const { secret } = await enrol();
+    db.failNextRpc('issue_local_custody_mfa_challenge');
+    await expect(issue()).rejects.toThrow('Could not issue custody MFA challenge');
+    expect(db.rows('mfa_challenges')).toHaveLength(0);
+    const issued = await issue();
+    if (!issued.ok) throw new Error('fixture');
+    db.failNextRpc('satisfy_local_custody_mfa_challenge');
+    expect(
+      await mfa.verifyChallenge({
+        challengeId: issued.challengeId,
+        userId: USER,
+        tenantId: TENANT,
+        sessionId: PLAN,
+        boundResourceRef: ACTION_A,
+        boundPayloadSha256: binding,
+        code: generateTotp(secret, T0 + STEP),
+        atMs: T0 + STEP,
+      }),
+    ).toMatchObject({ ok: false });
+    const row = db.rows('mfa_challenges')[0]!;
+    expect(row.attempts).toBe(1);
+    expect(row.satisfied_at).toBeUndefined();
+    // Independent fixture satisfaction isolates consume failure from verification.
+    row.satisfied_at = new Date().toISOString();
+    row.satisfied_with = 'totp';
+    db.failNextRpc('consume_local_custody_mfa_challenge');
+    expect(await consume(issued.challengeId)).toMatchObject({ ok: false });
+    expect(row.consumed_at).toBeUndefined();
+  });
+  it('refuses malformed or expanded custody issue responses', async () => {
+    await enrol();
+    for (const response of [
+      { id: ACTION_A, expires_at: '2026-10-16T10:00:00', max_attempts: 5 },
+      { id: ACTION_A, expires_at: '2026-10-16T10:00:00Z', max_attempts: 0 },
+      {
+        id: ACTION_A,
+        expires_at: '2026-10-16T10:00:00Z',
+        max_attempts: 5,
+        created_at: 'untrusted',
+      },
+    ]) {
+      db.onRpc('issue_local_custody_mfa_challenge', () => response);
+      await expect(issue()).rejects.toThrow();
+    }
+    expect(db.rows('mfa_challenges')).toHaveLength(0);
+  });
+  for (const mismatch of ['id', 'satisfied_with'] as const) {
+    it(`refuses a custody satisfaction response with different ${mismatch}`, async () => {
+      const { secret } = await enrol();
+      const issued = await issue();
+      if (!issued.ok) throw new Error('fixture');
+      db.onRpc('satisfy_local_custody_mfa_challenge', () => ({
+        id: issued.challengeId,
+        satisfied_at: new Date().toISOString(),
+        satisfied_with: 'totp',
+        [mismatch]: mismatch === 'id' ? ACTION_B : 'recovery_code',
+      }));
+      await expect(
+        mfa.verifyChallenge({
+          challengeId: issued.challengeId,
+          userId: USER,
+          tenantId: TENANT,
+          sessionId: PLAN,
+          boundResourceRef: ACTION_A,
+          boundPayloadSha256: binding,
+          code: generateTotp(secret, T0 + STEP),
+          atMs: T0 + STEP,
+        }),
+      ).rejects.toThrow();
+      expect(db.rows('mfa_challenges')[0]?.satisfied_at).toBeUndefined();
+    });
+  }
+  for (const mismatch of ['id', 'factor_id'] as const) {
+    it(`refuses a custody consumption response with different ${mismatch}`, async () => {
+      await enrol();
+      const issued = await issue();
+      if (!issued.ok) throw new Error('fixture');
+      const row = db.rows('mfa_challenges')[0]!;
+      row.satisfied_at = new Date().toISOString();
+      row.attempts = 1;
+      db.onRpc('consume_local_custody_mfa_challenge', () => ({
+        id: issued.challengeId,
+        satisfied_at: row.satisfied_at,
+        expires_at: row.expires_at,
+        factor_id: row.factor_id,
+        [mismatch]: ACTION_B,
+      }));
+      await expect(consume(issued.challengeId)).rejects.toThrow();
+      expect(row.consumed_at).toBeUndefined();
+    });
+  }
+  it('consumes custody authority once under concurrent attempts', async () => {
+    await enrol();
+    const issued = await issue();
+    if (!issued.ok) throw new Error('fixture');
+    const row = db.rows('mfa_challenges')[0]!;
+    row.satisfied_at = new Date().toISOString();
+    row.attempts = 1;
+    const results = await Promise.all([consume(issued.challengeId), consume(issued.challengeId)]);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(row.consumed_for).toBe(ACTION_A);
+  });
   it('requires bounded session-bound source before creating the challenge', async () => {
     await expect(
       mfa.issueChallenge({ userId: USER, tenantId: TENANT, purpose: 'local_custody_policy' }),

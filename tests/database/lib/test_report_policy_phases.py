@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -30,7 +31,7 @@ class PolicyPhases(unittest.TestCase):
         self.assertEqual(len(plan["all"]), len(set(plan["all"])))
         self.assertEqual(sorted(plan["historical143"] + plan["current"]), plan["all"])
         self.assertIn(PHASES.CURRENT, plan["current"])
-        self.assertEqual(plan["currentVersion"], 147)
+        self.assertEqual(plan["currentVersion"], 151)
         self.assertIn(
             "local-public-control-assessment-dispatch.test.sql", plan["current"]
         )
@@ -54,7 +55,12 @@ class PolicyPhases(unittest.TestCase):
             (root / "infra/supabase/migrations" / source.name).write_text(
                 "-- offline inventory only"
             )
-        self.assertEqual(PHASES.plan(root)["currentVersion"], 147)
+        self.assertEqual(PHASES.plan(root)["currentVersion"], 151)
+        custody = root / "tests/database/local-custody-operator-context.test.sql"
+        custody.unlink()
+        with self.assertRaisesRegex(ValueError, "custody148_context_suite_required"):
+            PHASES.plan(root)
+        custody.write_text("-- restored inventory only")
         dispatch = (
             root / "tests/database/local-public-control-assessment-dispatch.test.sql"
         )
@@ -101,7 +107,12 @@ class PolicyPhases(unittest.TestCase):
         ]
         for wrong in [
             rows[:-1],
-            [r.replace("147|", "146|") for r in rows],
+            [
+                r.replace(
+                    f"{plan['currentVersion']}|", f"{plan['currentVersion'] - 1}|"
+                )
+                for r in rows
+            ],
             rows + rows[:1],
             [r.replace("143|", "144|") for r in rows],
         ]:
@@ -113,6 +124,37 @@ class PolicyPhases(unittest.TestCase):
         self.assertTrue(
             json.loads((p / "suite-inventory-verified.json").read_text())["noneOmitted"]
         )
+
+    def test_latest149_requires_cancellation_suite(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            shutil.copytree(PHASES.ROOT / "infra", root / "infra")
+            shutil.copytree(PHASES.ROOT / "tests/database", root / "tests/database")
+            (
+                root / "tests/database/local-custody-intent-cancellation.test.sql"
+            ).unlink()
+            with self.assertRaisesRegex(
+                ValueError, "custody149_cancellation_suite_required"
+            ):
+                PHASES.plan(root)
+
+    def test_latest150_requires_mfa_clock_suite(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            shutil.copytree(PHASES.ROOT / "infra", root / "infra")
+            shutil.copytree(PHASES.ROOT / "tests/database", root / "tests/database")
+            (root / "tests/database/local-custody-mfa-time-contract.test.sql").unlink()
+            with self.assertRaisesRegex(ValueError, "custody150_mfa_clock_suite_required"):
+                PHASES.plan(root)
+
+    def test_latest151_requires_founder_authority_suite(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            shutil.copytree(PHASES.ROOT / "infra", root / "infra")
+            shutil.copytree(PHASES.ROOT / "tests/database", root / "tests/database")
+            (root / "tests/database/platform-founder-authority.test.sql").unlink()
+            with self.assertRaisesRegex(ValueError, "founder151_authority_suite_required"):
+                PHASES.plan(root)
 
     def test_legacy_rows_commit_before_canonical144_and_then_replay(self):
         p = self.directory()

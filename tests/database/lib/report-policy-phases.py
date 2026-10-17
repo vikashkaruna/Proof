@@ -79,6 +79,22 @@ def plan(root: Path = ROOT) -> dict:
         or "local-public-control-assessment-dispatch.test.sql" in files,
         "dispatch147_suite_required",
     )
+    need(
+        versions[-1] < 148 or "local-custody-operator-context.test.sql" in files,
+        "custody148_context_suite_required",
+    )
+    need(
+        versions[-1] < 149 or "local-custody-intent-cancellation.test.sql" in files,
+        "custody149_cancellation_suite_required",
+    )
+    need(
+        versions[-1] < 150 or "local-custody-mfa-time-contract.test.sql" in files,
+        "custody150_mfa_clock_suite_required",
+    )
+    need(
+        versions[-1] < 151 or "platform-founder-authority.test.sql" in files,
+        "founder151_authority_suite_required",
+    )
     return {
         "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),

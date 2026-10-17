@@ -1,7 +1,13 @@
+import { verifyLocalCustodyCancellation } from '../workloads/local-key-admission.js';
+import { bindingSha256 } from '../services/mfa.js';
 import { it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
 import { createHash } from 'node:crypto';
-import { encodeLocalCustodyPolicy, encodeLocalCustodyEvent } from '@axiom/types';
+import {
+  encodeLocalCustodyPolicy,
+  encodeLocalCustodyEvent,
+  encodeLocalCustodyCancellation,
+} from '@axiom/types';
 import { localCustodyPolicyRoutes } from './local-custody-policy.js';
 import { LocalKeyPolicy } from '../workloads/local-key-policy.js';
 import type { MfaService } from '../services/mfa.js';
@@ -71,7 +77,7 @@ function setup(role = 'owner', session = s) {
   let saved: unknown = { state: 'not_found' };
   const read = vi.fn(async (name: string, args: Record<string, unknown>) => ({
     data:
-      name === 'read_local_custody_policy_event'
+      name === 'read_local_custody_policy_outcome'
         ? saved
         : {
             authorized: true,
@@ -152,6 +158,10 @@ function setup(role = 'owner', session = s) {
     });
   return {
     send,
+    context: (query = '') =>
+      app.request('/v1/local-custody-policy/context' + query, {
+        headers: { 'X-Expected-Actor-Id': a },
+      }),
     read,
     write,
     mfa,
@@ -188,6 +198,7 @@ it('binds the dedicated challenge to exact authenticated actor/session/request a
   expect(f.write).toHaveBeenCalledTimes(1);
   expect((await f.send('record', { request: r })).status).toBe(200);
   expect(f.mfa.consumeChallenge).toHaveBeenCalledTimes(1);
+  expect(f.mfa.consumeChallenge).toHaveBeenCalledWith(expect.objectContaining({ sessionId: s }));
   expect(f.write).toHaveBeenCalledTimes(1);
 });
 it('preserves uncertain committed outcome and only recovers exact positive readback', async () => {
@@ -274,4 +285,330 @@ it('refuses malformed transport and invalid stage combinations without writer', 
   );
   expect(f.write).not.toHaveBeenCalled();
   expect(f.mfa.consumeChallenge).not.toHaveBeenCalled();
+});
+
+it('reads current scoped policy/head/history without creating MFA or a write', async () => {
+  const f = setup();
+  await f.send('record', { request: r, challengeId: event });
+  const saved = f.getSaved();
+  f.write.mockClear();
+  f.mfa.consumeChallenge.mockClear();
+  const row = {
+    policyId: op,
+    policyText,
+    policySha256: sha(policyText),
+    keyPolicySha256: p.keyPolicySha256,
+    head: { eventId: event, state: 'requested', activationEpoch: 0, reviewDueAt: 1 },
+    reviewOverdue: true,
+    actions: ['revoke'],
+  };
+  const result = {
+    version: 1,
+    tenantId: t,
+    actorId: a,
+    isDemo: false,
+    canRequest: true,
+    requestModes: ['operator_managed'],
+    selectedPolicyId: op,
+    rows: [row],
+    nextCursor: null,
+    history: [saved],
+    nextHistoryCursor: null,
+  };
+  f.read.mockResolvedValue({ data: result, error: null });
+  const response = await f.context('?policyId=' + op);
+  expect(response.status).toBe(200);
+  expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+  expect(await response.json()).toEqual({ data: result });
+  expect(f.read).toHaveBeenLastCalledWith(
+    'read_local_custody_operator_context',
+    expect.objectContaining({ p_tenant_id: t, p_actor_id: a, p_session_id: s, p_policy_id: op }),
+    expect.any(AbortSignal),
+  );
+  expect(f.write).not.toHaveBeenCalled();
+  expect(f.mfa.consumeChallenge).not.toHaveBeenCalled();
+  for (const wrong of [
+    { tenantId: event },
+    { actorId: event },
+    { selectedPolicyId: event },
+    { rows: [{ ...row, policySha256: 'f'.repeat(64) }] },
+    { rows: [{ ...row, head: { ...row.head, state: 'active' } }] },
+    { history: [] },
+  ]) {
+    f.read.mockResolvedValueOnce({ data: { ...result, ...wrong }, error: null });
+    expect((await f.context('?policyId=' + op)).status).toBe(503);
+  }
+});
+it('refuses malformed context pagination before RPC and supports explicit bounded cursors', async () => {
+  const f = setup();
+  for (const query of [
+    '?policyId=bad',
+    '?policyId=' + op + '&after=' + op,
+    '?beforeReceiptId=1',
+    '?after=' + op + '&after=' + op,
+    '?unknown=x',
+  ])
+    expect((await f.context(query)).status).toBe(400);
+  expect(f.read).not.toHaveBeenCalled();
+  f.read.mockResolvedValue({
+    data: {
+      version: 1,
+      tenantId: t,
+      actorId: a,
+      isDemo: false,
+      canRequest: true,
+      requestModes: ['operator_managed'],
+      selectedPolicyId: null,
+      rows: [],
+      nextCursor: null,
+      history: [],
+      nextHistoryCursor: null,
+    },
+    error: null,
+  });
+  expect((await f.context('?after=' + op)).status).toBe(200);
+  expect(f.read).toHaveBeenLastCalledWith(
+    'read_local_custody_operator_context',
+    expect.objectContaining({ p_after_policy_id: op }),
+    expect.any(AbortSignal),
+  );
+});
+
+it.each(['viewer', 'admin', 'approver'])(
+  'denies known %s role before context RPC',
+  async (role) => {
+    const f = setup(role);
+    const response = await f.context();
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: { code: 'custody_forbidden' } });
+    expect(f.read).not.toHaveBeenCalled();
+  },
+);
+it('checks a cancelled original before every MFA step and never calls a late writer', async () => {
+  const f = setup(),
+    c = {
+      version: 1,
+      operationKey: event,
+      originalRequestText: encodeLocalCustodyEvent(r),
+      reason: 'Stale exact intent',
+      confirmed: true,
+    };
+  const cancellationText = encodeLocalCustodyCancellation(c);
+  f.setSaved({
+    state: 'cancelled',
+    tenantId: t,
+    actorId: a,
+    operationKey: event,
+    originalOperationKey: op,
+    originalRequestText: c.originalRequestText,
+    originalRequestSha256: sha(c.originalRequestText),
+    cancellationText,
+    cancellationSha256: sha(cancellationText),
+    cancellationId: s,
+    receipt: { id: '2', entryHash: 'c'.repeat(64) },
+    replayed: true,
+  });
+  for (const step of ['recover', 'challenge', 'verify', 'record'])
+    expect((await f.send(step)).status).toBe(200);
+  expect(f.write).not.toHaveBeenCalled();
+  expect(f.mfa.issueChallenge).not.toHaveBeenCalled();
+  expect(f.mfa.consumeChallenge).not.toHaveBeenCalled();
+});
+it('resolution uses separate canonical bytes, key and domain; malformed/wrong-scope input never reaches writer', async () => {
+  const f = setup(),
+    c = {
+      version: 1,
+      operationKey: event,
+      originalRequestText: encodeLocalCustodyEvent(r),
+      reason: 'Stale exact intent',
+      confirmed: true,
+    };
+  f.read.mockImplementation(async (name, args) => ({
+    data:
+      name === 'read_local_custody_policy_cancellation'
+        ? { state: 'not_found' }
+        : {
+            authorized: true,
+            tenantId: t,
+            actorId: a,
+            sessionId: s,
+            operationKey: event,
+            requestSha256: sha(String(args.p_request_text)),
+          },
+    error: null,
+  }));
+  expect((await f.send('challenge', { resolution: c }, { 'Idempotency-Key': event })).status).toBe(
+    200,
+  );
+  expect(f.mfa.issueChallenge).toHaveBeenCalledWith(
+    expect.objectContaining({
+      boundResourceRef: event,
+      boundPayloadSha256: bindingSha256([
+        'axiom.local-custody.cancel',
+        1,
+        t,
+        a,
+        s,
+        sha(encodeLocalCustodyCancellation(c)),
+      ]),
+    }),
+  );
+  expect(
+    (await f.send('record', { request: r, resolution: c }, { 'Idempotency-Key': event })).status,
+  ).toBe(400);
+  expect(
+    (
+      await f.send(
+        'record',
+        { resolution: { ...c, confirmed: false } },
+        { 'Idempotency-Key': event },
+      )
+    ).status,
+  ).toBe(400);
+  expect(f.write).not.toHaveBeenCalled();
+});
+it('records only exact fresh cancellation MFA and refuses self-consistent changed-reason readback', async () => {
+  const f = setup(),
+    c = {
+      version: 1,
+      operationKey: event,
+      originalRequestText: encodeLocalCustodyEvent(r),
+      reason: 'Abandon stale intent',
+      confirmed: true,
+    };
+  const cancellationText = encodeLocalCustodyCancellation(c),
+    row = {
+      state: 'cancelled',
+      tenantId: t,
+      actorId: a,
+      operationKey: event,
+      originalOperationKey: op,
+      originalRequestText: c.originalRequestText,
+      originalRequestSha256: sha(c.originalRequestText),
+      cancellationText,
+      cancellationSha256: sha(cancellationText),
+      cancellationId: s,
+      receipt: { id: '2', entryHash: 'c'.repeat(64) },
+      replayed: false,
+    };
+  f.read.mockImplementation(async (name, args) => ({
+    data:
+      name === 'read_local_custody_policy_cancellation'
+        ? { state: 'not_found' }
+        : {
+            authorized: true,
+            tenantId: t,
+            actorId: a,
+            sessionId: s,
+            operationKey: event,
+            requestSha256: sha(String(args.p_request_text)),
+          },
+    error: null,
+  }));
+  f.mfa.verifyChallenge.mockResolvedValue({
+    ok: true,
+    challengeId: event,
+    purpose: 'local_custody_policy',
+    boundResourceRef: event,
+    factorId: a,
+    satisfiedWith: 'totp',
+  });
+  expect(
+    (
+      await f.send(
+        'verify',
+        { resolution: c, challengeId: event, code: '123456' },
+        { 'Idempotency-Key': event },
+      )
+    ).status,
+  ).toBe(200);
+  f.write.mockResolvedValue({ data: row, error: null });
+  const response = await f.send(
+    'record',
+    { resolution: c, challengeId: event },
+    { 'Idempotency-Key': event },
+  );
+  expect(response.status).toBe(201);
+  expect(f.write).toHaveBeenCalledWith(
+    'record_local_custody_policy_cancellation',
+    expect.objectContaining({ p_request_text: cancellationText, p_challenge_id: event }),
+    expect.any(AbortSignal),
+  );
+  expect(f.mfa.consumeChallenge).toHaveBeenCalledWith(
+    expect.objectContaining({
+      sessionId: s,
+      consumedFor: event,
+      boundPayloadSha256: bindingSha256([
+        'axiom.local-custody.cancel',
+        1,
+        t,
+        a,
+        s,
+        sha(cancellationText),
+      ]),
+    }),
+  );
+  const changed = encodeLocalCustodyCancellation({ ...c, reason: 'Different reason' });
+  f.read.mockResolvedValue({
+    data: { ...row, cancellationText: changed, cancellationSha256: sha(changed) },
+    error: null,
+  });
+  expect((await f.send('recover', { resolution: c }, { 'Idempotency-Key': event })).status).toBe(
+    503,
+  );
+  expect(f.write).toHaveBeenCalledTimes(1);
+});
+it('verifies cancellation tenant/actor/original/key/hash commitments independently of HTTP delivery', () => {
+  const c = {
+      version: 1,
+      operationKey: event,
+      originalRequestText: encodeLocalCustodyEvent(r),
+      reason: 'Abandon stale intent',
+      confirmed: true,
+    },
+    cancellationText = encodeLocalCustodyCancellation(c);
+  const row = {
+    state: 'cancelled',
+    tenantId: t,
+    actorId: a,
+    operationKey: event,
+    originalOperationKey: op,
+    originalRequestText: c.originalRequestText,
+    originalRequestSha256: sha(c.originalRequestText),
+    cancellationText,
+    cancellationSha256: sha(cancellationText),
+    cancellationId: s,
+    receipt: { id: '2', entryHash: 'c'.repeat(64) },
+    replayed: true,
+  };
+  const expected = { tenantId: t, actorId: a, originalRequestText: c.originalRequestText };
+  expect(verifyLocalCustodyCancellation(row, expected)).toEqual(row);
+  for (const changed of [
+    { tenantId: s },
+    { actorId: s },
+    { operationKey: s },
+    { originalOperationKey: s },
+    { originalRequestText: encodeLocalCustodyEvent({ ...r, reason: 'different' }) },
+    { originalRequestSha256: 'd'.repeat(64) },
+    { cancellationSha256: 'd'.repeat(64) },
+    { cancellationText: JSON.stringify(c) },
+  ])
+    expect(() => verifyLocalCustodyCancellation({ ...row, ...changed }, expected)).toThrow();
+  const different = encodeLocalCustodyCancellation({
+    ...c,
+    originalRequestText: encodeLocalCustodyEvent({ ...r, reason: 'different' }),
+  });
+  expect(() =>
+    verifyLocalCustodyCancellation(
+      { ...row, cancellationText: different, cancellationSha256: sha(different) },
+      expected,
+    ),
+  ).toThrow();
+  expect(() => verifyLocalCustodyCancellation(row, { ...expected, tenantId: s })).toThrow();
+  expect(() =>
+    verifyLocalCustodyCancellation(row, {
+      ...expected,
+      originalRequestText: expected.originalRequestText + ' ',
+    }),
+  ).toThrow();
 });

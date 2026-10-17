@@ -3,6 +3,11 @@ import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { test, expect } from '@playwright/test';
+import { z } from 'zod';
+import {
+  operationSchema,
+  pageMetaSchema,
+} from '../../../apps/web/src/app/(app)/evidence/evidence-contract';
 import { selectTenant, signIn, state, signInFreshOwner } from '../fixtures';
 import { acceptanceTarget, repoRoot } from '../target';
 import { localRoleBearer } from '../local-writer';
@@ -335,14 +340,59 @@ test.describe('real provider evidence ingestion', () => {
     await page.reload();
     const pendingList = await pendingListResponse;
     expect(pendingList.status()).toBe(200);
-    expect(await pendingList.json()).toMatchObject({
+    const pendingEnvelope = z
+      .object({ data: z.array(operationSchema), meta: pageMetaSchema })
+      .parse(await pendingList.json());
+    expect(pendingEnvelope).toMatchObject({
       data: expect.arrayContaining([
         expect.objectContaining({ operationKey: pending.operationKey, status: 'pending' }),
       ]),
     });
     checkpoint('pending_operation_browser_readback_verified');
-    const operationRow = page
-      .getByRole('region', { name: 'Upload operations', exact: true })
+    const operationsRegion = page.getByRole('region', { name: 'Upload operations', exact: true });
+    // The API response is not proof that React consumed and rendered that response.
+    // Retain only finite state/counts; never DOM text, identifiers or error messages.
+    const diagnostic = await Promise.race([
+      operationsRegion
+        .evaluateAll(
+          (regions, key) => ({
+            state: 'available' as const,
+            regions: regions.length,
+            busy: regions.some((region) => region.getAttribute('aria-busy') === 'true'),
+            alerts: regions.reduce(
+              (count, region) => count + region.querySelectorAll('[role="alert"]').length,
+              0,
+            ),
+            matchingCards: regions.reduce(
+              (count, region) =>
+                count +
+                [...region.querySelectorAll('div.rounded')].filter((card) =>
+                  card.textContent?.includes(key),
+                ).length,
+              0,
+            ),
+          }),
+          pending.operationKey,
+        )
+        .catch(() => ({ state: 'unavailable' as const })),
+      new Promise<{ state: 'unavailable' }>((resolve) => {
+        const timer = setTimeout(() => resolve({ state: 'unavailable' }), 1_000);
+        timer.unref();
+      }),
+    ]);
+    console.info(
+      JSON.stringify({
+        event: 'evidence_ingestion_render_state',
+        ...diagnostic,
+        pendingInEnvelope: pendingEnvelope.data.some(
+          (row) => row.operationKey === pending.operationKey,
+        ),
+        responseRows: pendingEnvelope.data.length,
+      }),
+    );
+    await expect(operationsRegion).toHaveAttribute('aria-busy', 'false');
+    await expect(operationsRegion.getByRole('alert')).toHaveCount(0);
+    const operationRow = operationsRegion
       .locator('div.rounded')
       .filter({ hasText: pending.operationKey });
     await expect(operationRow).toContainText('pending');

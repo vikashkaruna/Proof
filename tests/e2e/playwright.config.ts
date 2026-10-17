@@ -168,6 +168,9 @@ export default defineConfig({
   // deployed acceptance forbids skipped journeys, so do not discover that
   // fixture-only spec unless the explicit storage launcher enables it.
   testIgnore: [
+    ...(process.env.AXIOM_LOCAL_CUSTODY_BROWSER_ACCEPTANCE === 'true'
+      ? []
+      : ['**/local-custody-policy-provider.spec.ts']),
     ...(process.env.AXIOM_PUBLIC_WEBSITE_LIVE === 'true' ? [] : ['**/public-website-live.spec.ts']),
     ...(process.env.AXIOM_EVIDENCE_STORAGE_ACCEPTANCE === 'true'
       ? []
