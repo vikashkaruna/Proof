@@ -114,7 +114,7 @@ test('a founder recovers another founder who lost their authenticator', async ({
   await founder.goto('/settings/security', { waitUntil: 'domcontentloaded' });
   const consolePanel = founder.getByTestId('mfa-recovery-console');
   await consolePanel.getByRole('button', { name: 'Open recovery console' }).click();
-  await consolePanel.getByLabel('Founder to recover').selectOption(subject.id);
+  await consolePanel.getByLabel('Account to recover').selectOption(subject.id);
   await consolePanel
     .getByLabel('How you verified their identity')
     .fill('Video call on the known number, e2e journey');

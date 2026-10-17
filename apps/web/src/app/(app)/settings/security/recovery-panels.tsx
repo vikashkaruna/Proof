@@ -242,6 +242,10 @@ const overviewSchema = z.object({
   founders: z.array(
     z.object({ user_id: z.string(), email: z.string(), full_name: z.string().nullable() }),
   ),
+  // 0156: tenant owners/admins a founder may recover. Absent before 0156.
+  owners: z
+    .array(z.object({ user_id: z.string(), email: z.string(), full_name: z.string().nullable() }))
+    .default([]),
   cases: z.array(
     z.object({
       case_id: z.string(),
@@ -299,7 +303,9 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
     }
   }
 
-  const emailOf = (id: string) => overview?.founders.find((f) => f.user_id === id)?.email ?? id;
+  const emailOf = (id: string) =>
+    [...(overview?.founders ?? []), ...(overview?.owners ?? [])].find((f) => f.user_id === id)
+      ?.email ?? id;
 
   const open = () =>
     act(async () => {
@@ -377,7 +383,7 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
           <>
             <div className="flex flex-col gap-3 rounded-md border border-slate-300 bg-slate-50 p-4">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="recoverySubject">Founder to recover</Label>
+                <Label htmlFor="recoverySubject">Account to recover</Label>
                 <select
                   id="recoverySubject"
                   className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
@@ -385,11 +391,20 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
                   onChange={(e) => setSubject(e.target.value)}
                 >
                   <option value="">Select…</option>
-                  {overview.founders.map((f) => (
-                    <option key={f.user_id} value={f.user_id}>
-                      {f.full_name ? `${f.full_name} — ${f.email}` : f.email}
-                    </option>
-                  ))}
+                  <optgroup label="Founders">
+                    {overview.founders.map((f) => (
+                      <option key={f.user_id} value={f.user_id}>
+                        {f.full_name ? `${f.full_name} — ${f.email}` : f.email}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Owners & admins">
+                    {overview.owners.map((f) => (
+                      <option key={f.user_id} value={f.user_id}>
+                        {f.full_name ? `${f.full_name} — ${f.email}` : f.email}
+                      </option>
+                    ))}
+                  </optgroup>
                 </select>
               </div>
               <div className="flex flex-col gap-1.5">

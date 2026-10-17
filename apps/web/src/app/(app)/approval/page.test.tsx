@@ -9,10 +9,19 @@ const state = vi.hoisted(() => ({
   plans: { data: [] as Record<string, unknown>[] | null, error: null as Error | null },
   calls: [] as Array<[string, string, unknown]>,
   capability: vi.fn(),
+  tenant: vi.fn(),
+  role: 'approver' as string,
+  scopes: [] as string[],
+}));
+vi.mock('next/navigation', () => ({
+  redirect: (to: string) => {
+    throw new Error('REDIRECT ' + to);
+  },
 }));
 vi.mock('@/lib/tenant-context', () => ({
   Capability: { PLAN_READ: 'plan.read', PLAN_APPROVE: 'plan.approve' },
   requireCapabilityContext: state.capability,
+  requireTenantContext: state.tenant,
 }));
 vi.mock('next/link', () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
@@ -24,6 +33,13 @@ beforeEach(() => {
   state.actions = { data: [], error: null };
   state.plans = { data: [], error: null };
   state.calls = [];
+  state.role = 'approver';
+  state.scopes = [];
+  state.tenant.mockReset().mockImplementation(async () => ({
+    ...(await state.capability()),
+    role: state.role,
+    approvalScopes: state.scopes,
+  }));
   state.capability.mockReset().mockImplementation(async () => ({
     tenantId: 'tenant-1',
     supabase: {
@@ -64,8 +80,8 @@ it('shows empty approval and plan lists without demo actions or validated rollba
   }
   expect(state.calls).toContainEqual(['remediation_actions', 'tenant_id', 'tenant-1']);
   expect(state.calls).toContainEqual(['remediation_plans', 'tenant_id', 'tenant-1']);
-  // The queue is offered to, and guarded for, those who can decide.
-  expect(state.capability).toHaveBeenCalledWith('plan.approve');
+  // The queue is guarded by the approver ROLE (scope is decided per action).
+  expect(state.tenant).toHaveBeenCalled();
 });
 
 it('keeps query errors distinct from empty queues', async () => {
@@ -100,4 +116,52 @@ it('renders the shared module context line with the approval module id', async (
   expect(view).toContain('अनुमोदन कतार');
   expect(view).toContain('M3.3');
   expect(view).not.toMatch(/<h1[^>]*>[^<]*अनुमोदन/);
+});
+
+it('admits a scoped approver and marks each action in or out of scope', async () => {
+  state.scopes = ['identity.deprovision'];
+  state.actions = {
+    data: [
+      {
+        id: 'a1',
+        plan_id: 'p1',
+        description: 'Remove stale account',
+        action_type: 'identity.deprovision',
+        risk_class: 'low',
+      },
+      {
+        id: 'a2',
+        plan_id: 'p1',
+        description: 'Delete records',
+        action_type: 'data-deletion',
+        risk_class: 'high',
+      },
+    ],
+    error: null,
+  };
+  const html = renderToStaticMarkup(await ApprovalPage());
+  expect(html).toContain('Within your approval scope (identity.deprovision)');
+  expect(html).toContain('Outside your approval scope (data-deletion) — view only');
+});
+
+it('shows no scope labels to an unscoped approver', async () => {
+  state.actions = {
+    data: [
+      {
+        id: 'a1',
+        plan_id: 'p1',
+        description: 'x',
+        action_type: 'data-deletion',
+        risk_class: 'low',
+      },
+    ],
+    error: null,
+  };
+  const html = renderToStaticMarkup(await ApprovalPage());
+  expect(html).not.toContain('approval scope');
+});
+
+it('still refuses a role that cannot approve', async () => {
+  state.role = 'viewer';
+  await expect(ApprovalPage()).rejects.toThrow('REDIRECT /portal?error=forbidden');
 });
