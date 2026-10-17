@@ -114,3 +114,15 @@ describe('local key service entrypoint', () => {
     expect(() => prepared.serve(new AbortController().signal)).toThrow();
   });
 });
+
+it('keeps the checked-in example configuration valid', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const { localKeyServiceConfiguration } = await import('./local-key-service.js');
+  const example = JSON.parse(
+    await readFile(
+      new URL('../../../infra/workload/local-key-service.example.json', import.meta.url),
+      'utf8',
+    ),
+  );
+  expect(localKeyServiceConfiguration.safeParse(example).success).toBe(true);
+});
