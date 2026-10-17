@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
+import { isAbsolute, join } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { parseCatalogueJson } from '@axiom/control-library';
@@ -30,11 +32,34 @@ const digest = (text: string) => createHash('sha256').update(text, 'utf8').diges
 /** Mounted behind normal verified Auth/tenant middleware.
  * The SQL writer repeats live authority + fresh retained MFA; this factory adds
  * no global capability, bypass, provider configuration or automatic mutation. */
+/** Operator-staged, non-secret custody manifests, one file per tenant
+ * (`<tenantId>.json` = {policyText, policySha256}) in a read-only directory
+ * named by AXIOM_LOCAL_CUSTODY_MANIFEST_DIR. Absent directory or file: null. */
+export async function readStagedCustodyManifest(
+  tenantId: string,
+  directory = process.env.AXIOM_LOCAL_CUSTODY_MANIFEST_DIR,
+): Promise<string | null> {
+  if (!directory || !isAbsolute(directory)) return null;
+  const file = join(directory, `${uuid.parse(tenantId).toLowerCase()}.json`);
+  try {
+    const info = await stat(file);
+    if (!info.isFile() || info.size < 2 || info.size > LOCAL_CUSTODY_MAX_BYTES * 2) return null;
+    return await readFile(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+const stagedSchema = z
+  .object({ policyText: z.string().max(LOCAL_CUSTODY_MAX_BYTES), policySha256: z.string() })
+  .strict();
+
 export function localCustodyPolicyRoutes(deps: {
   mfa: MfaService;
   read?: LocalCustodyReadRpc;
   write?: LocalCustodyReadRpc;
+  stagedManifest?: (tenantId: string) => Promise<string | null>;
 }) {
+  const stagedManifest = deps.stagedManifest ?? ((t: string) => readStagedCustodyManifest(t));
   const read =
     deps.read ??
     (async (name, args, signal) => createSupabaseAdmin().rpc(name, args).abortSignal(signal));
@@ -43,6 +68,28 @@ export function localCustodyPolicyRoutes(deps: {
     (async (name, args, signal) => createHumanActionWriter().rpc(name, args).abortSignal(signal));
   const app = new Hono<{ Variables: Variables }>();
   app.use('/local-custody-policy/*', boundedJsonBody(LOCAL_CUSTODY_MAX_BYTES * 4));
+  // Pre-fills the owner's request with the operator-prepared manifest for THIS
+  // tenant only. Read-only guidance: the request is still built, reviewed,
+  // MFA-confirmed and re-verified in SQL exactly as for a pasted manifest.
+  app.get('/local-custody-policy/staged-manifest', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const tenant = uuid.safeParse(c.get('tenantId'));
+    if (!tenant.success || !uuid.safeParse(c.get('user')?.id).success)
+      return c.json({ error: { code: 'current_session_required' } }, 401);
+    if (!['owner', 'founder'].includes(c.get('role')))
+      return c.json({ error: { code: 'custody_forbidden' } }, 403);
+    try {
+      const raw = await stagedManifest(tenant.data);
+      if (raw === null) return c.json({ error: { code: 'no_staged_manifest' } }, 404);
+      const staged = stagedSchema.parse(parseCatalogueJson(raw, LOCAL_CUSTODY_MAX_BYTES * 2));
+      const policy = verifyLocalCustodyPolicy(staged.policyText, staged.policySha256);
+      if (policy.tenantId !== tenant.data.toLowerCase())
+        return c.json({ error: { code: 'no_staged_manifest' } }, 404);
+      return c.json({ data: { policyText: staged.policyText, policySha256: staged.policySha256 } });
+    } catch {
+      return c.json({ error: { code: 'staged_manifest_invalid' } }, 422);
+    }
+  });
   app.get('/local-custody-policy/context', async (c) => {
     c.header('Cache-Control', 'private, no-store');
     const tenant = uuid.safeParse(c.get('tenantId')),

@@ -33,6 +33,15 @@ interface Props {
   canApprove?: boolean;
   canReject?: boolean;
   canExecute?: boolean;
+  /**
+   * Plain-language BR-2 reasons per action id, from the recorded-run readiness
+   * (migration 0157). Empty for an action that can be approved now.
+   */
+  blockerReasons?: Record<string, string[]>;
+  /** Why this plan's status rules out approval, or null when it does not. */
+  planBlocker?: string | null;
+  /** False when readiness could not be read: nothing is offered (fail closed). */
+  readinessAvailable?: boolean;
 }
 
 export function ApprovalActions({
@@ -47,6 +56,9 @@ export function ApprovalActions({
   canApprove = false,
   canReject = false,
   canExecute = false,
+  blockerReasons = {},
+  planBlocker = null,
+  readinessAvailable = true,
 }: Props) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set(eligible.map((a) => a.id)));
@@ -374,8 +386,22 @@ export function ApprovalActions({
     );
   }
 
+  // Approval is only offered when the server would accept it. Starting a
+  // step-up for a plan whose status rules approval out spent the approver's
+  // codes on a refusal (owner finding, 2026-10-17).
+  const approvalOffered = canApprove && readinessAvailable && !planBlocker;
+
   return (
     <div className="flex flex-col gap-4">
+      {planBlocker && (
+        <div
+          role="status"
+          className="rounded-md border border-slate-300 bg-slate-50 p-3 text-sm text-slate-700"
+        >
+          <strong>Not open for approval.</strong> {planBlocker}
+        </div>
+      )}
+
       {planStatus === 'cancelled' && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
           This remediation plan is currently marked as cancelled/rejected. You may still re-approve
@@ -385,9 +411,9 @@ export function ApprovalActions({
 
       {blocked.length > 0 && (
         <div className="rounded-md border border-ember-500 bg-ember-50 p-3 text-sm text-ember-700">
-          <strong>{blocked.length} action(s) blocked</strong> — not eligible for approval. Need a
-          completed dry-run AND a validated rollback. The BFF will refuse to issue an approval token
-          that includes a blocked action.
+          <strong>{blocked.length} action(s) blocked</strong> — not eligible for approval. Each
+          needs a recorded, unexpired, successful dry run for its current content AND a validated
+          rollback (BR-2). The reason for each is listed against the action below.
         </div>
       )}
 
@@ -493,11 +519,18 @@ export function ApprovalActions({
                 <span className="text-slate-600">
                   {action.action_type} · {action.risk_class} risk
                 </span>
-                {!canSelect && (
-                  <span className="block text-ember-700">
-                    Requires a completed dry-run and validated rollback.
-                  </span>
-                )}
+                {!canSelect &&
+                  (blockerReasons[action.id]?.length ? (
+                    blockerReasons[action.id]!.map((reason) => (
+                      <span key={reason} className="block text-ember-700">
+                        {reason}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="block text-ember-700">
+                      Requires a recorded dry run and a validated rollback.
+                    </span>
+                  ))}
               </span>
             </label>
           );
@@ -553,7 +586,7 @@ export function ApprovalActions({
         />
       </div>
 
-      {canApprove && stepUp && (
+      {approvalOffered && stepUp && (
         <div className="rounded-md border border-slate-300 bg-slate-50 p-4">
           <p className="text-sm font-medium text-slate-800">Confirm with your authenticator</p>
           <p className="mt-1 text-xs text-slate-600">
@@ -605,7 +638,7 @@ export function ApprovalActions({
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        {canApprove && (
+        {approvalOffered && (
           <Button
             variant="accent"
             size="lg"

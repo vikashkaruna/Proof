@@ -178,15 +178,48 @@ export async function createApprovablePlan(label: string): Promise<{
       rollback_definition: { restore: 'persona-snapshot' },
       parameters: { columns: ['email'] },
       closes_finding_ids: [],
-      dry_run_status: 'dry_run_complete',
       rollback_validated: true,
-      dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
-      dry_run_result: { recordsAffected: 12 },
     },
     { tenantId: state.tenantA.id, engagementId: state.engagementA },
   );
+  // 0157: approval needs a RECORDED dry run; the inline status alone is not one.
+  // Record it through the sanctioned path, which also sets that status.
+  await recordFixtureDryRun(actionId, { columns: ['email'] }, { restore: 'persona-snapshot' });
 
   return { id, title, actionId };
+}
+
+/** A successful dry run for a fixture action, recorded by `record_dry_run` (0060). */
+export async function recordFixtureDryRun(
+  actionId: string,
+  parameters: unknown,
+  rollbackDefinition: unknown,
+): Promise<void> {
+  const res = await fetch(`${state.supabaseUrl}/rest/v1/rpc/record_dry_run`, {
+    method: 'POST',
+    headers: {
+      apikey: state.publishableKey,
+      Authorization: `Bearer ${state.serviceKey}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      p_tenant_id: state.tenantA.id,
+      p_action_id: actionId,
+      p_status: 'succeeded',
+      p_diff: { changes: [{ field: 'email', before: 'cleartext', after: 'masked' }] },
+      p_refusal_reason: null,
+      p_simulated_by: 'sudhaar',
+      p_parameters: parameters,
+      p_rollback_definition: rollbackDefinition,
+      p_correlation_id: crypto.randomUUID(),
+    }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    dryRun?: { status?: string };
+    error?: string;
+  };
+  if (!res.ok || body.dryRun?.status !== 'succeeded')
+    throw new Error(`Fixture dry run not recorded: ${res.status} ${body.error ?? ''}`);
 }
 
 /**

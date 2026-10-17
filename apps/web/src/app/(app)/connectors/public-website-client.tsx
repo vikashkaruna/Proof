@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { z } from 'zod';
 import { publicFormMetadataSchema } from '@axiom/types';
-import { generateUUID } from '@axiom/ui';
+import { buttonVariants, generateUUID } from '@axiom/ui';
 import {
   loadContextualCapture,
   retainContextualCapture,
@@ -574,6 +574,7 @@ export function PublicWebsiteClient({
       {disabledReason && <p role="status">{disabledReason}</p>}
       {savedAwaitingCleanup && (
         <button
+          className={buttonVariants({ variant: 'outline', size: 'sm' })}
           type="button"
           onClick={() => {
             try {

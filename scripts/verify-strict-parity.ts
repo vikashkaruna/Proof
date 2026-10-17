@@ -1145,10 +1145,26 @@ async function main() {
       risk_score: 10,
       rollback_definition: { fixture: true },
       rollback_validated: true,
-      dry_run_status: 'dry_run_complete',
-      dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
     },
   ]);
+  // 0157: approval needs a RECORDED dry run for the action's current content,
+  // recorded through record_dry_run as Sudhaar's simulation would be.
+  async function recordParityDryRun(parameters: unknown) {
+    const res = await apiRequest('/rest/v1/rpc/record_dry_run', 'POST', {
+      p_tenant_id: tenantB,
+      p_action_id: actionId,
+      p_status: 'succeeded',
+      p_diff: { changes: [] },
+      p_refusal_reason: null,
+      p_simulated_by: 'sudhaar',
+      p_parameters: parameters,
+      p_rollback_definition: { fixture: true },
+      p_correlation_id: randomUUID(),
+    });
+    const body = (await res.json().catch(() => ({}))) as { dryRun?: { status?: string } };
+    assert.equal(body.dryRun?.status, 'succeeded', 'parity fixture dry run not recorded');
+  }
+  await recordParityDryRun({});
   const approval = { planId, actionIds: [actionId], mode: 'batch' };
   await check(
     'session_mfa_does_not_replace_approval_step_up',
@@ -1176,6 +1192,9 @@ async function main() {
   await updateLocalFixtureRow(fixtureTarget, 'remediation_actions', actionId, {
     parameters: { changedAfterStepUp: true },
   });
+  // Re-simulated for the edited content, so this check reaches the step-up
+  // binding (the property under test) rather than the BR-2 readiness gate.
+  await recordParityDryRun({ changedAfterStepUp: true });
   await check(
     'changed_action_content_invalidates_step_up',
     '/v1/plans/approve',

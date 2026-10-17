@@ -12,7 +12,7 @@ import {
   retainedBuildResultSchema,
 } from '../../reports/retained-artifact-state';
 import { useReceiptRefresh } from '../../reports/use-receipt-refresh';
-import { PageHeader } from '@axiom/ui';
+import { PageHeader, buttonVariants } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
 
 export type DpbBreach = { id: string; title: string; detected_at: string };
@@ -321,7 +321,7 @@ export function DpbReviewsClient({
           />
           <button
             disabled={busy || !selected || !title.trim()}
-            className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className={buttonVariants({ variant: 'primary' })}
           >
             Freeze source
           </button>
@@ -372,7 +372,7 @@ export function DpbReviewsClient({
                         onClick={() =>
                           void act(`/reports/dpb/requests/${item.requestId}/generate`, {})
                         }
-                        className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                        className={buttonVariants({ variant: 'outline', size: 'sm' })}
                       >
                         Create deterministic draft
                       </button>
@@ -384,7 +384,7 @@ export function DpbReviewsClient({
                           item.contentHash &&
                           void inspectSource(item.requestId, item.reportId!, item.contentHash)
                         }
-                        className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                        className={buttonVariants({ variant: 'outline', size: 'sm' })}
                       >
                         Inspect frozen source
                       </button>
@@ -402,7 +402,7 @@ export function DpbReviewsClient({
                               item.reportId,
                             )
                           }
-                          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                          className={buttonVariants({ variant: 'outline', size: 'sm' })}
                         >
                           Build retained versions
                         </button>
@@ -421,7 +421,7 @@ export function DpbReviewsClient({
                                 item.reportId,
                               )
                             }
-                            className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                            className={buttonVariants({ variant: 'outline', size: 'sm' })}
                           >
                             Reconcile
                           </button>
@@ -434,7 +434,7 @@ export function DpbReviewsClient({
                                 item.reportId,
                               )
                             }
-                            className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                            className={buttonVariants({ variant: 'outline', size: 'sm' })}
                           >
                             Retry missing
                           </button>
@@ -469,7 +469,7 @@ export function DpbReviewsClient({
                                 pdfHash: artifact.pdf!.sha256,
                               })
                             }
-                            className="rounded bg-teal-700 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
+                            className={buttonVariants({ variant: 'accent', size: 'sm' })}
                           >
                             Release exact PDF
                           </button>
@@ -479,7 +479,7 @@ export function DpbReviewsClient({
                       <button
                         disabled={busy}
                         onClick={() => void download(item.reportId!, artifact)}
-                        className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                        className={buttonVariants({ variant: 'outline', size: 'sm' })}
                       >
                         Download verified PDF
                       </button>
@@ -525,7 +525,7 @@ export function DpbReviewsClient({
                               note: 'Reviewed the frozen recorded breach and DPB notification source and its stated limitations.',
                             })
                           }
-                          className="rounded bg-slate-900 px-3 py-1 text-sm font-medium text-white disabled:opacity-50"
+                          className={buttonVariants({ variant: 'accent', size: 'sm' })}
                         >
                           Approve exact draft
                         </button>

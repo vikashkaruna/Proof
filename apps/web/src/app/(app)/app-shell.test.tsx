@@ -43,6 +43,7 @@ vi.mock('@/lib/tenant-context', () => {
     role: 'approver',
     approvalScopes: [] as string[],
     supabase: {
+      rpc: async () => ({ data: [], error: null }),
       from: () => {
         const query = {
           select: () => query,

@@ -1,7 +1,13 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
-import { can } from '@axiom/types';
+import {
+  PlanReadinessSchema,
+  can,
+  describePlanStatusBlocker,
+  type ActionReadiness,
+  type PlanReadiness,
+} from '@axiom/types';
 import {
   PageHeader,
   Card,
@@ -26,6 +32,13 @@ import { DryRunHistory, type DryRunRow } from './dry-run-history';
 import { ApprovalProofArchive } from './approval-proof-archive';
 import { DryRunDiffView } from '../../execution/dry-run-diff';
 import { moduleBarProps } from '@/lib/module-bar';
+import {
+  approvedWithoutRecordedRun,
+  blockerReasons,
+  cacheContradictsRecord,
+  dryRunBadge,
+  recordedDryRunState,
+} from '@/lib/dry-run-truth';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,7 +64,10 @@ interface RemediationAction {
   dry_run_completed_at: string | null;
   dry_run_expires_at: string | null;
   dry_run_result: unknown;
+  latest_dry_run_id: string | null;
   rollback_validated: boolean;
+  rollback_validated_at: string | null;
+  execution_status: string | null;
   rollback_definition: { estimatedRollbackTimeSeconds?: number } | null;
   approval_status: string;
   approved_at: string | null;
@@ -132,11 +148,30 @@ export default async function PlanDetailPage({ params }: PageProps) {
     (a, b) => a.sequence - b.sequence,
   );
 
-  const eligible = actions.filter(
-    (a) => a.dry_run_status === 'dry_run_complete' && a.rollback_validated,
+  // BR-2 readiness from the RECORDED dry runs (migration 0157) — the same rule
+  // the BFF gate and the approval trigger apply. The inline dry_run_status is a
+  // display cache and is never treated as a dry run on its own. If readiness
+  // cannot be read, nothing is offered for approval (fail closed).
+  const readinessRes = await supabase.rpc('plan_approval_readiness', {
+    p_tenant_id: typedPlan.tenant_id,
+    p_plan_id: id,
+  });
+  const readinessParsed = readinessRes.error
+    ? null
+    : PlanReadinessSchema.safeParse(readinessRes.data);
+  const readiness: PlanReadiness | null = readinessParsed?.success ? readinessParsed.data : null;
+  const readinessByAction = new Map<string, ActionReadiness>(
+    (readiness?.actions ?? []).map((a) => [a.actionId, a]),
   );
-  const blocked = actions.filter(
-    (a) => !(a.dry_run_status === 'dry_run_complete' && a.rollback_validated),
+  const planBlocker = describePlanStatusBlocker(typedPlan.status);
+
+  const eligible = actions.filter((a) => readinessByAction.get(a.id)?.ready === true);
+  const blocked = actions.filter((a) => readinessByAction.get(a.id)?.ready !== true);
+  const blockerReasonsByAction = Object.fromEntries(
+    actions.map((a) => [a.id, blockerReasons(readinessByAction.get(a.id))]),
+  );
+  const approvedUnrecorded = actions.filter((a) =>
+    approvedWithoutRecordedRun(a.approval_status, readinessByAction.get(a.id)),
   );
   const aggregateBlast = typedPlan.aggregate_blast_radius;
 
@@ -175,7 +210,14 @@ export default async function PlanDetailPage({ params }: PageProps) {
     .order('created_at', { ascending: false })
     .limit(100);
   const dryRuns = (dryRunsRes.data ?? []) as unknown as DryRunRow[];
+  // The run the action links to is its current one; newest-first is only a
+  // fallback for a history read that predates the link.
+  const runsById = new Map(dryRuns.map((run) => [run.id, run]));
   const latestDryRunByAction = new Map<string, DryRunRow>();
+  for (const action of actions) {
+    const linked = action.latest_dry_run_id ? runsById.get(action.latest_dry_run_id) : undefined;
+    if (linked) latestDryRunByAction.set(action.id, linked);
+  }
   for (const run of dryRuns) {
     if (!latestDryRunByAction.has(run.action_id)) latestDryRunByAction.set(run.action_id, run);
   }
@@ -286,6 +328,28 @@ export default async function PlanDetailPage({ params }: PageProps) {
         </div>
       </div>
 
+      {!readiness && (
+        <p
+          role="alert"
+          className="rounded-md border border-ember-500 bg-ember-50 p-3 text-sm text-ember-700"
+        >
+          <strong>Approval readiness is unavailable.</strong> The recorded dry runs could not be
+          read, so no action is offered for approval. Refresh, or check the dry-run history below.
+        </p>
+      )}
+
+      {approvedUnrecorded.length > 0 && (
+        <p
+          role="alert"
+          className="rounded-md border border-ember-500 bg-ember-50 p-3 text-sm text-ember-700"
+        >
+          <strong>{approvedUnrecorded.length} approved action(s) have no recorded dry run.</strong>{' '}
+          They were approved on the status field alone, before approval required a recorded run
+          (BR-2, migration 0157). That approval is not evidence of a dry run, and the action cannot
+          be approved again until a dry run is recorded for it.
+        </p>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Approval actions</CardTitle>
@@ -304,6 +368,9 @@ export default async function PlanDetailPage({ params }: PageProps) {
             actions={actions}
             eligible={eligible}
             blocked={blocked}
+            blockerReasons={blockerReasonsByAction}
+            planBlocker={planBlocker}
+            readinessAvailable={readiness !== null}
             initialApprovalToken={activeApprovalToken}
             initialApprovedActionIds={activeApprovedActionIds}
             canApprove={canApprove}
@@ -315,7 +382,13 @@ export default async function PlanDetailPage({ params }: PageProps) {
 
       <div className="flex flex-col gap-3">
         {actions.map((a) => (
-          <ActionCard key={a.id} action={a} latestDryRun={latestDryRunByAction.get(a.id) ?? null} />
+          <ActionCard
+            key={a.id}
+            planId={typedPlan.id}
+            action={a}
+            latestDryRun={latestDryRunByAction.get(a.id) ?? null}
+            readiness={readinessByAction.get(a.id) ?? null}
+          />
         ))}
       </div>
 
@@ -325,16 +398,23 @@ export default async function PlanDetailPage({ params }: PageProps) {
 }
 
 function ActionCard({
+  planId,
   action,
   latestDryRun,
+  readiness,
 }: {
+  planId: string;
   action: RemediationAction;
   latestDryRun: DryRunRow | null;
+  readiness: ActionReadiness | null;
 }) {
-  const dryRunOk = action.dry_run_status === 'dry_run_complete';
   const rollbackOk = action.rollback_validated;
   const isApproved = action.approval_status === 'approved';
-  const isEligible = dryRunOk && rollbackOk;
+  const isEligible = readiness?.ready === true;
+  const runState = recordedDryRunState(readiness);
+  const runBadge = dryRunBadge(runState);
+  const cacheContradiction = cacheContradictsRecord(action.dry_run_status, readiness);
+  const reasons = blockerReasons(readiness);
   // The recorded run is the source of truth; the action row's `dry_run_result`
   // is only its display cache. Parse defensively — a shape that does not fit
   // falls back to the raw JSON below rather than rendering invented fields.
@@ -390,16 +470,24 @@ function ActionCard({
               Dry-run
             </p>
             <p className="mt-1 text-sm">
-              <StatusBadge status={action.dry_run_status as StatusKind} />
+              <Badge variant={runBadge.variant}>{runBadge.label}</Badge>
             </p>
-            {action.dry_run_completed_at && (
-              <p className="text-xs text-slate-500">
-                {formatDateTime(action.dry_run_completed_at)}
-              </p>
+            {readiness?.dryRun ? (
+              <>
+                <p className="text-xs text-slate-500">
+                  {formatDateTime(readiness.dryRun.createdAt)}
+                </p>
+                <p className="text-xs text-slate-500">
+                  window ends {formatDateTime(readiness.dryRun.expiresAt)}
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-slate-500">No run on record</p>
             )}
-            {action.dry_run_expires_at && (
-              <p className="text-xs text-slate-500">
-                expires {formatDateTime(action.dry_run_expires_at)}
+            {cacheContradiction && (
+              <p className="mt-1 text-xs text-ember-700">
+                The status field says &ldquo;dry-run complete&rdquo;, but no run is recorded. The
+                status field is not a dry run.
               </p>
             )}
           </div>
@@ -408,8 +496,17 @@ function ActionCard({
               Rollback
             </p>
             <p className="mt-1 text-sm">
-              {rollbackOk ? <StatusBadge status="approved" /> : <StatusBadge status="awaiting" />}
+              {rollbackOk ? (
+                <Badge variant="success">Validated</Badge>
+              ) : (
+                <Badge variant="warning">Not validated</Badge>
+              )}
             </p>
+            {action.rollback_validated_at && (
+              <p className="text-xs text-slate-500">
+                {formatDateTime(action.rollback_validated_at)}
+              </p>
+            )}
             <p className="text-xs text-slate-500">
               ~{action.rollback_definition?.estimatedRollbackTimeSeconds ?? 0}s
             </p>
@@ -424,7 +521,29 @@ function ActionCard({
             {action.approved_at && (
               <p className="text-xs text-slate-500">{formatDateTime(action.approved_at)}</p>
             )}
+            {approvedWithoutRecordedRun(action.approval_status, readiness) && (
+              <p className="mt-1 text-xs text-ember-700">Approved without a recorded dry run.</p>
+            )}
           </div>
+        </div>
+
+        {!isEligible && reasons.length > 0 && (
+          <ul
+            aria-label={`Why action #${action.sequence} cannot be approved now`}
+            className="list-disc space-y-0.5 rounded-md border border-slate-200 bg-white py-2 pl-7 pr-3 text-xs text-slate-700"
+          >
+            {reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        )}
+
+        <div>
+          <Button variant="outline" size="sm" asChild>
+            <Link href={`/plans/${planId}/actions/${action.id}`}>
+              View dry-run &amp; rollback details
+            </Link>
+          </Button>
         </div>
 
         {refusedRun && (

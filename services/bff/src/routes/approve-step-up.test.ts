@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Hono } from 'hono';
 import { generateTotp } from '@axiom/mfa';
 import { UserRole, Capability, rolesWith } from '@axiom/types';
-import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
+import { createFakeDb, seedRecordedDryRun, type FakeDb } from '../test/fake-postgrest.js';
 import type { Variables } from '../types.js';
 
 /**
@@ -64,15 +64,18 @@ function seedApprovablePlan() {
     library_version: '0.1.1',
   });
   for (const id of [ACTION_A, ACTION_B]) {
-    fake.seed('remediation_actions', {
-      id,
-      tenant_id: TENANT,
-      plan_id: PLAN,
-      action_type: 'data.mask',
-      dry_run_status: 'dry_run_complete',
-      rollback_validated: true,
-      dry_run_expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
-    });
+    seedRecordedDryRun(
+      fake,
+      fake.seed('remediation_actions', {
+        id,
+        tenant_id: TENANT,
+        plan_id: PLAN,
+        action_type: 'data.mask',
+        dry_run_status: 'dry_run_complete',
+        rollback_validated: true,
+        dry_run_expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+      }),
+    );
   }
 }
 
@@ -322,6 +325,82 @@ describe('POST /v1/plans/approve — MFA step-up', () => {
 
 // A valid factor cannot rescue missing/stale safety evidence. These denials
 // precede token consumption and runtime dispatch.
+/**
+ * 0157 · owner finding 2026-10-17 — the gate reads the RECORDED dry run.
+ *
+ * A Kosha plan said "dry-run complete" with no dry run recorded, and was
+ * approved; another plan, in `partial_failure`, answered only "Plan is not
+ * ready for approval" after four step-ups. Both are refused here before any
+ * step-up is spent, and the refusal names what is missing.
+ */
+describe('POST /v1/plans/approve — recorded dry-run gate (BR-2)', () => {
+  type Refusal = {
+    error: {
+      code: string;
+      message: string;
+      details: { ineligible?: { id: string; blockers: string[] }[]; planStatus?: string };
+    };
+  };
+
+  it('refuses an action whose cache says dry_run_complete but has no recorded run', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+    fake.rows('remediation_actions').find((r) => r.id === ACTION_A)!.latest_dry_run_id = null;
+
+    const res = await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as Refusal;
+    expect(body.error.code).toBe('actions_ineligible');
+    expect(body.error.details.ineligible).toEqual([
+      expect.objectContaining({ id: ACTION_A, blockers: ['no_recorded_dry_run'] }),
+    ]);
+    expect(body.error.message).toContain('No dry run is recorded');
+    expect(fake.rows('approval_tokens')).toHaveLength(0);
+    expect(fake.rows('mfa_challenges').find((r) => r.id === challengeId)?.consumed_at).toBeFalsy();
+  });
+
+  it('names a refused recorded run', async () => {
+    const app = await buildApp();
+    const action = fake.rows('remediation_actions').find((r) => r.id === ACTION_B)!;
+    seedRecordedDryRun(fake, action, { status: 'refused' });
+
+    const res = await post(app, '/v1/plans/approve', approveBody());
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as Refusal;
+    expect(body.error.details.ineligible).toEqual([
+      expect.objectContaining({ id: ACTION_B, blockers: ['dry_run_refused'] }),
+    ]);
+  });
+
+  it('says which plan status rules approval out, before any step-up', async () => {
+    fake.rows('remediation_plans')[0]!.status = 'partial_failure';
+    const app = await buildApp();
+    const res = await post(app, '/v1/plans/approve', approveBody());
+    expect(res.status).toBe(422);
+    const body = (await res.json()) as Refusal;
+    expect(body.error.code).toBe('plan_not_approvable');
+    expect(body.error.message).toContain('"partial failure"');
+    expect(body.error.details.planStatus).toBe('partial_failure');
+  });
+
+  it('fails closed when readiness cannot be read', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+    fake.failNextRpc('plan_approval_readiness');
+    const res = await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+    expect(res.status).toBe(503);
+    expect(fake.rows('approval_tokens')).toHaveLength(0);
+  });
+
+  it('issues when every requested action has a recorded fresh run', async () => {
+    const app = await buildApp();
+    const challengeId = await freshStepUp(app);
+    const res = await post(app, '/v1/plans/approve', approveBody({ mfaChallengeId: challengeId }));
+    expect(res.status).toBe(201);
+    expect(fake.rows('approval_tokens')).toHaveLength(1);
+  });
+});
+
 describe('dry-run expiry at both safety gates', () => {
   it.each([null, 'not-a-date', '2000-01-01T00:00:00.000Z'])(
     'refuses approval with expiry %s',

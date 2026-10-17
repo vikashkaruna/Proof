@@ -1,4 +1,5 @@
 'use client';
+import { buttonVariants } from '@axiom/ui';
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { z } from 'zod';
@@ -316,7 +317,11 @@ export function ReportRequestRecovery({
           )}
           {recovery.confirmed &&
           canonicalJson(recovery.confirmed.operation) === canonicalJson(operation) ? (
-            <button type="button" onClick={recovery.clearConfirmed}>
+            <button
+              className={buttonVariants({ variant: 'outline', size: 'sm' })}
+              type="button"
+              onClick={recovery.clearConfirmed}
+            >
               Clear confirmed browser reference
             </button>
           ) : (
@@ -333,6 +338,7 @@ export function ReportRequestRecovery({
                 I authorize checking or retrying this exact retained request.
               </label>
               <button
+                className={buttonVariants({ variant: 'outline', size: 'sm' })}
                 type="button"
                 disabled={
                   recovery.busy || !recovery.canRetry || confirmation !== canonicalJson(operation)
