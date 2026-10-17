@@ -19,6 +19,10 @@ import { logger } from '../lib/logger.js';
  *               POST /mfa/recovery/cases                   open (fences subject)
  *               POST /mfa/recovery/cases/:id/authorize     confirm bound session
  *               POST /mfa/recovery/cases/:id/cancel
+ * Delegation:   GET  /mfa/recovery/delegations              founder or owner view
+ *               POST /mfa/recovery/delegations              founder issues (tenant from context)
+ *               POST /mfa/recovery/delegations/:id/revoke   founder
+ *               POST /mfa/recovery/delegated-cases          owner opens (scoped)
  * Beneficiary:  GET  /mfa/recovery/beneficiary
  *               POST /mfa/recovery/beneficiary/bind
  *               POST /mfa/recovery/beneficiary/enrol
@@ -39,6 +43,28 @@ const AuthorizeBody = z.object({ beneficiarySessionId: uuid, code }).strict();
 const CaseBody = z.object({ caseId: uuid }).strict();
 const EnrolBody = z.object({ caseId: uuid, label: z.string().max(64).nullish() }).strict();
 const ActivateBody = z.object({ caseId: uuid, code }).strict();
+const DelegateBody = z
+  .object({
+    ownerUserId: uuid,
+    targetRoles: z
+      .array(z.enum(['approver', 'reviewer', 'viewer']))
+      .min(1)
+      .max(3)
+      .refine((r) => new Set(r).size === r.length, 'duplicate role'),
+    expiresInDays: z.number().int().min(1).max(30),
+    reason: z.string().trim().min(10).max(1000),
+    code,
+  })
+  .strict();
+const RevokeBody = z.object({ reason: z.string().trim().min(1).max(1000) }).strict();
+const DelegatedOpenBody = z
+  .object({
+    delegationId: uuid,
+    subjectUserId: uuid,
+    reason: z.string().trim().min(10).max(1000),
+    code,
+  })
+  .strict();
 
 function refusal(error: { code?: string } | null) {
   if (error?.code === 'PT409') return { status: 409 as const, code: 'recovery_conflict' };
@@ -169,6 +195,87 @@ export function mfaRecoveryRoutes(deps: { mfa: MfaService; rpc?: RecoveryRpc }) 
       return c.json({ error: { code: r.code } }, r.status);
     }
     return c.body(null, 204);
+  });
+
+  // ─── Scoped owner delegation (0154) ─────────────────────────────────
+  app.get('/mfa/recovery/delegations', async (c) => {
+    const { data, error } = await rpc('read_mfa_recovery_delegations', {
+      p_actor_id: c.get('user').id,
+    });
+    if (error) {
+      const r = refusal(error);
+      return c.json({ error: { code: r.code } }, r.status);
+    }
+    return c.json(data);
+  });
+
+  // The tenant is the one the founder is acting in, never a body field.
+  app.post('/mfa/recovery/delegations', async (c) => {
+    const body = DelegateBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: { code: 'validation_failed' } }, 400);
+    const tenantId = c.get('tenantId');
+    const step = await stepUp(c, `delegate:${body.data.ownerUserId}:${tenantId}`, body.data.code);
+    if (!step.ok) return c.json({ error: { code: step.code } }, step.status);
+    const { data, error } = await rpc('issue_mfa_recovery_delegation', {
+      p_founder_id: c.get('user').id,
+      p_founder_session_id: c.get('sessionId'),
+      p_challenge_id: step.challengeId,
+      p_owner_id: body.data.ownerUserId,
+      p_tenant_id: tenantId,
+      p_target_roles: body.data.targetRoles,
+      p_expires_at: new Date(Date.now() + body.data.expiresInDays * 86_400_000).toISOString(),
+      p_reason: body.data.reason,
+    });
+    if (error) {
+      const r = refusal(error);
+      return c.json({ error: { code: r.code } }, r.status);
+    }
+    return c.json(data, 201);
+  });
+
+  app.post('/mfa/recovery/delegations/:id/revoke', async (c) => {
+    const id = uuid.safeParse(c.req.param('id'));
+    const body = RevokeBody.safeParse(await c.req.json().catch(() => null));
+    if (!id.success || !body.success) return c.json({ error: { code: 'validation_failed' } }, 400);
+    const { error } = await rpc('revoke_mfa_recovery_delegation', {
+      p_founder_id: c.get('user').id,
+      p_founder_session_id: c.get('sessionId'),
+      p_delegation_id: id.data,
+      p_reason: body.data.reason,
+    });
+    if (error) {
+      const r = refusal(error);
+      return c.json({ error: { code: r.code } }, r.status);
+    }
+    return c.body(null, 204);
+  });
+
+  app.post('/mfa/recovery/delegated-cases', async (c) => {
+    const body = DelegatedOpenBody.safeParse(await c.req.json().catch(() => null));
+    if (!body.success) return c.json({ error: { code: 'validation_failed' } }, 400);
+    const actorId = c.get('user').id;
+    if (body.data.subjectUserId.toLowerCase() === actorId.toLowerCase())
+      return c.json({ error: { code: 'recovery_refused' } }, 403);
+    const step = await stepUp(
+      c,
+      `open:${body.data.subjectUserId}:${body.data.delegationId}`,
+      body.data.code,
+    );
+    if (!step.ok) return c.json({ error: { code: step.code } }, step.status);
+    const { data, error } = await rpc('open_delegated_mfa_recovery_case', {
+      p_owner_id: actorId,
+      p_owner_session_id: c.get('sessionId'),
+      p_challenge_id: step.challengeId,
+      p_delegation_id: body.data.delegationId,
+      p_subject_id: body.data.subjectUserId,
+      p_reason: body.data.reason,
+    });
+    if (error) {
+      logger.warn({ actorId, code: error.code }, 'delegated MFA recovery open refused');
+      const r = refusal(error);
+      return c.json({ error: { code: r.code } }, r.status);
+    }
+    return c.json(data, 201);
   });
 
   // ─── Beneficiary (the subject, on a fresh post-cutoff session) ──────

@@ -18,6 +18,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@axiom/supabase', () => ({
   createSupabaseServerClient: async () => ({
     auth: { getUser: async () => ({ data: { user: state.user } }) },
+    rpc: async () => ({ data: (state as { recovery?: unknown }).recovery ?? null, error: null }),
     from: (table: string) => {
       const query = {
         select: () => query,
@@ -119,4 +120,15 @@ it('sends a user without a recorded tenant to onboarding', async () => {
   await expect(VerifyPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
     'REDIRECT /onboarding',
   );
+});
+
+it('routes an account under recovery to the recovery panel instead of a prompt it cannot satisfy', async () => {
+  (state as { recovery?: unknown }).recovery = { case_id: 'case-1', state: 'opened' };
+  try {
+    await expect(VerifyPage({ searchParams: Promise.resolve({}) })).rejects.toThrow(
+      'REDIRECT /settings/security?recovery=1',
+    );
+  } finally {
+    (state as { recovery?: unknown }).recovery = null;
+  }
 });
