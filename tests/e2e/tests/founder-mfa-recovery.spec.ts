@@ -249,9 +249,7 @@ test('a founder delegates recovery and an owner recovers an approver in their te
   await card.getByRole('button', { name: 'Codes match — confirm' }).click();
   await expect(panel.getByRole('status')).toContainText('15 minutes');
 
-  await beneficiary
-    .getByRole('button', { name: 'Check for confirmation' })
-    .click();
+  await beneficiary.getByRole('button', { name: 'Check for confirmation' }).click();
   await beneficiary.getByRole('button', { name: 'Set up new authenticator' }).click();
   const newSecret = (await beneficiary.getByTestId('recovery-setup-key').innerText()).replace(
     /\s+/g,
