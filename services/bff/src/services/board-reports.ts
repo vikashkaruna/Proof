@@ -6,6 +6,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
+  buildQuestionnaireEvidenceReport,
+  renderQuestionnaireEvidenceDraft,
+  verifyQuestionnaireEvidenceSource,
+} from '@axiom/report-kit/questionnaire-evidence-report';
+import {
   buildCoverageFirstReport,
   renderCoverageFirstDraft,
   verifyCoverageFirstSource,
@@ -207,7 +212,20 @@ export class BoardReportService {
     } catch {
       throw new EvidenceError('assessment_source_incomplete', 409);
     }
-    if ((frozenJson as { schema_version?: unknown })?.schema_version === 4) {
+    const frozenVersion = (frozenJson as { schema_version?: unknown })?.schema_version;
+    if (frozenVersion === 4 || frozenVersion === 5) {
+      // Source4 (reviewed public evidence) → document5; source5 (questionnaire
+      // only, 0155) → document6. Both withhold metrics and are recomputed by SQL.
+      const questionnaireOnly = frozenVersion === 5;
+      const verifySource = questionnaireOnly
+        ? verifyQuestionnaireEvidenceSource
+        : verifyCoverageFirstSource;
+      const buildDocument = questionnaireOnly
+        ? buildQuestionnaireEvidenceReport
+        : buildCoverageFirstReport;
+      const renderDraft = questionnaireOnly
+        ? renderQuestionnaireEvidenceDraft
+        : renderCoverageFirstDraft;
       let content;
       const input = {
         requestId,
@@ -220,7 +238,7 @@ export class BoardReportService {
         generatedAt: new Date().toISOString(),
       };
       try {
-        const { source } = verifyCoverageFirstSource(input.sourceText, input.sourceSha256, {
+        const { source } = verifySource(input.sourceText, input.sourceSha256, {
           requestId,
           tenantId,
           engagementId: input.engagementId,
@@ -235,7 +253,7 @@ export class BoardReportService {
           JSON.parse(input.sourceText).report_kind !== 'board'
         )
           throw Error();
-        content = buildCoverageFirstReport(input);
+        content = buildDocument(input);
       } catch {
         throw new EvidenceError('assessment_source_conflict', 409);
       }
@@ -247,7 +265,7 @@ export class BoardReportService {
           p_actor_id: actorId,
           p_request_id: requestId,
           p_content_text: JSON.stringify(content),
-          p_html_text: renderCoverageFirstDraft(input),
+          p_html_text: renderDraft(input),
           p_correlation_id: correlationId,
         },
         signal,

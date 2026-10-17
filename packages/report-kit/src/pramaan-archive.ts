@@ -3,6 +3,10 @@ import {
   parseCoverageFirstJson,
   verifyCoverageFirstSource,
 } from './coverage-first-source';
+import {
+  QuestionnaireEvidenceSourceV5Schema,
+  verifyQuestionnaireEvidenceSource,
+} from './questionnaire-evidence-report';
 import { parseCatalogueJson } from '@axiom/control-library';
 /** Exact-version derivative archives for published, source-bound reports. */
 import { createHash } from 'node:crypto';
@@ -36,7 +40,7 @@ export type PramaanBoardArchiveInput = PramaanSourceArchiveInput;
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-/** Only source4 is unwrapped for validation; the ZIP always retains the original
+/** Only source4/source5 are unwrapped for validation; the ZIP always retains the original
  * exact provider source bytes and digest, never this derived inner view. */
 function archiveValidationSource(
   kind: 'board' | 'auditor',
@@ -44,7 +48,24 @@ function archiveValidationSource(
   scope: z.infer<typeof inputSchema>,
 ) {
   const text = Buffer.from(input.sourceBytes).toString('utf8');
-  if (JSON.parse(text).schema_version !== 4) return text;
+  const version = JSON.parse(text).schema_version;
+  if (version === 5) {
+    const envelope = QuestionnaireEvidenceSourceV5Schema.parse(
+      parseCoverageFirstJson(text, 4 * 1024 * 1024),
+    );
+    if (envelope.report_kind !== kind) throw Error('Questionnaire archive kind refused');
+    const original = z
+      .object({ assessment_run_id: z.uuid() })
+      .parse(JSON.parse(envelope.retained_source.text));
+    verifyQuestionnaireEvidenceSource(text, scope.source.sha256, {
+      tenantId: scope.tenantId,
+      engagementId: scope.engagementId,
+      requestId: scope.requestId,
+      assessmentRunId: original.assessment_run_id,
+    });
+    return envelope.retained_source.text;
+  }
+  if (version !== 4) return text;
   const envelope = CoverageFirstSourceV4Schema.parse(parseCoverageFirstJson(text, 4 * 1024 * 1024));
   if (envelope.report_kind !== kind) throw Error('Coverage archive kind refused');
   const original = z
