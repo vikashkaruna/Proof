@@ -124,7 +124,7 @@ it('lets an approver select an exact eligible subset but never a blocked action'
       canApprove
     />,
   );
-  expect((screen.getByLabelText(/Requires a completed dry-run/) as HTMLInputElement).disabled).toBe(
+  expect((screen.getByLabelText(/Requires a recorded dry run/) as HTMLInputElement).disabled).toBe(
     true,
   );
   fireEvent.click(screen.getByLabelText(/Patch second/));

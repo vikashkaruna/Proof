@@ -187,8 +187,12 @@ select pg_temp.assert_eq(
    ) ->> 'error'),
   'content_mismatch', 'a dry-run over content that is not the stored action is refused');
 
+-- A frozen action for this assertion only. How it became approved is not under
+-- test here: 0157 refuses approving a refused run (recorded-dry-run-approval).
+set local session_replication_role = replica;
 update public.remediation_actions set approval_status = 'approved'
   where id = '00000000-0000-0000-0000-0000000000d2';
+set local session_replication_role = origin;
 select pg_temp.assert_eq(
   (select public.record_dry_run(
      '00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-0000000000d2',

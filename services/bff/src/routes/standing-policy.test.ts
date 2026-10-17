@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { refuseMovedProofRpcs } from '../test/moved-proof-rpcs.js';
 import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
-import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
+import { createFakeDb, seedRecordedDryRun, type FakeDb } from '../test/fake-postgrest.js';
 import type { Variables } from '../types.js';
 
 /**
@@ -97,20 +97,23 @@ function seedApprovablePlan() {
     library_version: '0.1.1',
   });
   for (const id of [ACTION_A, ACTION_B]) {
-    fake.seed('remediation_actions', {
-      id,
-      tenant_id: TENANT,
-      plan_id: PLAN,
-      action_type: 'data.mask',
-      approval_status: 'awaiting_approval',
-      dry_run_status: 'dry_run_complete',
-      rollback_validated: true,
-      dry_run_expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
-      parameters: { system: 'crm' },
-      rollback_definition: { steps: [] },
-      closes_finding_ids: [],
-      dry_run_result: { renderable: true },
-    });
+    seedRecordedDryRun(
+      fake,
+      fake.seed('remediation_actions', {
+        id,
+        tenant_id: TENANT,
+        plan_id: PLAN,
+        action_type: 'data.mask',
+        approval_status: 'awaiting_approval',
+        dry_run_status: 'dry_run_complete',
+        rollback_validated: true,
+        dry_run_expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
+        parameters: { system: 'crm' },
+        rollback_definition: { steps: [] },
+        closes_finding_ids: [],
+        dry_run_result: { renderable: true },
+      }),
+    );
   }
   fake.seed('standing_approval_policies', {
     id: POLICY,

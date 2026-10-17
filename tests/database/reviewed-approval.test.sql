@@ -40,7 +40,7 @@ values
 update public.remediation_actions
    set dry_run_status = 'dry_run_complete', rollback_validated = true,
        dry_run_expires_at = now() + interval '1 hour',
-       dry_run_result = jsonb_build_object('recordsAffected', 12);
+       dry_run_result = jsonb_build_object('changes', '[]'::jsonb, 'recordsAffected', 12);
 
 insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypted) values
  ('00000000-0000-0000-0000-0000000000e1','00000000-0000-0000-0000-0000000000a9','totp','active','fixture-only');
@@ -92,6 +92,21 @@ $$;
 -- Preserve 0026 token digests exactly, including nested JSON and sorted sets.
 update public.remediation_actions set parameters = '{"unicode":"नमस्ते", "null":null,"array":[2,1],"nested":{"b":2,"a":1}}',
  closes_finding_ids = array['00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001']::uuid[];
+
+-- 0157: approval needs a recorded run for the stored content (these
+-- parameters); the inline cache alone is not one. Recorded here exactly as record_dry_run would.
+insert into public.dry_runs(tenant_id, action_id, plan_id, status, diff, renderable,
+  parameters_hash, rollback_definition_hash, correlation_id, expires_at)
+select tenant_id, id, plan_id, 'succeeded', '{"changes": [], "recordsAffected": 12}'::jsonb, true,
+  encode(sha256(convert_to(parameters::text, 'UTF8')), 'hex'),
+  encode(sha256(convert_to(rollback_definition::text, 'UTF8')), 'hex'),
+  gen_random_uuid(), now() + interval '1 hour'
+  from public.remediation_actions
+ where tenant_id in ('00000000-0000-0000-0000-0000000000c1') and latest_dry_run_id is null and rollback_definition is not null;
+update public.remediation_actions a set latest_dry_run_id = d.id, dry_run_result = d.diff
+  from public.dry_runs d
+ where d.tenant_id = a.tenant_id and d.action_id = a.id and a.latest_dry_run_id is null
+   and a.tenant_id in ('00000000-0000-0000-0000-0000000000c1');
 create temporary table reviewed_snapshot as select jsonb_agg(to_jsonb(a)) as actions,
  public.action_set_content_digest('00000000-0000-0000-0000-0000000000c1',
  '00000000-0000-0000-0000-0000000000c3', array['00000000-0000-0000-0000-0000000000d1','00000000-0000-0000-0000-0000000000d2']::uuid[]) as digest

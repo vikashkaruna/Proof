@@ -275,12 +275,28 @@ async function main() {
       rollback_definition: { restore: 'persona-snapshot' },
       parameters: { columns: ['email'] },
       closes_finding_ids: [],
-      dry_run_status: 'dry_run_complete',
       rollback_validated: true,
-      dry_run_expires_at: new Date(Date.now() + 3_600_000).toISOString(),
-      dry_run_result: { recordsAffected: 12 },
     },
   ]);
+  // 0157: approval needs a RECORDED dry run; the inline status alone is not one.
+  // Recorded through record_dry_run, which also sets the action's status.
+  const dryRun = await expectStatus(
+    await api('/rest/v1/rpc/record_dry_run', 'POST', {
+      p_tenant_id: tenantA.id,
+      p_action_id: actionId,
+      p_status: 'succeeded',
+      p_diff: { changes: [{ field: 'email', before: 'cleartext', after: 'masked' }] },
+      p_refusal_reason: null,
+      p_simulated_by: 'sudhaar',
+      p_parameters: { columns: ['email'] },
+      p_rollback_definition: { restore: 'persona-snapshot' },
+      p_correlation_id: randomUUID(),
+    }),
+    200,
+    'record the persona plan dry run',
+  );
+  if (((await dryRun.json()) as { dryRun?: { status?: string } }).dryRun?.status !== 'succeeded')
+    throw new Error('record the persona plan dry run: not recorded');
 
   const state: PersonaState = {
     deployment: target

@@ -45,6 +45,7 @@ import { sovereignLicenseRoutes } from './sovereign-license.js';
 import { dispatchExecution, type DispatchOutcome } from '../services/execution-dispatch.js';
 import { dispatchRollback } from '../services/rollback-dispatch.js';
 import { dispatchDryRun } from '../services/dry-run-dispatch.js';
+import { approvalGateRefusal, readPlanReadiness } from '../services/approval-readiness.js';
 import { invokeGenericAgent } from '../services/generic-agent-invocation.js';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
@@ -75,7 +76,12 @@ import type { RealtimeService } from '../services/realtime.js';
 import type { Variables } from '../types.js';
 import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
-import { Capability, authorize } from '@axiom/types';
+import {
+  APPROVABLE_PLAN_STATUSES,
+  Capability,
+  authorize,
+  describePlanStatusBlocker,
+} from '@axiom/types';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
 import { loadEnv } from '@axiom/config';
@@ -981,9 +987,18 @@ export function v1Routes(deps: Deps) {
     if (planErr || !plan) {
       return c.json({ error: { code: 'plan_not_found', message: 'Plan not found' } }, 404);
     }
-    if (!['draft', 'review', 'approved', 'cancelled'].includes(plan.status)) {
+    // The status alone already rules the plan out; say which status and why,
+    // rather than the old bare "not ready for approval".
+    const statusBlocker = describePlanStatusBlocker(plan.status);
+    if (statusBlocker) {
       return c.json(
-        { error: { code: 'plan_not_approvable', message: 'Plan is not ready for approval' } },
+        {
+          error: {
+            code: 'plan_not_approvable',
+            message: statusBlocker,
+            details: { planStatus: plan.status, approvableStatuses: APPROVABLE_PLAN_STATUSES },
+          },
+        },
         422,
       );
     }
@@ -1050,40 +1065,19 @@ export function v1Routes(deps: Deps) {
       }
     }
 
-    // Hard gate: every action must have a successful dry-run and a
-    // validated rollback. Per Doc 04 §4.3 / BR-2 — no approval
-    // without both. Per-action check, not just plan-level.
-    const ineligible = (actions ?? []).filter(
-      (a) => a.dry_run_status !== 'dry_run_complete' || !a.rollback_validated,
-    );
-    if (ineligible.length > 0) {
-      return c.json(
-        {
-          error: {
-            code: 'actions_ineligible',
-            message: `${ineligible.length} action(s) are not eligible for approval (need dry-run + validated rollback)`,
-            details: { ineligible: ineligible.map((a) => a.id) },
-          },
-        },
-        422,
-      );
+    // Hard gate, per action (Doc 04 §4.3 / BR-2): a RECORDED, fresh,
+    // successful dry run for the stored content, and a validated rollback.
+    // Read from `plan_approval_readiness` (0157), the same rule the approval
+    // trigger enforces under the locks — the inline dry_run_status cache alone
+    // is not a dry run. Each missing requirement is named in the refusal.
+    const readinessRead = await readPlanReadiness(admin, tenantId, input.planId);
+    if (!readinessRead.ok) {
+      return readinessRead.reason === 'not_found'
+        ? c.json({ error: { code: 'plan_not_found', message: 'Plan not found' } }, 404)
+        : c.json({ error: { code: 'lookup_failed', message: 'Readiness unavailable' } }, 503);
     }
-
-    // Stale dry-run check
-    const now = Date.now();
-    const stale = (actions ?? []).filter((a) => !hasFreshDryRun(a.dry_run_expires_at, now));
-    if (stale.length > 0) {
-      return c.json(
-        {
-          error: {
-            code: 'dry_run_expired',
-            message: 'Dry-runs have expired; please re-run before approving',
-            details: { expired: stale.map((a) => a.id) },
-          },
-        },
-        422,
-      );
-    }
+    const gate = approvalGateRefusal(readinessRead.readiness, input.actionIds);
+    if (gate) return c.json(gate.body, gate.status);
 
     // ── W1 · SEC-8 · the step-up ───────────────────────────────────────
     //
@@ -1892,9 +1886,18 @@ export function v1Routes(deps: Deps) {
     if (planErr || !plan) {
       return c.json({ error: { code: 'plan_not_found', message: 'Plan not found' } }, 404);
     }
-    if (!['draft', 'review', 'approved', 'cancelled'].includes(plan.status)) {
+    // The status alone already rules the plan out; say which status and why,
+    // rather than the old bare "not ready for approval".
+    const statusBlocker = describePlanStatusBlocker(plan.status);
+    if (statusBlocker) {
       return c.json(
-        { error: { code: 'plan_not_approvable', message: 'Plan is not ready for approval' } },
+        {
+          error: {
+            code: 'plan_not_approvable',
+            message: statusBlocker,
+            details: { planStatus: plan.status, approvableStatuses: APPROVABLE_PLAN_STATUSES },
+          },
+        },
         422,
       );
     }
@@ -1981,38 +1984,16 @@ export function v1Routes(deps: Deps) {
     }
 
     // Same per-action hard gate as the approve route (BR-2): no approval —
-    // standing or interactive — without a successful dry-run and a validated
-    // rollback, both fresh.
-    const ineligible = (actions ?? []).filter(
-      (a) => a.dry_run_status !== 'dry_run_complete' || !a.rollback_validated,
-    );
-    if (ineligible.length > 0) {
-      return c.json(
-        {
-          error: {
-            code: 'actions_ineligible',
-            message:
-              'A standing policy does not replace the dry-run gate: every action needs a fresh dry-run and a validated rollback first',
-            details: { ineligible: ineligible.map((a) => a.id) },
-          },
-        },
-        422,
-      );
+    // standing or interactive — without a recorded, fresh, successful dry run
+    // and a validated rollback. A standing policy does not replace it.
+    const readinessRead = await readPlanReadiness(admin, tenantId, planId);
+    if (!readinessRead.ok) {
+      return readinessRead.reason === 'not_found'
+        ? c.json({ error: { code: 'plan_not_found', message: 'Plan not found' } }, 404)
+        : c.json({ error: { code: 'lookup_failed', message: 'Readiness unavailable' } }, 503);
     }
-    const now = Date.now();
-    const stale = (actions ?? []).filter((a) => !hasFreshDryRun(a.dry_run_expires_at, now));
-    if (stale.length > 0) {
-      return c.json(
-        {
-          error: {
-            code: 'dry_run_expired',
-            message: 'Dry-runs have expired; re-run them before evaluating the policy',
-            details: { expired: stale.map((a) => a.id) },
-          },
-        },
-        422,
-      );
-    }
+    const gate = approvalGateRefusal(readinessRead.readiness, actionIds);
+    if (gate) return c.json(gate.body, gate.status);
 
     // The digest of the content as read, so the issuance under locks can
     // prove the content the policy evaluated is the content that was there.
@@ -2028,7 +2009,7 @@ export function v1Routes(deps: Deps) {
       );
     }
 
-    const expiresAt = new Date(now + input.expiresInMinutes * 60_000).toISOString();
+    const expiresAt = new Date(Date.now() + input.expiresInMinutes * 60_000).toISOString();
     const signed = await deps.approvalEngine.issue(tenantId, {
       planId,
       actionIds,

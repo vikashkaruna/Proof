@@ -197,8 +197,13 @@ insert into public.plan_reconciliations(id,tenant_id,plan_id,batch_id,approved_s
  ('99430000-0000-4000-8000-000000000086','99430000-0000-4000-8000-000000000010',
   '99430000-0000-4000-8000-000000000060','99430000-0000-4000-8000-000000000083',
   '{}'::jsonb,'{}'::jsonb,'Fixture statement',repeat('s',32));
+-- 0157: an approved action carries a recorded run for its content (the cache
+-- equal to that run's diff) and a validated rollback, as real issuance requires.
 update public.remediation_actions set
  latest_dry_run_id='99430000-0000-4000-8000-000000000081',
+ dry_run_status='dry_run_complete',dry_run_result='{"changes":[]}'::jsonb,
+ dry_run_completed_at=clock_timestamp(),dry_run_expires_at=clock_timestamp()+interval '1 hour',
+ rollback_validated=true,rollback_validated_at=clock_timestamp(),
  approval_token_id='99430000-0000-4000-8000-000000000082',
  approved_by='99430000-0000-4000-8000-000000000001',approval_status='approved',
  execution_batch_id='99430000-0000-4000-8000-000000000083',
