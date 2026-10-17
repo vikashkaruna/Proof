@@ -34,7 +34,7 @@ import {
  * server's; the route only reads them before fulfilling unchanged. */
 async function retainBody(
   page: Page,
-  pathname: (path: string) => boolean,
+  pathname: (path: string, url: URL) => boolean,
   method: 'GET' | 'POST',
 ): Promise<() => Promise<unknown>> {
   let text: string | undefined;
@@ -43,7 +43,7 @@ async function retainBody(
     const request = route.request();
     if (
       request.method() !== method ||
-      !pathname(new URL(request.url()).pathname) ||
+      !pathname(new URL(request.url()).pathname, new URL(request.url())) ||
       text !== undefined
     )
       return route.fallback();
@@ -149,6 +149,7 @@ export async function registeredWebsiteSourceInBrowser(
     }
   }
   process.stdout.write('[registered-website-stage] target-submit\n');
+  const registeredBody = await retainBody(page, (p) => p === operationPath, 'POST');
   const registered = page.waitForResponse(
     (r) => new URL(r.url()).pathname === operationPath && r.request().method() === 'POST',
     { timeout: 15_000 },
@@ -161,7 +162,7 @@ export async function registeredWebsiteSourceInBrowser(
   expect(registration.status()).toBe(201);
   targetSubmissionCheckpoint('response-schema');
   const target = await probeRegisteredResponse(
-    registration,
+    { json: registeredBody, headers: () => registration.headers() },
     'target-submit',
     registeredResponseScope(
       registration.request().headers(),
@@ -197,6 +198,15 @@ export async function registeredWebsiteSourceInBrowser(
   process.stdout.write('[registered-website-stage] capture-prepare\n');
   await registeredCombobox(console, 'Operation').selectOption('capture', { timeout: 15_000 });
   process.stdout.write('[registered-website-stage] load-saved-targets\n');
+  const targetsBody = await retainBody(
+    page,
+    (p, url) =>
+      p === '/api/bff/v1/public-website-assets/selection' &&
+      url.searchParams.get('kind') === 'targets' &&
+      url.searchParams.get('estateId') === config.estateId &&
+      url.searchParams.get('systemId') === config.systemId,
+    'GET',
+  );
   const targetsResponse = page.waitForResponse(
     (r) => {
       const url = new URL(r.url());
@@ -223,7 +233,7 @@ export async function registeredWebsiteSourceInBrowser(
   expect(loadedTargets.request().headers()['x-tenant-id']).toBe(config.tenantId);
   targetSelectionCheckpoint('response-schema');
   const targetsPage = await probeRegisteredResponse(
-    loadedTargets,
+    { json: targetsBody, headers: () => loadedTargets.headers() },
     'saved-targets',
     registeredResponseScope(loadedTargets.request().headers(), config),
     (body) => publicWebsiteAssetSelectionPageSchema.parse((body as { data: unknown }).data),
