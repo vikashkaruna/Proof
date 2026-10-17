@@ -17,16 +17,23 @@ import {
   manifest,
   policyId,
 } from './__tests__/fixtures';
-const api = vi.hoisted(() => ({ load: vi.fn(), step: vi.fn(), resolution: vi.fn() }));
+const api = vi.hoisted(() => ({
+  load: vi.fn(),
+  step: vi.fn(),
+  resolution: vi.fn(),
+  staged: vi.fn(),
+}));
 vi.mock('./custody-client', () => ({
   custodyScope: (tenantId: string, actorId: string) => ({ tenantId, actorId }),
   loadCustodyContext: api.load,
   custodyStep: api.step,
   custodyResolutionStep: api.resolution,
+  loadStagedManifest: api.staged,
 }));
 beforeEach(() => {
   localStorage.clear();
   vi.stubGlobal('crypto', webcrypto);
+  api.staged.mockReset().mockResolvedValue(null);
   api.load
     .mockReset()
     .mockImplementation(async (scope: { tenantId: string; actorId: string }) =>
@@ -79,11 +86,20 @@ async function prepare() {
     screen.getByLabelText('I reviewed the exact non-secret policy, selected action and reason.'),
   );
   fireEvent.click(screen.getByRole('button', { name: 'Prepare owner request' }));
+  // A request prepared on this page offers the one-step record panel.
+  await screen.findByRole('button', { name: 'Record request' });
+}
+/** Prepare, then reload: the request is now RETAINED from an earlier page, so
+ * the explicit check-and-retry steps are required again. */
+async function prepareRetained() {
+  await prepare();
+  cleanup();
+  render(<LocalCustodyClient tenantId={tenant} actorId={actor} />);
   await screen.findByRole('button', { name: 'Check retained request' });
 }
 it('prepares durable exact intent without mutation; requires recovery and fresh confirmation before MFA', async () => {
   await mount();
-  await prepare();
+  await prepareRetained();
   expect(api.step.mock.calls.map((c) => c[1])).toEqual(['recover']);
   expect(readCustodyIntents(localStorage, tenant, actor)).toHaveLength(1);
   expect(screen.getByRole('button', { name: 'Request authenticator challenge' })).toHaveProperty(
@@ -130,7 +146,7 @@ it('recorded response loss reload preserves exact body/key; only positive recove
 });
 it('fresh MFA verification/record uses frozen intent and never persists the code', async () => {
   await mount();
-  await prepare();
+  await prepareRetained();
   fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
   await screen.findByText(/No positive receipt was found/);
   fireEvent.click(
@@ -252,7 +268,7 @@ it('invalid operator manifest refused by read-only validation never becomes an u
 
 it('committed record response loss survives reload and exact positive reconciliation without another mutation', async () => {
   await mount();
-  await prepare();
+  await prepareRetained();
   const saved = readCustodyIntents(localStorage, tenant, actor)[0]!;
   fireEvent.click(screen.getByRole('button', { name: 'Check retained request' }));
   await screen.findByText(/No positive receipt was found/);
@@ -354,7 +370,7 @@ it('prepares an exact review predecessor and new future reminder without changin
     screen.getByLabelText('I reviewed the exact non-secret policy, selected action and reason.'),
   );
   fireEvent.click(screen.getByRole('button', { name: 'Prepare review' }));
-  await screen.findByRole('button', { name: 'Check retained request' });
+  await screen.findByRole('button', { name: 'Record request' });
   expect(readCustodyIntents(localStorage, tenant, actor)[0]?.request).toMatchObject({
     transition: 'review',
     previousEventId: event,
@@ -440,7 +456,7 @@ it('pins an immutable exact request across read-only preparation', async () => {
       return { state: 'not_found' };
     },
   );
-  await prepare();
+  await prepareRetained();
   expect(readCustodyIntents(localStorage, tenant, actor)).toHaveLength(1);
 });
 
@@ -562,4 +578,62 @@ it('explains when approve and activate appear and names the manifest file as tex
   expect(manifestField.getAttribute('aria-describedby')).toBe('custody-manifest-hint');
   expect(document.getElementById('custody-manifest-hint')?.textContent).toContain('kosha.json');
   expect(screen.queryAllByRole('link')).toHaveLength(0);
+});
+
+it('pre-fills the operator-staged manifest for this organisation and says so', async () => {
+  api.staged.mockResolvedValueOnce(manifest());
+  await mount();
+  await screen.findByText(/Loaded automatically from the manifest your Axiom operator prepared/);
+  expect(
+    (screen.getByLabelText('Operator-reviewed non-secret manifest JSON') as HTMLTextAreaElement)
+      .value,
+  ).toBe(JSON.stringify(manifest()));
+});
+
+it('says when no prepared manifest is staged, leaving paste available', async () => {
+  await mount();
+  await screen.findByText(/No prepared manifest is staged for this organisation/);
+  expect(
+    (screen.getByLabelText('Operator-reviewed non-secret manifest JSON') as HTMLTextAreaElement)
+      .value,
+  ).toBe('');
+});
+
+it('records a freshly prepared request in one step: challenge, verify, record', async () => {
+  await mount();
+  await prepare();
+  const saved = readCustodyIntents(localStorage, tenant, actor)[0]!;
+  api.step.mockClear();
+  api.step
+    .mockResolvedValueOnce({ challengeId: event })
+    .mockResolvedValueOnce({ verified: true })
+    .mockResolvedValueOnce(receipt(saved.request));
+  const record = screen.getByRole('button', { name: 'Record request' });
+  expect(record).toHaveProperty('disabled', true);
+  fireEvent.change(screen.getByLabelText('Authenticator code'), { target: { value: '123456' } });
+  fireEvent.click(record);
+  await screen.findByRole('region', { name: 'Confirmed custody receipt' });
+  expect(api.step.mock.calls.map((c) => c[1])).toEqual(['challenge', 'verify', 'record']);
+  expect(
+    api.step.mock.calls.every(
+      (c) => c[2] === saved.request || JSON.stringify(c[2]) === JSON.stringify(saved.request),
+    ),
+  ).toBe(true);
+  expect(api.step.mock.calls[1]?.[4]).toBe('123456');
+  expect(readCustodyIntents(localStorage, tenant, actor)).toEqual([]);
+  expect(JSON.stringify(localStorage)).not.toContain('123456');
+});
+
+it('falls back to the explicit check-and-retry steps when one-step recording fails', async () => {
+  await mount();
+  await prepare();
+  api.step.mockClear();
+  api.step
+    .mockResolvedValueOnce({ challengeId: event })
+    .mockRejectedValueOnce(Error('Connection lost'));
+  fireEvent.change(screen.getByLabelText('Authenticator code'), { target: { value: '123456' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Record request' }));
+  await screen.findByRole('button', { name: 'Check retained request' });
+  expect(screen.queryByRole('button', { name: 'Record request' })).toBeNull();
+  expect(readCustodyIntents(localStorage, tenant, actor)).toHaveLength(1);
 });

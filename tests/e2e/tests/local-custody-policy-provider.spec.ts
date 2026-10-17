@@ -274,6 +274,12 @@ async function prepare(
       ? person.page.getByRole('button', { name: 'Prepare owner request', exact: true })
       : article(person).getByRole('button', { name: `Prepare ${action}`, exact: true })
   ).click();
+  // Freshly prepared on this page: the one-step record panel is offered. These
+  // journeys exercise the RETAINED path (reload / response loss), so reload.
+  await expect(
+    person.page.getByRole('button', { name: 'Record request', exact: true }),
+  ).toBeVisible();
+  await person.page.reload({ waitUntil: 'domcontentloaded' });
   await expect(
     person.page.getByRole('button', { name: 'Check retained request', exact: true }),
   ).toBeVisible();

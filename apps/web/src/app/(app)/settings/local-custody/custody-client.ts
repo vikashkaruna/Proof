@@ -219,3 +219,22 @@ export async function custodyResolutionStep(
   if (verified.challengeId !== challengeId) throw Error('MFA challenge changed.');
   return verified;
 }
+
+/** The operator-prepared manifest for THIS tenant, or null when none is staged.
+ * Guidance only: the owner still reviews it, and every recording re-verifies it. */
+export async function loadStagedManifest(scope: { tenantId: string; actorId: string }) {
+  custodyScope(scope.tenantId, scope.actorId);
+  const response = await fetch('/api/bff/v1/local-custody-policy/staged-manifest', {
+    cache: 'no-store',
+    signal: AbortSignal.timeout(15000),
+    headers: { 'x-tenant-id': scope.tenantId, 'x-expected-actor-id': scope.actorId },
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error('The operator-prepared manifest could not be loaded.');
+  return z
+    .object({
+      data: z.object({ policyText: z.string(), policySha256: z.string() }).strict(),
+    })
+    .strict()
+    .parse(await response.json()).data;
+}

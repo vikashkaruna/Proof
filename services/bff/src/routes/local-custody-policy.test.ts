@@ -1,6 +1,6 @@
 import { verifyLocalCustodyCancellation } from '../workloads/local-key-admission.js';
 import { bindingSha256 } from '../services/mfa.js';
-import { it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
 import { createHash } from 'node:crypto';
 import {
@@ -8,7 +8,7 @@ import {
   encodeLocalCustodyEvent,
   encodeLocalCustodyCancellation,
 } from '@axiom/types';
-import { localCustodyPolicyRoutes } from './local-custody-policy.js';
+import { localCustodyPolicyRoutes, readStagedCustodyManifest } from './local-custody-policy.js';
 import { LocalKeyPolicy } from '../workloads/local-key-policy.js';
 import type { MfaService } from '../services/mfa.js';
 import type { LocalCustodyReadRpc } from '../workloads/local-key-admission.js';
@@ -611,4 +611,85 @@ it('verifies cancellation tenant/actor/original/key/hash commitments independent
       originalRequestText: expected.originalRequestText + ' ',
     }),
   ).toThrow();
+});
+
+describe('operator-staged manifest pre-fill', () => {
+  function stagedApp(role: string, raw: string | null) {
+    const app = new Hono<{ Variables: Variables }>();
+    app.use('*', async (c, next) => {
+      c.set('tenantId', t);
+      c.set('user', { id: a } as never);
+      c.set('sessionId', s);
+      c.set('role', role as never);
+      await next();
+    });
+    app.route(
+      '/v1',
+      localCustodyPolicyRoutes({
+        mfa: {} as unknown as MfaService,
+        read: vi.fn(),
+        write: vi.fn(),
+        stagedManifest: async () => raw,
+      }),
+    );
+    return (path = '/v1/local-custody-policy/staged-manifest') => app.request(path);
+  }
+  const staged = JSON.stringify({ policyText, policySha256: sha(policyText) });
+
+  it('returns the verified manifest for this tenant to an owner and a founder', async () => {
+    for (const role of ['owner', 'founder']) {
+      const res = await stagedApp(role, staged)();
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ data: { policyText, policySha256: sha(policyText) } });
+    }
+  });
+  it('refuses other roles, a missing file, a wrong digest and another tenant', async () => {
+    expect((await stagedApp('axiom_analyst', staged)()).status).toBe(403);
+    expect((await stagedApp('viewer', staged)()).status).toBe(403);
+    expect((await stagedApp('owner', null)()).status).toBe(404);
+    const tampered = JSON.stringify({ policyText, policySha256: 'f'.repeat(64) });
+    expect((await stagedApp('owner', tampered)()).status).toBe(422);
+    const ot = '99999999-9999-4999-8999-999999999999';
+    const oref = ref.replace(t, ot);
+    const otherPolicy = {
+      ...p,
+      tenantId: ot,
+      keyPolicy: { primary: oref, readable: [oref] },
+      keyPolicySha256: new LocalKeyPolicy({
+        tenantId: ot,
+        revision: op,
+        mode: 'operator_managed',
+        validity: { kind: 'until_revoked', reviewDueAt: 1 },
+        primary: oref,
+        readable: [oref],
+      }).fingerprint,
+    };
+    const other = encodeLocalCustodyPolicy(otherPolicy);
+    // A fully valid manifest for ANOTHER tenant is not offered here.
+    const res = await stagedApp(
+      'owner',
+      JSON.stringify({ policyText: other, policySha256: sha(other) }),
+    )();
+    expect(res.status).toBe(404);
+  });
+  it('reads only <tenantId>.json from an absolute directory', async () => {
+    const { mkdtemp, writeFile, rm } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = await mkdtemp(join(tmpdir(), 'axiom-staged-'));
+    try {
+      await writeFile(join(dir, `${t}.json`), staged);
+      expect(await readStagedCustodyManifest(t, dir)).toBe(staged);
+      expect(
+        await readStagedCustodyManifest('99999999-9999-4999-8999-999999999999', dir),
+      ).toBeNull();
+      const { relative } = await import('node:path');
+      // Even a relative path that does point at the staged file is refused.
+      expect(await readStagedCustodyManifest(t, relative(process.cwd(), dir))).toBeNull();
+      expect(await readStagedCustodyManifest(t, undefined)).toBeNull();
+      await expect(readStagedCustodyManifest('../etc/passwd', dir)).rejects.toThrow();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

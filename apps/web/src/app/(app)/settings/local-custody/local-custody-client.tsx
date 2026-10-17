@@ -29,6 +29,7 @@ import {
   custodyStep,
   custodyResolutionStep,
   custodyScope,
+  loadStagedManifest,
 } from './custody-client';
 import {
   readCustodyIntents,
@@ -78,6 +79,11 @@ export function LocalCustodyClient({
     [cancelReason, setCancelReason] = useState(''),
     [cancelConfirmed, setCancelConfirmed] = useState(false),
     [cancelConfirmationScope, setCancelConfirmationScope] = useState('');
+  // A request prepared on this page is known not to be recorded yet (prepare()
+  // just checked), so it can be recorded in one step. A request retained from
+  // an earlier session keeps the explicit check-and-retry steps below.
+  const [freshKey, setFreshKey] = useState<string | null>(null);
+  const [staged, setStaged] = useState<'idle' | 'loaded' | 'none' | 'error'>('idle');
   const [manifest, setManifest] = useState(''),
     [reason, setReason] = useState(''),
     [confirmed, setConfirmed] = useState(false),
@@ -210,6 +216,24 @@ export function LocalCustodyClient({
         setBusyOwner((current) => (current?.token === token ? null : current));
     }
   }
+  const stagedStarted = useRef(false);
+  useEffect(() => {
+    if (!visibleContext?.canRequest || stagedStarted.current || manifest !== '') return;
+    stagedStarted.current = true;
+    let live = true;
+    loadStagedManifest(scope)
+      .then((value) => {
+        if (!live) return;
+        if (value === null) return setStaged('none');
+        draftVersion.current++;
+        setManifest(JSON.stringify(value));
+        setStaged('loaded');
+      })
+      .catch(() => live && setStaged('error'));
+    return () => {
+      live = false;
+    };
+  }, [visibleContext?.canRequest, manifest, scope]);
   async function prepare(
     row: LocalCustodyContextRow | null,
     transition: LocalCustodyEventRequest['transition'],
@@ -273,6 +297,7 @@ export function LocalCustodyClient({
       setPending(readCustodyIntents(localStorage, scope.tenantId, scope.actorId));
       setChosen(request.operationKey);
       resetStep();
+      setFreshKey(request.operationKey);
       setConfirmed(false);
       setMessage(
         'Exact request retained. Check its recorded state before requesting a fresh authenticator challenge.',
@@ -387,6 +412,37 @@ export function LocalCustodyClient({
       if (lease.current === token) {
         resetStep();
         setMessage('The exact intent remains retained. Check its recorded state before any retry.');
+      }
+      throw e;
+    }
+  }
+  async function recordFresh() {
+    if (!selected || selected.request.operationKey !== freshKey || selectedResolution) return;
+    const token = lease.current;
+    assertCustodyIntent(localStorage, selected, true);
+    try {
+      const issued = await custodyStep(scope, 'challenge', selected.request);
+      if (lease.current !== token) return;
+      if (!('challengeId' in issued)) throw new Error('Authenticator challenge unavailable.');
+      await custodyStep(scope, 'verify', selected.request, issued.challengeId, code);
+      if (lease.current !== token) return;
+      const result = await custodyStep(scope, 'record', selected.request, issued.challengeId);
+      if (lease.current !== token) return;
+      if (!('state' in result) || (result.state !== 'recorded' && result.state !== 'cancelled'))
+        throw new Error('Custody response could not be verified.');
+      setFreshKey(null);
+      setCode('');
+      complete(selected, result);
+    } catch (e) {
+      if (lease.current === token) {
+        // Fall back to the explicit steps: the outcome may or may not have
+        // committed, so the request must be checked before any retry.
+        setFreshKey(null);
+        setCode('');
+        resetStep();
+        setMessage(
+          'Recording did not complete. The exact request is kept; check its recorded state below before any retry.',
+        );
       }
       throw e;
     }
@@ -695,103 +751,137 @@ export function LocalCustodyClient({
                       retried; the original action will not be sent.
                     </Notice>
                   )}
-                  <StepList>
-                    <Step
-                      n={1}
-                      title="Check its recorded state"
-                      state={recovered ? 'done' : 'current'}
+                  {selected.request.operationKey === freshKey && !selectedResolution ? (
+                    <div
+                      className="flex min-w-0 flex-col gap-3 rounded-lg border border-teal-500/40 bg-teal-50/40 p-4"
+                      data-testid="custody-record-fresh"
                     >
-                      <FieldHint>
-                        Looks up whether this exact request was already recorded. Nothing is sent
-                        for recording.
-                      </FieldHint>
-                      <div>
-                        <Button
-                          variant="primary"
-                          disabled={busy}
-                          onClick={() => void run(reconcile)}
-                        >
-                          {selectedResolution
-                            ? 'Check retained cancellation'
-                            : 'Check retained request'}
-                        </Button>
-                      </div>
-                    </Step>
-                    <Step
-                      n={2}
-                      title="Confirm the exact retry"
-                      state={retryConfirmed && recovered ? 'done' : recovered ? 'current' : 'todo'}
-                    >
-                      <label className={checkLabelClass}>
-                        <input
-                          type="checkbox"
-                          className={checkboxClass}
-                          checked={retryConfirmed}
-                          onChange={(e) => setRetryConfirmed(e.target.checked)}
-                          disabled={!recovered || busy}
-                        />
-                        I reviewed this exact retained request and authorize its retry with fresh
-                        MFA.
-                      </label>
-                    </Step>
-                    <Step
-                      n={3}
-                      title="Authenticate"
-                      state={verified ? 'done' : retryConfirmed && recovered ? 'current' : 'todo'}
-                    >
-                      <div>
-                        <Button
-                          variant="outline"
-                          disabled={busy || !recovered || !retryConfirmed}
-                          onClick={() => void run(() => step('challenge'))}
-                        >
-                          Request authenticator challenge
-                        </Button>
-                      </div>
-                      {challenge && recovered && (
-                        <div className="flex flex-wrap items-end gap-3">
-                          <div className="flex flex-col gap-1.5">
-                            <Label htmlFor="custody-authenticator-code">Authenticator code</Label>
-                            <Input
-                              id="custody-authenticator-code"
-                              className="w-40"
-                              inputMode="numeric"
-                              autoComplete="one-time-code"
-                              value={code}
-                              onChange={(e) => {
-                                setCode(e.target.value);
-                                setVerified(false);
-                              }}
-                            />
-                          </div>
-                          <Button
-                            variant="outline"
-                            disabled={busy || !code}
-                            onClick={() => void run(() => step('verify'))}
-                          >
-                            Verify authenticator
-                          </Button>
+                      <p className="text-sm text-indigo-500">
+                        Your request is prepared. Enter your authenticator code to record it in the
+                        audit ledger.
+                      </p>
+                      <div className="flex flex-wrap items-end gap-3">
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor="custody-fresh-code">Authenticator code</Label>
+                          <Input
+                            id="custody-fresh-code"
+                            className="w-40"
+                            inputMode="numeric"
+                            autoComplete="one-time-code"
+                            value={code}
+                            onChange={(e) => setCode(e.target.value)}
+                          />
                         </div>
-                      )}
-                    </Step>
-                    <Step n={4} title="Record it" state={verified ? 'current' : 'todo'}>
-                      <FieldHint>
-                        Records the exact action in the audit ledger. A policy receipt alone does
-                        not provision keys or start services.
-                      </FieldHint>
-                      <div>
                         <Button
                           variant="accent"
-                          disabled={busy || !verified || !retryConfirmed}
-                          onClick={() => void run(() => step('record'))}
+                          disabled={busy || !/^[0-9]{6}$/.test(code)}
+                          onClick={() => void run(recordFresh)}
                         >
-                          {selectedResolution
-                            ? 'Record exact cancellation'
-                            : 'Record exact custody action'}
+                          Record request
                         </Button>
                       </div>
-                    </Step>
-                  </StepList>
+                    </div>
+                  ) : (
+                    <StepList>
+                      <Step
+                        n={1}
+                        title="Check its recorded state"
+                        state={recovered ? 'done' : 'current'}
+                      >
+                        <FieldHint>
+                          Looks up whether this exact request was already recorded. Nothing is sent
+                          for recording.
+                        </FieldHint>
+                        <div>
+                          <Button
+                            variant="primary"
+                            disabled={busy}
+                            onClick={() => void run(reconcile)}
+                          >
+                            {selectedResolution
+                              ? 'Check retained cancellation'
+                              : 'Check retained request'}
+                          </Button>
+                        </div>
+                      </Step>
+                      <Step
+                        n={2}
+                        title="Confirm the exact retry"
+                        state={
+                          retryConfirmed && recovered ? 'done' : recovered ? 'current' : 'todo'
+                        }
+                      >
+                        <label className={checkLabelClass}>
+                          <input
+                            type="checkbox"
+                            className={checkboxClass}
+                            checked={retryConfirmed}
+                            onChange={(e) => setRetryConfirmed(e.target.checked)}
+                            disabled={!recovered || busy}
+                          />
+                          I reviewed this exact retained request and authorize its retry with fresh
+                          MFA.
+                        </label>
+                      </Step>
+                      <Step
+                        n={3}
+                        title="Authenticate"
+                        state={verified ? 'done' : retryConfirmed && recovered ? 'current' : 'todo'}
+                      >
+                        <div>
+                          <Button
+                            variant="outline"
+                            disabled={busy || !recovered || !retryConfirmed}
+                            onClick={() => void run(() => step('challenge'))}
+                          >
+                            Request authenticator challenge
+                          </Button>
+                        </div>
+                        {challenge && recovered && (
+                          <div className="flex flex-wrap items-end gap-3">
+                            <div className="flex flex-col gap-1.5">
+                              <Label htmlFor="custody-authenticator-code">Authenticator code</Label>
+                              <Input
+                                id="custody-authenticator-code"
+                                className="w-40"
+                                inputMode="numeric"
+                                autoComplete="one-time-code"
+                                value={code}
+                                onChange={(e) => {
+                                  setCode(e.target.value);
+                                  setVerified(false);
+                                }}
+                              />
+                            </div>
+                            <Button
+                              variant="outline"
+                              disabled={busy || !code}
+                              onClick={() => void run(() => step('verify'))}
+                            >
+                              Verify authenticator
+                            </Button>
+                          </div>
+                        )}
+                      </Step>
+                      <Step n={4} title="Record it" state={verified ? 'current' : 'todo'}>
+                        <FieldHint>
+                          Records the exact action in the audit ledger. A policy receipt alone does
+                          not provision keys or start services.
+                        </FieldHint>
+                        <div>
+                          <Button
+                            variant="accent"
+                            disabled={busy || !verified || !retryConfirmed}
+                            onClick={() => void run(() => step('record'))}
+                          >
+                            {selectedResolution
+                              ? 'Record exact cancellation'
+                              : 'Record exact custody action'}
+                          </Button>
+                        </div>
+                      </Step>
+                    </StepList>
+                  )}
                   {!selectedResolution && (
                     <div className="flex min-w-0 flex-col gap-3 rounded-lg border border-ember-500/30 bg-ember-50/40 p-4">
                       <div>
@@ -894,7 +984,18 @@ export function LocalCustodyClient({
             </div>
           </Step>
           {visibleContext?.canRequest && (
-            <Step n={2} title="Paste the operator manifest (owner request only)">
+            <Step n={2} title="Review the operator-prepared manifest (owner request only)">
+              <p className="text-xs text-slate-600" role="status">
+                {staged === 'loaded'
+                  ? 'Loaded automatically from the manifest your Axiom operator prepared for this organisation. Review it; do not edit it.'
+                  : staged === 'idle'
+                    ? 'Loading the operator-prepared manifest…'
+                    : staged === 'none'
+                      ? 'No prepared manifest is staged for this organisation. Paste the file your operator gave you.'
+                      : staged === 'error'
+                        ? 'The prepared manifest could not be loaded. Paste the file your operator gave you, or retry.'
+                        : ''}
+              </p>
               <div className="flex min-w-0 flex-col gap-1.5">
                 <Label htmlFor="custody-manifest">Operator-reviewed non-secret manifest JSON</Label>
                 <Textarea
