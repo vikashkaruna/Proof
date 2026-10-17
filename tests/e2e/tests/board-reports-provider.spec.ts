@@ -1208,7 +1208,10 @@ test.describe('real-provider board report lifecycle', () => {
     await requestForm.getByLabel('Assessment', { exact: true }).selectOption(assessment.runId, {
       timeout: 15_000,
     });
-    const title = `Browser board ${crypto.randomUUID()}`;
+    // document6 (0155) withholds the frozen rationale, so the unsafe value is
+    // also placed in the one user-controlled field it renders: the title.
+    const title = `Browser board ${unsafeText} ${crypto.randomUUID()}`;
+    const titlePattern = new RegExp(title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     await requestForm.getByLabel('Report title').fill(title);
     await requestForm
       .getByRole('checkbox', {
@@ -1216,7 +1219,7 @@ test.describe('real-provider board report lifecycle', () => {
       })
       .check();
     await requestForm.getByRole('button', { name: 'Request board draft' }).click();
-    await expect(workflow.getByRole('button', { name: new RegExp(title) })).toBeVisible();
+    await expect(workflow.getByRole('button', { name: titlePattern })).toBeVisible();
     const founderContext = await browser.newContext();
     try {
       const founder = await founderContext.newPage();
@@ -1230,7 +1233,7 @@ test.describe('real-provider board report lifecycle', () => {
       await satisfyLoginMfaWithSecret(founder, account.totpSecret!);
       await founder.goto('/reports');
       const board = founder.getByRole('region', { name: 'Board report workflow' });
-      await board.getByRole('button', { name: new RegExp(title) }).click();
+      await board.getByRole('button', { name: titlePattern }).click();
       const selected = founder.locator('[aria-label="Selected board request"]');
       await selected.getByRole('button', { name: 'Generate source-bound draft' }).click();
       await expect(selected.getByRole('button', { name: 'Open report for review' })).toBeVisible();
@@ -1239,6 +1242,8 @@ test.describe('real-provider board report lifecycle', () => {
       await expect(detail.getByRole('heading', { name: title, exact: true })).toBeVisible();
       await detail.getByText('Exact recorded content', { exact: true }).click();
       await expect(detail.locator('pre')).toContainText(unsafeText);
+      // The finding rationale is opaque provenance in document6, never shown.
+      await expect(detail.locator('pre')).toContainText('"schema_version":6');
       await expect(detail.locator('img')).toHaveCount(0);
       await expect(detail.getByRole('button', { name: /Email/ })).toHaveCount(0);
       await detail
