@@ -163,7 +163,7 @@ def container(tenant: str, mode: str, detach: bool) -> None:
             *(["-d", "--restart", "unless-stopped"] if detach else []),
             "--user", f"{UID}:{UID}", "--network", "container:axiom-bff",
             "--label", "axiom.purpose=local-key-service", "--read-only", "--cap-drop", "ALL",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m,mode=1777",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m,mode=1777",  # nosec B108 - container-private tmpfs, not a host path
             "--security-opt", "no-new-privileges:true",
             "--mount", f"type=volume,src=axiom-key-service-{tenant}-conf,dst={CONF},readonly",
             "--mount", f"type=volume,src=axiom-key-service-{tenant}-keys,dst={KEYS}",
