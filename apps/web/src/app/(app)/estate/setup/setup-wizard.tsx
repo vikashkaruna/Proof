@@ -1,4 +1,6 @@
 'use client';
+
+import { formatDate } from '@/lib/display-time';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle, Input, Label } from '@axiom/ui';
@@ -133,8 +135,8 @@ export function SetupWizard({
     <div className="flex flex-col gap-4" data-testid="setup-wizard">
       {wizard?.status === 'completed' && (
         <p role="status" data-testid="setup-complete">
-          Onboarding completed on {new Date(wizard.completed_at ?? '').toLocaleDateString()}. The
-          readiness snapshot below is what was confirmed at that time.
+          Onboarding completed on {formatDate(wizard.completed_at ?? '')}. The readiness snapshot
+          below is what was confirmed at that time.
         </p>
       )}
       {wizard?.status === 'completed' && wizard.estate_id && (

@@ -1,4 +1,5 @@
 'use client';
+import { formatDateTime } from '@/lib/display-time';
 
 import { moduleBarProps } from '@/lib/module-bar';
 import { PageHeader } from '@axiom/ui';
@@ -579,14 +580,15 @@ export function ConsentRecordProof({ record }: { record: ConsentRecord }) {
     <div className="space-y-1 text-xs text-slate-600">
       <p className="break-all">Record ID: {record.id}</p>
       <p>
-        Captured at <time dateTime={record.granted_at}>{record.granted_at}</time> · Channel:{' '}
-        {record.channel}
+        Captured at <time dateTime={record.granted_at}>{formatDateTime(record.granted_at)}</time> ·
+        Channel: {record.channel}
       </p>
       <p className="break-all">Recorded by: {record.granted_by}</p>
       {record.expires_at ? (
         <p>
-          Expires at <time dateTime={record.expires_at}>{record.expires_at}</time>. Do not rely on
-          this grant after that time; its recorded status does not change automatically at expiry.
+          Expires at <time dateTime={record.expires_at}>{formatDateTime(record.expires_at)}</time>.
+          Do not rely on this grant after that time; its recorded status does not change
+          automatically at expiry.
         </p>
       ) : (
         <p>

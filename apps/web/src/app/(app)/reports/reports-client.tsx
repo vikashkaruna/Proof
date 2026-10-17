@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDateTime } from '@/lib/display-time';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -27,7 +28,7 @@ import { AuditorWorkflow } from './auditor-workflow';
 import { CoverageFirstPreview } from './coverage-first-preview';
 import { QuestionnaireEvidencePreview } from './questionnaire-evidence-preview';
 
-const date = (value: string) => new Date(value).toLocaleString();
+const date = (value: string) => formatDateTime(value);
 
 export function canOfferRelease(report: ReportDetail): boolean {
   return (

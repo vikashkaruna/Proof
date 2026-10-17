@@ -10,6 +10,7 @@ pnpm-lock.yaml
 # Its 2-space JSON.stringify output doesn't match prettier's exact formatting and would
 # re-break `pnpm format:check` on every regen. Source of truth is the TS module.
 services/agent-runtime/src/axiom/data/controls.json
+services/agent-runtime/src/axiom/data/controls-*.json
 
 # Next.js auto-generated type definitions
 **/next-env.d.ts

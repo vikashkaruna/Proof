@@ -1,4 +1,6 @@
 'use client';
+
+import { formatDateTime } from '@/lib/display-time';
 import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
 import { EvidenceType } from '@axiom/types';
 import { z } from 'zod';
@@ -415,9 +417,7 @@ function StagedEvidenceSessionPanel({ tenantId, actorId }: { tenantId: string; a
             <p className="break-all">Unaccepted observed version: {unconfirmed.observedVersion}</p>
           )}
           {unconfirmed.payloadExpiresAt && (
-            <p>
-              Temporary upload expires: {new Date(unconfirmed.payloadExpiresAt).toLocaleString()}.
-            </p>
+            <p>Temporary upload expires: {formatDateTime(unconfirmed.payloadExpiresAt)}.</p>
           )}
           {journal &&
             !unconfirmed.terminalReason &&

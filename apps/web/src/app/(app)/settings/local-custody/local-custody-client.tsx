@@ -1,4 +1,5 @@
 'use client';
+import { displayLocalToInstant, displayTimeZone } from '@/lib/display-time';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { generateUUID } from '@axiom/ui';
 import { z } from 'zod';
@@ -218,7 +219,10 @@ export function LocalCustodyClient({ tenantId, actorId }: { tenantId: string; ac
           transition,
           ...supplied,
           previousEventId: row?.head.eventId ?? null,
-          nextReviewDueAt: transition === 'review' ? Date.parse(reviewDate) : null,
+          // Wall-clock time in the display zone (IST by default), never the
+          // browser's own zone; NaN keeps the schema's refusal of bad input.
+          nextReviewDueAt:
+            transition === 'review' ? (displayLocalToInstant(reviewDate)?.getTime() ?? NaN) : null,
           reason,
           confirmed: true,
         }),
@@ -643,7 +647,7 @@ export function LocalCustodyClient({ tenantId, actorId }: { tenantId: string; ac
           />
         </label>
         <label>
-          Next periodic review (review action only)
+          Next periodic review (review action only, {displayTimeZone()})
           <input
             type="datetime-local"
             value={reviewDate}

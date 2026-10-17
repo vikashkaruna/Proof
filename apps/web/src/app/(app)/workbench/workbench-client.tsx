@@ -1,5 +1,6 @@
 'use client';
 
+import { formatClock } from '@/lib/display-time';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { AgentIcon, AgentLabel, PageHeader } from '@axiom/ui';
@@ -525,11 +526,7 @@ export function AgentWorkbenchClient({
                       </span>
                     </div>
                     <div className="text-right font-mono text-[11px] text-slate-500">
-                      {new Date(r.timestamp).toLocaleTimeString('en-IN', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      })}
+                      {formatClock(r.timestamp)}
                     </div>
                   </div>
                 ))}

@@ -1,4 +1,5 @@
 'use client';
+import { formatDateTime } from '@/lib/display-time';
 import React, {
   useCallback,
   useEffect,
@@ -269,7 +270,7 @@ function Panel({
               <option value="">Choose an assessment</option>
               {options?.assessments.map((a) => (
                 <option key={a.assessmentRunId} value={a.assessmentRunId}>
-                  {a.engagementTitle} · {a.libraryVersion} · {a.finalizedAt}
+                  {a.engagementTitle} · {a.libraryVersion} · {formatDateTime(a.finalizedAt)}
                 </option>
               ))}
             </select>

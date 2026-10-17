@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDate, formatTime } from '@/lib/display-time';
 import React, { createContext, useContext, useState } from 'react';
 import Link from 'next/link';
 import { AgentIcon, AgentLabel, formatINRCrore, PageHeader, postureBand } from '@axiom/ui';
@@ -461,13 +462,7 @@ function PortalView({
                     </span>
                     <span className="text-xs text-[#94a3b8]">
                       Started:{' '}
-                      {engagement.startedAt
-                        ? new Date(engagement.startedAt).toLocaleDateString('en-IN', {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric',
-                          })
-                        : 'Not recorded'}
+                      {engagement.startedAt ? formatDate(engagement.startedAt) : 'Not recorded'}
                     </span>
                   </div>
                   <h2 className="mt-2 font-heading text-xl font-bold text-[#1E2A4A]">
@@ -948,13 +943,7 @@ function PortalView({
                         </div>
                         <span className="text-xs text-slate-400">·</span>
                         <span className="text-xs text-slate-500">
-                          {item.collectedAt
-                            ? new Date(item.collectedAt).toLocaleDateString('en-IN', {
-                                day: 'numeric',
-                                month: 'short',
-                                year: 'numeric',
-                              })
-                            : 'Not recorded'}
+                          {item.collectedAt ? formatDate(item.collectedAt) : 'Not recorded'}
                         </span>
                       </div>
 
@@ -1083,10 +1072,7 @@ function PortalView({
                     <div>
                       <div className="font-semibold text-[#1E2A4A]">{d.principalName}</div>
                       <div className="text-[11px] text-slate-500">
-                        Received:{' '}
-                        {d.receivedAt
-                          ? new Date(d.receivedAt).toLocaleDateString('en-IN')
-                          : 'Recent'}
+                        Received: {d.receivedAt ? formatDate(d.receivedAt) : 'Recent'}
                       </div>
                     </div>
                   </div>
@@ -1098,9 +1084,7 @@ function PortalView({
 
                     <div className="text-right">
                       <div className="text-[11px] font-semibold text-[#1E2A4A]">
-                        {d.dueBy
-                          ? `Due ${new Date(d.dueBy).toLocaleDateString('en-IN')}`
-                          : 'No due date recorded'}
+                        {d.dueBy ? `Due ${formatDate(d.dueBy)}` : 'No due date recorded'}
                       </div>
                       <div className="text-[10px] text-slate-500">
                         {d.slaDays === null
@@ -1208,12 +1192,7 @@ function PortalView({
                     </span>
 
                     <span className="text-[11px] text-slate-500">
-                      {entry.occurredAt
-                        ? new Date(entry.occurredAt).toLocaleTimeString('en-IN', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })
-                        : ''}
+                      {entry.occurredAt ? formatTime(entry.occurredAt) : ''}
                     </span>
                   </div>
                 </div>

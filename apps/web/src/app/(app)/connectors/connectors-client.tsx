@@ -1,4 +1,5 @@
 'use client';
+import { formatDateTime } from '@/lib/display-time';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
@@ -105,7 +106,7 @@ function SetupStatus({ tenantId, connectorId }: { tenantId: string; connectorId:
           <li>
             Last recorded observation:{' '}
             {status.lastObservation
-              ? `${status.lastObservation.status} at ${status.lastObservation.checked_at}`
+              ? `${status.lastObservation.status} at ${formatDateTime(status.lastObservation.checked_at)}`
               : 'none'}
           </li>
         </ul>

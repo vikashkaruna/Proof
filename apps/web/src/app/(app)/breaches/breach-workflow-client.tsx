@@ -1,5 +1,6 @@
 'use client';
 
+import { formatDateTime } from '@/lib/display-time';
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -258,7 +259,7 @@ export function BreachWorkflowClient({
             <dl className="grid grid-cols-2 gap-2 text-sm text-slate-600 sm:grid-cols-4">
               <div>
                 <dt className="text-slate-400">Detected</dt>
-                <dd>{new Date(breach.detected_at).toLocaleString()}</dd>
+                <dd>{formatDateTime(breach.detected_at)}</dd>
               </div>
               <div>
                 <dt className="text-slate-400">DPB deadline</dt>
@@ -266,20 +267,18 @@ export function BreachWorkflowClient({
                   className={overdue ? 'font-semibold' : ''}
                   style={overdue ? { color: '#D9534F' } : {}}
                 >
-                  {new Date(breach.dpb_notification_due_by).toLocaleString()}
+                  {formatDateTime(breach.dpb_notification_due_by)}
                 </dd>
               </div>
               <div>
                 <dt className="text-slate-400">DPB notified</dt>
-                <dd>
-                  {breach.dpb_notified_at ? new Date(breach.dpb_notified_at).toLocaleString() : '—'}
-                </dd>
+                <dd>{breach.dpb_notified_at ? formatDateTime(breach.dpb_notified_at) : '—'}</dd>
               </div>
               <div>
                 <dt className="text-slate-400">Principals notified</dt>
                 <dd>
                   {breach.principals_notified_at
-                    ? new Date(breach.principals_notified_at).toLocaleString()
+                    ? formatDateTime(breach.principals_notified_at)
                     : '—'}
                 </dd>
               </div>
