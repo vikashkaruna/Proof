@@ -135,8 +135,9 @@ export function RecoveryBeneficiary({
           Account recovery in progress <Badge variant="warning">{recovery.state}</Badge>
         </CardTitle>
         <CardDescription>
-          A founder has opened a recovery for your authenticator. Your earlier sessions have been
-          ended. Nothing else in the product is available until this recovery is complete.
+          A founder or your organisation's owner has opened a recovery for your authenticator. Your
+          earlier sessions have been ended. Nothing else in the product is available until this
+          recovery is complete.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -169,7 +170,8 @@ export function RecoveryBeneficiary({
         ) : !recovery.boundHere ? (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-slate-700">
-              Step 1 of 3. Bind this sign-in to the recovery so the founder can confirm it is you.
+              Step 1 of 3. Bind this sign-in to the recovery so the person recovering your account
+              can confirm it is you.
             </p>
             <Button variant="accent" onClick={bind} loading={busy}>
               Bind this sign-in
@@ -178,8 +180,8 @@ export function RecoveryBeneficiary({
         ) : !authorized ? (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-slate-700">
-              Step 2 of 3. Read this code to the founder over a channel you both trust. They must
-              see the same code before confirming.
+              Step 2 of 3. Read this code to the person recovering your account, over a channel you
+              both trust. They must see the same code before confirming.
             </p>
             {recovery.sessionId && (
               <p
@@ -190,7 +192,7 @@ export function RecoveryBeneficiary({
               </p>
             )}
             <Button variant="ghost" onClick={() => act(refresh)} loading={busy}>
-              Check whether the founder has confirmed
+              Check for confirmation
             </Button>
           </div>
         ) : pending ? (
@@ -223,8 +225,8 @@ export function RecoveryBeneficiary({
         ) : (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-slate-700">
-              Step 3 of 3. The founder confirmed this sign-in. Set up your new authenticator within
-              15 minutes.
+              Step 3 of 3. Your sign-in was confirmed. Set up your new authenticator within 15
+              minutes.
             </p>
             <Button variant="accent" onClick={enrol} loading={busy}>
               Set up new authenticator

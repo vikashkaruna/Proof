@@ -215,6 +215,100 @@ describe('founder MFA recovery routes', () => {
   });
 });
 
+describe('scoped owner delegation routes', () => {
+  const DELEGATION = '00000000-0000-4000-8000-0000000000d9';
+
+  it('binds the delegation to the tenant the founder is acting in, not a body field', async () => {
+    const mfa = fakeMfa();
+    const rpc = vi.fn<RecoveryRpc>(async () => ({
+      data: { delegation_id: DELEGATION },
+      error: null,
+    }));
+    const before = Date.now();
+    const res = await app(mfa, rpc).request(
+      post('/v1/mfa/recovery/delegations', {
+        ownerUserId: SUBJECT,
+        targetRoles: ['approver', 'viewer'],
+        expiresInDays: 7,
+        reason: 'Owner handles approver lockouts',
+        code: '123456',
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(mfa.issueChallenge).toHaveBeenCalledWith(
+      expect.objectContaining({ boundResourceRef: `delegate:${SUBJECT}:${TENANT}` }),
+    );
+    const args = rpc.mock.calls[0]![1] as Record<string, unknown>;
+    expect(args).toMatchObject({ p_founder_id: ACTOR, p_tenant_id: TENANT, p_owner_id: SUBJECT });
+    const expires = Date.parse(args.p_expires_at as string);
+    expect(expires - before).toBeGreaterThanOrEqual(7 * 86_400_000 - 1000);
+    expect(expires - before).toBeLessThanOrEqual(7 * 86_400_000 + 5000);
+  });
+
+  it.each([
+    [{ targetRoles: ['owner'] }],
+    [{ targetRoles: ['approver', 'approver'] }],
+    [{ expiresInDays: 45 }],
+    [{ tenantId: TENANT }],
+  ])('refuses an out-of-scope delegation request %j before any step-up', async (override) => {
+    const mfa = fakeMfa();
+    const rpc = vi.fn<RecoveryRpc>();
+    const res = await app(mfa, rpc).request(
+      post('/v1/mfa/recovery/delegations', {
+        ownerUserId: SUBJECT,
+        targetRoles: ['approver'],
+        expiresInDays: 7,
+        reason: 'Owner handles approver lockouts',
+        code: '123456',
+        ...override,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mfa.issueChallenge).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('opens a delegated case with a step-up bound to subject and delegation', async () => {
+    const mfa = fakeMfa();
+    const rpc = vi.fn<RecoveryRpc>(async () => ({ data: { case_id: CASE }, error: null }));
+    const res = await app(mfa, rpc).request(
+      post('/v1/mfa/recovery/delegated-cases', {
+        delegationId: DELEGATION,
+        subjectUserId: SUBJECT,
+        reason: 'Member lost phone, verified in person',
+        code: '123456',
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(mfa.issueChallenge).toHaveBeenCalledWith(
+      expect.objectContaining({ boundResourceRef: `open:${SUBJECT}:${DELEGATION}` }),
+    );
+    expect(rpc).toHaveBeenCalledWith('open_delegated_mfa_recovery_case', {
+      p_owner_id: ACTOR,
+      p_owner_session_id: SESSION,
+      p_challenge_id: CHALLENGE,
+      p_delegation_id: DELEGATION,
+      p_subject_id: SUBJECT,
+      p_reason: 'Member lost phone, verified in person',
+    });
+  });
+
+  it('refuses a delegated owner recovering themselves before any step-up', async () => {
+    const mfa = fakeMfa();
+    const rpc = vi.fn<RecoveryRpc>();
+    const res = await app(mfa, rpc).request(
+      post('/v1/mfa/recovery/delegated-cases', {
+        delegationId: DELEGATION,
+        subjectUserId: ACTOR,
+        reason: 'Recover my own account please',
+        code: '123456',
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect(mfa.issueChallenge).not.toHaveBeenCalled();
+  });
+});
+
 describe('account fence middleware', () => {
   function fenced(access: SessionAccess | Error, path: string) {
     const mfa = fakeMfa({
