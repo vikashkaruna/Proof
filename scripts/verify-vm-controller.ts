@@ -135,6 +135,8 @@ async function main() {
   outcomes['vm-controller-root-owned-live-issuer-sync-required'] = true;
   phase = 'stale-policy';
   const altered = structuredClone(input.config);
+  // This live verifier exercises the cloud KMS path only.
+  if (altered.keys.provider === 'local') throw new Error('cloud KMS configuration required');
   altered.keys.primary = `arn:aws:kms:ap-south-1:123456789012:key/${randomUUID()}`;
   await assert.rejects(composeVmAssessmentController(altered, db, ports), {
     message: 'VM assessment controller configuration refused',
