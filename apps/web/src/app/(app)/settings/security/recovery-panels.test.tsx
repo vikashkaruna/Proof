@@ -99,7 +99,7 @@ it('founder opens a recovery only with a subject, a stated verification and a co
   fireEvent.click(screen.getByRole('button', { name: 'Open recovery console' }));
   const open = await screen.findByRole('button', { name: 'Open recovery' });
   expect((open as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.change(screen.getByLabelText('Founder to recover'), { target: { value: 'f2' } });
+  fireEvent.change(screen.getByLabelText('Account to recover'), { target: { value: 'f2' } });
   fireEvent.change(screen.getByLabelText('How you verified their identity'), {
     target: { value: 'too short' },
   });
@@ -151,4 +151,37 @@ it('founder confirms the exact bound session shown by fingerprint', async () => 
     beneficiarySessionId: SESSION,
     code: '654321',
   });
+});
+
+it('lists tenant owners and admins as recoverable accounts alongside founders', async () => {
+  fetchMock.mockResolvedValueOnce(
+    json({
+      founders: [{ user_id: 'f2', email: 'founder-two@example.invalid', full_name: null }],
+      owners: [{ user_id: 'o1', email: 'owner-one@example.invalid', full_name: 'Owner One' }],
+      cases: [],
+    }),
+  );
+  render(<RecoveryConsole tenantId="tenant-1" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open recovery console' }));
+  await screen.findByRole('button', { name: 'Open recovery' });
+  const select = screen.getByLabelText('Account to recover') as HTMLSelectElement;
+  const values = Array.from(select.options).map((o) => o.value);
+  expect(values).toEqual(['', 'f2', 'o1']);
+  expect(
+    screen.getByRole('option', { name: 'Owner One — owner-one@example.invalid' }),
+  ).toBeTruthy();
+});
+
+it('still renders for an overview without owners (pre-0156 server)', async () => {
+  fetchMock.mockResolvedValueOnce(
+    json({
+      founders: [{ user_id: 'f2', email: 'founder-two@example.invalid', full_name: null }],
+      cases: [],
+    }),
+  );
+  render(<RecoveryConsole tenantId="tenant-1" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open recovery console' }));
+  await screen.findByRole('button', { name: 'Open recovery' });
+  const select = screen.getByLabelText('Account to recover') as HTMLSelectElement;
+  expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'f2']);
 });
