@@ -99,14 +99,15 @@ export function roleRoutedKeyAuthority(
     const read = reads[role];
     if (read) authorities.set(role, createLocalCustodyKeyAuthority(policyText, policySha256, read));
   }
-  return Object.freeze({
+  const routed: LocalKeyAuthority = {
     value: Object.freeze({ primary: p.keyPolicy.primary }),
     async require(caller, ...rest) {
       const authority = authorities.get(caller.role);
       if (!authority) throw new DispatchRefused();
       return authority.require(caller, ...rest);
     },
-  });
+  };
+  return Object.freeze(routed);
 }
 
 /** resolveAcceptedRun for serveLocalKeyMtlsGeneration. The run comes only
