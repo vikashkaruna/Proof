@@ -24,7 +24,7 @@ import {
 } from './middleware/evidence-body-limit.js';
 import { idempotency } from './middleware/idempotency.js';
 import { reportAuthority } from './middleware/report-authority.js';
-import { requireSessionMfa } from './middleware/session-mfa.js';
+import { requireCurrentSession, requireSessionMfa } from './middleware/session-mfa.js';
 import { errorHandler } from './middleware/error.js';
 import { v1Routes } from './routes/v1.js';
 import { publicRoutes } from './routes/public.js';
@@ -139,6 +139,7 @@ export function createApp(
 
   // Authenticated routes
   app.use('/v1/*', authMiddleware);
+  app.use('/v1/*', requireCurrentSession(mfa));
   app.use('/v1/*', tenantResolver);
   // Revoked staff cannot start new mutations or burn an idempotency key.
   app.use('/v1/*', requireLiveStaffAuthority);

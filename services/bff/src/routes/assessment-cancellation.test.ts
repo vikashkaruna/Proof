@@ -45,6 +45,7 @@ vi.mock('@supabase/supabase-js', () => ({
 vi.mock('../services/mfa.js', async (load) => ({
   ...(await load<typeof import('../services/mfa.js')>()),
   createMfaService: () => ({
+    sessionAccess: async () => ({ sessionCurrent: true, recovery: null }),
     requiresLoginMfa: async () => true,
     isEnrolled: async () => true,
     sessionAttestation: async () => (state.freshMfa ? { verified: true } : null),
@@ -329,6 +330,7 @@ it.each(['unenrolled', 'unverified'] as const)(
   'normal owner session MFA blocks cancellation before data reads: %s',
   async (kind) => {
     const mfa = {
+      sessionAccess: async () => ({ sessionCurrent: true, recovery: null }),
       requiresLoginMfa: vi.fn().mockResolvedValue(true),
       isEnrolled: vi.fn().mockResolvedValue(kind !== 'unenrolled'),
       sessionAttestation: vi.fn().mockResolvedValue(null),
@@ -346,6 +348,7 @@ it.each(['unenrolled', 'unverified'] as const)(
 );
 it('a verified owner session still traverses the same exact human cancellation path', async () => {
   const mfa = {
+    sessionAccess: async () => ({ sessionCurrent: true, recovery: null }),
     requiresLoginMfa: vi.fn().mockResolvedValue(true),
     isEnrolled: vi.fn().mockResolvedValue(true),
     sessionAttestation: vi.fn().mockResolvedValue({ id: 'verified' }),

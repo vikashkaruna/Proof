@@ -23,4 +23,6 @@ export type Variables = {
    * "not attested".
    */
   sessionId: string;
+  /** Set by requireCurrentSession; absent only under the auth bypass. */
+  sessionAccess?: import('./services/mfa.js').SessionAccess;
 };
