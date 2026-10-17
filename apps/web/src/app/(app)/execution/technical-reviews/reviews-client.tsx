@@ -77,11 +77,15 @@ export function TechnicalReviewsClient({
   plans,
   canRequest,
   founder,
+  canList,
 }: {
   tenantId: string;
   plans: TechnicalPlan[];
   canRequest: boolean;
   founder: boolean;
+  /** Owners/admins (own requests) and internal founders (all). Others are
+   * refused by SQL, so the list is not requested and the reason is stated. */
+  canList: boolean;
 }) {
   const [requests, setRequests] = useState<Request[]>([]);
   const [chosenPlan, setChosenPlan] = useState('');
@@ -98,6 +102,7 @@ export function TechnicalReviewsClient({
   const refresh = useCallback(() => setRevision((value) => value + 1), []);
   useReceiptRefresh(requests, refresh);
   useEffect(() => {
+    if (!canList) return;
     const controller = new AbortController();
     void (async () => {
       try {
@@ -115,7 +120,7 @@ export function TechnicalReviewsClient({
       }
     })();
     return () => controller.abort();
-  }, [tenantId, revision]);
+  }, [tenantId, revision, canList]);
 
   async function act(path: string, body: unknown, artifactReportId?: string | null) {
     setBusy(true);
@@ -338,7 +343,11 @@ export function TechnicalReviewsClient({
           Tenant owners and admins see their own requests. Internal founders see all requests for
           this tenant.
         </p>
-        {requests.length === 0 ? (
+        {!canList ? (
+          <p className="rounded border p-4 text-sm">
+            Your role cannot list technical register requests. Ask a tenant owner or admin.
+          </p>
+        ) : requests.length === 0 ? (
           <p className="rounded border p-4 text-sm">No technical register requests are recorded.</p>
         ) : (
           <div className="space-y-3">

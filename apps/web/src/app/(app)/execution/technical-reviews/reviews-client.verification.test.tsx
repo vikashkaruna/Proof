@@ -79,13 +79,16 @@ function routes(map: Record<string, Route>) {
   });
 }
 const listing = (rows: unknown[]) => () => Response.json({ requests: rows, total: rows.length });
-const mount = (over: Partial<{ canRequest: boolean; founder: boolean; tenantId: string }> = {}) =>
+const mount = (
+  over: Partial<{ canRequest: boolean; founder: boolean; tenantId: string; canList: boolean }> = {},
+) =>
   render(
     <TechnicalReviewsClient
       tenantId={over.tenantId ?? tenant}
       plans={plans}
       canRequest={over.canRequest ?? false}
       founder={over.founder ?? true}
+      canList={over.canList ?? true}
     />,
   );
 
@@ -132,6 +135,16 @@ it('shows a failed list read as an error with no invented requests', async () =>
   mount();
   expect((await screen.findByRole('alert')).textContent).toBe('list unavailable');
   expect(screen.getByText('No technical register requests are recorded.')).toBeTruthy();
+});
+
+it('never requests the list for a role SQL would refuse, and says why', async () => {
+  routes({ '/reports/technical/requests?': listing([]) });
+  mount({ founder: false, canList: false });
+  expect(await screen.findByText(/Your role cannot list technical register requests/)).toBeTruthy();
+  expect(
+    request.mock.calls.some(([, path]) => String(path).startsWith('/reports/technical/requests?')),
+  ).toBe(false);
+  expect(screen.queryByText('No technical register requests are recorded.')).toBeNull();
 });
 
 it('shows request rows but no founder actions to a non-founder', async () => {
