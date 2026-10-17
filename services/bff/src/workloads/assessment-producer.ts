@@ -24,6 +24,7 @@ import {
 } from './dispatch-key-wrappers.js';
 import { DispatchRefused, type DispatchKeyWrapper } from './dispatch-payload.js';
 import { workloadTrustDomain } from './jwt-svid.js';
+import { localCustodyKeysConfiguration, localDispatchKeyWrapper } from './local-custody-client.js';
 import { readOriginalAssessmentRequest } from '../routes/assessment-original-request.js';
 
 export class AssessmentQuestionnaireRefused extends Error {
@@ -48,13 +49,16 @@ export const assessmentProducerConfiguration = z
             tenantId: uuid,
             workloadId: uuid,
             trustDomain: workloadTrustDomain,
-            keys: z
-              .object({
-                provider: z.enum(['aws', 'gcp']),
-                primary: z.string().max(500),
-                retiring: z.array(z.string().max(500)).max(9),
-              })
-              .strict(),
+            keys: z.union([
+              z
+                .object({
+                  provider: z.enum(['aws', 'gcp']),
+                  primary: z.string().max(500),
+                  retiring: z.array(z.string().max(500)).max(9),
+                })
+                .strict(),
+              localCustodyKeysConfiguration,
+            ]),
           })
           .strict(),
       )
@@ -86,6 +90,29 @@ export interface AssessmentRequestProducer {
   ): Promise<{ job_id: string; run_id: string; expires_at: string }>;
 }
 
+async function requireParikshanRegistration(
+  db: SupabaseClient,
+  tenantId: string,
+  workloadId: string,
+  trustDomain: string,
+) {
+  const registration = await db
+    .from('workload_identities')
+    .select('id,tenant_id,agent_name,spiffe_id,status')
+    .eq('tenant_id', tenantId)
+    .eq('id', workloadId)
+    .abortSignal(AbortSignal.timeout(10000))
+    .single();
+  if (registration.error) throw new DispatchRefused();
+  z.object({
+    id: z.literal(workloadId),
+    tenant_id: z.literal(tenantId),
+    agent_name: z.literal('parikshan'),
+    spiffe_id: z.literal(`spiffe://${trustDomain}/agent/parikshan`),
+    status: z.literal('active'),
+  }).parse(registration.data);
+}
+
 /** Trusted human producer only. Returned facade cannot claim/decrypt/launch/confirm.
  * Configuration never comes from HTTP; startup never publishes policy/registers work. */
 export async function composeAssessmentProducer(
@@ -95,6 +122,7 @@ export async function composeAssessmentProducer(
     awsKms?: DispatchAwsKmsPort;
     gcpKms?: DispatchGcpKmsPort;
     writer?: () => SupabaseClient;
+    localWrapper?: typeof localDispatchKeyWrapper;
   } = {},
 ): Promise<AssessmentRequestProducer> {
   try {
@@ -106,33 +134,51 @@ export async function composeAssessmentProducer(
     const ownedKeys = new Set<string>();
     for (const tenant of config.tenants) {
       if (registry.has(tenant.tenantId)) throw new DispatchRefused();
-      for (const ref of [tenant.keys.primary, ...tenant.keys.retiring]) {
+      const id = tenant.tenantId as TenantId;
+      const keys = tenant.keys;
+      if (keys.provider === 'local') {
+        await requireParikshanRegistration(db, id, tenant.workloadId, tenant.trustDomain);
+        // Wrap only: this facade never unwraps, claims or launches. Local mode
+        // admits only reviewed public-control work (enqueueLocal).
+        const local = (ports.localWrapper ?? localDispatchKeyWrapper)(keys, {
+          tenantId: id,
+          workloadId: tenant.workloadId,
+          role: 'producer',
+        });
+        const wrapOnly: DispatchKeyWrapper = {
+          wrap: (...args) => local.wrap(...args),
+          unwrap: async () => {
+            throw new DispatchRefused();
+          },
+        };
+        const dispatch = new AssessmentDispatch(
+          db,
+          wrapOnly,
+          new Map(),
+          ports.writer ?? createHumanActionWriter,
+          keys.custody,
+        );
+        registry.set(id, {
+          workloadId: tenant.workloadId,
+          dispatch: {
+            enqueue: dispatch.enqueue.bind(dispatch),
+            recover: dispatch.recover.bind(dispatch),
+          },
+        });
+        continue;
+      }
+      for (const ref of [keys.primary, ...keys.retiring]) {
         if (ownedKeys.has(ref)) throw new DispatchRefused();
         ownedKeys.add(ref);
       }
-      const id = tenant.tenantId as TenantId;
       const policy = new DispatchKeyPolicy(
-        tenant.keys.provider,
-        new Map([[id, { primary: tenant.keys.primary, retiring: tenant.keys.retiring }]]),
+        keys.provider,
+        new Map([[id, { primary: keys.primary, retiring: keys.retiring }]]),
       );
       const revision = await new DispatchPolicyStore(db).currentRevision(policy, id);
-      const registration = await db
-        .from('workload_identities')
-        .select('id,tenant_id,agent_name,spiffe_id,status')
-        .eq('tenant_id', id)
-        .eq('id', tenant.workloadId)
-        .abortSignal(AbortSignal.timeout(10000))
-        .single();
-      if (registration.error) throw new DispatchRefused();
-      z.object({
-        id: z.literal(tenant.workloadId),
-        tenant_id: z.literal(id),
-        agent_name: z.literal('parikshan'),
-        spiffe_id: z.literal(`spiffe://${tenant.trustDomain}/agent/parikshan`),
-        status: z.literal('active'),
-      }).parse(registration.data);
+      await requireParikshanRegistration(db, id, tenant.workloadId, tenant.trustDomain);
       const provider =
-        tenant.keys.provider === 'aws'
+        keys.provider === 'aws'
           ? new AwsDispatchKeyWrapper(policy, ports.awsKms)
           : new GcpDispatchKeyWrapper(policy, ports.gcpKms);
       const wrapOnly: DispatchKeyWrapper = {
