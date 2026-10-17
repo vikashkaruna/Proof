@@ -1,0 +1,25 @@
+{
+  "policyFile": "/etc/axiom/local-custody/policy.json",
+  "policySha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "keyDirectory": "/var/lib/axiom/local-custody/keys",
+  "endpoint": { "host": "127.0.0.1", "port": 7443 },
+  "supabaseUrl": "http://127.0.0.1:54321",
+  "credentials": {
+    "operator": "/etc/axiom/local-custody/operator/backend.key",
+    "producer": "/etc/axiom/local-custody/producer/backend.key",
+    "controller": "/etc/axiom/local-custody/controller/backend.key"
+  },
+  "workload": {
+    "socketPath": "/run/spire/agent/api.sock",
+    "spiffeId": "spiffe://local.axiomproof.test/service/local-key-service",
+    "issuerNodeId": "spiffe://local.axiomproof.test/spire/agent/join_token/local",
+    "healthFile": "/run/spire-health/status.json"
+  },
+  "peers": [
+    {
+      "spiffeId": "spiffe://local.axiomproof.test/service/assessment-dispatch-producer",
+      "role": "producer"
+    },
+    { "spiffeId": "spiffe://local.axiomproof.test/controller/assessment", "role": "controller" }
+  ]
+}

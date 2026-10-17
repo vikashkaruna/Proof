@@ -87,6 +87,7 @@ export async function controllerBackendCredentials(
   filename: string,
   env: NodeJS.ProcessEnv,
   tenantId: string,
+  options: { localHttp?: boolean } = {},
 ) {
   let bytes: Buffer | undefined;
   try {
@@ -99,7 +100,16 @@ export async function controllerBackendCredentials(
         AXIOM_REGION: z.literal('ap-south-1'),
         SUPABASE_URL: z.url().refine((s) => {
           const u = new URL(s);
-          return u.protocol === 'https:' && !u.username && !u.password && !u.search && !u.hash;
+          // Plain HTTP only for the local co-located controller, and only to
+          // this machine or a single-label container name on its own network.
+          const local =
+            options.localHttp === true &&
+            u.protocol === 'http:' &&
+            (['127.0.0.1', 'localhost'].includes(u.hostname) ||
+              /^[a-z0-9][a-z0-9_-]{0,62}$/.test(u.hostname));
+          return (
+            (u.protocol === 'https:' || local) && !u.username && !u.password && !u.search && !u.hash
+          );
         }),
       })
       .parse(env);

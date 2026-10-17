@@ -226,6 +226,7 @@ export async function serveLocalKeyMtlsGeneration(options: {
     caller: Readonly<LocalKeyCaller>,
     context: Buffer,
     deadline: number,
+    keyRef: string,
   ) => Promise<string>;
   listening: (endpoint: LocalKeyTlsEndpoint) => void;
 }): Promise<void> {
@@ -326,7 +327,9 @@ export async function serveLocalKeyMtlsGeneration(options: {
           const fields = z.array(z.unknown()).parse(JSON.parse(context.toString('utf8')));
           if (fields[5] !== peer.workloadId) throw new X509Refused();
           let caller: LocalKeyCaller = { ...peer, role: peer.role };
-          if (body.operation === 'unwrap')
+          if (body.operation === 'unwrap') {
+            // The reference only selects the SQL row; SQL binds it to the job.
+            if (!body.keyRef || key.length !== 61) throw new X509Refused();
             caller = {
               ...caller,
               originalRunId: uuid.parse(
@@ -334,9 +337,11 @@ export async function serveLocalKeyMtlsGeneration(options: {
                   Object.freeze(caller),
                   runContext,
                   options.deadline,
+                  body.keyRef,
                 ),
               ),
             };
+          }
           if (socket.destroyed || signal.aborted) throw new X509Refused();
           if (body.operation === 'wrap') {
             if (body.keyRef !== undefined || key.length !== 32) throw new X509Refused();
