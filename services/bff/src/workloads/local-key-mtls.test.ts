@@ -215,7 +215,7 @@ function fixture(
     })),
     unwrap: vi.fn<LocalKeyService['unwrap']>(async () => Buffer.alloc(32, 9)),
   };
-  const resolveAcceptedRun = vi.fn(async () => run);
+  const resolveAcceptedRun = vi.fn(async (_c: unknown, _x: Buffer, _d: number, _k: string) => run);
   let ready: (endpoint: LocalKeyTlsEndpoint) => void = () => {};
   const listening = new Promise<LocalKeyTlsEndpoint>((resolve) => {
     ready = resolve;
@@ -684,6 +684,7 @@ describe('unmounted real TLS, owned loopback ephemeral generation only', () => {
       });
       await f.done;
       expect(f.resolveAcceptedRun).toHaveBeenCalledOnce();
+      expect(f.resolveAcceptedRun.mock.calls[0]?.[3]).toBe(keyRef);
       expect(f.service.unwrap.mock.calls[0]?.[0]).toMatchObject({
         originalRunId: run,
         role: 'controller',
