@@ -15,6 +15,7 @@ import {
   Label,
 } from '@axiom/ui';
 import { sessionFingerprint } from './recovery-panels';
+import { Notice, checkboxClass, selectClass } from '@/components/workflow-blocks';
 
 /**
  * Scoped owner delegation of MFA recovery (0154). Founders issue and revoke;
@@ -154,33 +155,47 @@ export function DelegationManager({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {s.notice && (
-          <p role="status" className="text-sm text-slate-700">
+          <Notice tone="success" role="status">
             {s.notice}
-          </p>
+          </Notice>
         )}
         {s.error && (
-          <div className="rounded-md border border-ember-500 bg-ember-50 p-3 text-sm text-ember-700">
+          <Notice tone="error" role="alert">
             {s.error}
-          </div>
+          </Notice>
         )}
         {!s.data ? (
-          <Button variant="ghost" onClick={() => s.act(s.load)} loading={s.busy}>
-            Manage owner delegations
-          </Button>
+          <div>
+            <Button variant="primary" onClick={() => s.act(s.load)} loading={s.busy}>
+              Manage owner delegations
+            </Button>
+          </div>
         ) : (
           <>
+            <h4 className="font-heading text-sm font-semibold text-indigo-500">
+              Active delegations
+            </h4>
+            {live.length === 0 && (
+              <p className="text-sm text-slate-600">No owner holds a live delegation here.</p>
+            )}
             {live.map((d) => (
               <div
                 key={d.delegation_id}
                 data-testid="mfa-recovery-delegation"
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-slate-300 p-3 text-sm"
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-sm"
               >
-                <span>
-                  {d.owner_email} · {d.target_roles.join(', ')} · until{' '}
-                  {formatDateTime(d.expires_at)}
+                <span className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="font-medium text-indigo-500">{d.owner_email}</span>
+                  {d.target_roles.map((r) => (
+                    <Badge key={r} variant="info">
+                      {r}
+                    </Badge>
+                  ))}
+                  <span className="text-slate-600">until {formatDateTime(d.expires_at)}</span>
                 </span>
                 <Button
-                  variant="ghost"
+                  variant="outline"
+                  className="border-ember-500/40 text-ember-700 hover:bg-ember-50"
                   size="sm"
                   onClick={() => revoke(d.delegation_id)}
                   loading={s.busy}
@@ -189,12 +204,15 @@ export function DelegationManager({
                 </Button>
               </div>
             ))}
-            <div className="flex flex-col gap-3 rounded-md border border-slate-300 bg-slate-50 p-4">
+            <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-mist-50 p-4">
+              <h4 className="font-heading text-sm font-semibold text-indigo-500">
+                Issue a delegation
+              </h4>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="delegateOwner">Owner</Label>
                 <select
                   id="delegateOwner"
-                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  className={selectClass}
                   value={owner}
                   onChange={(e) => setOwner(e.target.value)}
                 >
@@ -206,12 +224,13 @@ export function DelegationManager({
                   ))}
                 </select>
               </div>
-              <fieldset className="flex gap-4 text-sm">
+              <fieldset className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
                 <legend className="mb-1 text-sm font-medium">Roles they may recover</legend>
                 {ROLES.map((r) => (
                   <label key={r} className="flex items-center gap-1.5">
                     <input
                       type="checkbox"
+                      className={checkboxClass}
                       checked={roles.includes(r)}
                       onChange={(e) =>
                         setRoles((cur) =>
@@ -226,9 +245,15 @@ export function DelegationManager({
               <div className="flex flex-wrap items-end gap-3">
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="delegateDays">Days (1–30)</Label>
-                  <Input id="delegateDays" value={days} onChange={(e) => setDays(e.target.value)} />
+                  <Input
+                    id="delegateDays"
+                    className="w-24"
+                    inputMode="numeric"
+                    value={days}
+                    onChange={(e) => setDays(e.target.value)}
+                  />
                 </div>
-                <div className="flex min-w-64 flex-1 flex-col gap-1.5">
+                <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1.5">
                   <Label htmlFor="delegateReason">Why this owner</Label>
                   <Input
                     id="delegateReason"
@@ -342,35 +367,40 @@ export function OwnerRecoveryPanel({ tenantId }: { tenantId: string }) {
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {s.notice && (
-          <p role="status" className="text-sm text-slate-700">
+          <Notice tone="success" role="status">
             {s.notice}
-          </p>
+          </Notice>
         )}
         {s.error && (
-          <div className="rounded-md border border-ember-500 bg-ember-50 p-3 text-sm text-ember-700">
+          <Notice tone="error" role="alert">
             {s.error}
-          </div>
+          </Notice>
         )}
         {!s.data ? (
-          <Button variant="ghost" onClick={() => s.act(s.load)} loading={s.busy}>
-            Check my recovery delegation
-          </Button>
+          <div>
+            <Button variant="primary" onClick={() => s.act(s.load)} loading={s.busy}>
+              Check my recovery delegation
+            </Button>
+          </div>
         ) : !delegation ? (
-          <p className="text-sm text-slate-600">
+          <Notice tone="neutral">
             No founder has delegated recovery to you for this organisation.
-          </p>
+          </Notice>
         ) : (
           <>
-            <p className="text-sm text-slate-700">
+            <Notice tone="info">
               Delegated for {delegation.target_roles.join(', ')} until{' '}
               {formatDateTime(delegation.expires_at)}.
-            </p>
-            <div className="flex flex-col gap-3 rounded-md border border-slate-300 bg-slate-50 p-4">
+            </Notice>
+            <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-mist-50 p-4">
+              <h4 className="font-heading text-sm font-semibold text-indigo-500">
+                Start a recovery
+              </h4>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="ownerRecoverySubject">Member to recover</Label>
                 <select
                   id="ownerRecoverySubject"
-                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  className={selectClass}
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
                 >
@@ -417,16 +447,16 @@ export function OwnerRecoveryPanel({ tenantId }: { tenantId: string }) {
                 <div
                   key={c.case_id}
                   data-testid="mfa-owner-recovery-case"
-                  className="flex flex-col gap-2 rounded-md border border-indigo-300 bg-indigo-50 p-4 text-sm"
+                  className="flex flex-col gap-2 rounded-lg border border-indigo-200 bg-white p-4 text-sm shadow-sm"
                 >
-                  <p className="font-medium text-indigo-900">
+                  <p className="flex flex-wrap items-center gap-2 font-semibold text-indigo-500">
                     {c.subject_email} · <Badge variant="warning">{c.state}</Badge>
                   </p>
                   {c.state === 'bound' && c.beneficiary_session ? (
                     <div className="flex flex-wrap items-end gap-3">
                       <span>
                         Confirm only if their code is{' '}
-                        <span className="font-mono text-lg tracking-widest">
+                        <span className="rounded-md bg-indigo-50 px-2 py-0.5 font-mono text-lg tracking-widest text-indigo-500">
                           {sessionFingerprint(c.beneficiary_session.session_id)}
                         </span>
                       </span>
@@ -458,9 +488,9 @@ export function OwnerRecoveryPanel({ tenantId }: { tenantId: string }) {
                         : 'Confirmed; waiting for enrolment.'}
                     </p>
                   )}
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
                     <Button
-                      variant="ghost"
+                      variant="outline"
                       size="sm"
                       onClick={() => s.act(s.load)}
                       loading={s.busy}
@@ -468,7 +498,8 @@ export function OwnerRecoveryPanel({ tenantId }: { tenantId: string }) {
                       Refresh
                     </Button>
                     <Button
-                      variant="ghost"
+                      variant="outline"
+                      className="border-ember-500/40 text-ember-700 hover:bg-ember-50"
                       size="sm"
                       onClick={() => cancel(c.case_id)}
                       loading={s.busy}

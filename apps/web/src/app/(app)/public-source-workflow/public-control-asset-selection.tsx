@@ -1,4 +1,6 @@
 'use client';
+import { buttonVariants } from '@axiom/ui';
+import { selectClass } from '@/components/workflow-blocks';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import {
@@ -251,6 +253,7 @@ function Selection({
       {!estate && !error && <p role="status">Loading saved estate and systems…</p>}
       {error && <p role="alert">{error}</p>}
       <button
+        className={buttonVariants({ variant: 'outline', size: 'sm' })}
         type="button"
         disabled={busy}
         onClick={() => {
@@ -274,6 +277,7 @@ function Selection({
           <label>
             Website review system
             <select
+              className={selectClass}
               value={systemId}
               disabled={disabled || busy || estate.status !== 'active'}
               onChange={(e) => {
@@ -293,7 +297,12 @@ function Selection({
               ))}
             </select>
           </label>
-          <button type="button" disabled={busy || !systemId} onClick={() => void load('targets')}>
+          <button
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
+            type="button"
+            disabled={busy || !systemId}
+            onClick={() => void load('targets')}
+          >
             Load registered review targets
           </button>
           {targets && (
@@ -301,6 +310,7 @@ function Selection({
               <label>
                 Registered review target
                 <select
+                  className={selectClass}
                   value={targetId}
                   disabled={disabled || busy}
                   onChange={(e) => {
@@ -328,13 +338,19 @@ function Selection({
               </label>
               {targets.rows.length === 0 && <p>No saved targets on this page.</p>}
               {targets.nextCursor && (
-                <button type="button" disabled={busy} onClick={() => void load('targets', true)}>
+                <button
+                  className={buttonVariants({ variant: 'outline', size: 'sm' })}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void load('targets', true)}
+                >
                   Next review target page
                 </button>
               )}
             </>
           )}
           <button
+            className={buttonVariants({ variant: 'outline', size: 'sm' })}
             type="button"
             disabled={busy || !targetId}
             onClick={() => void load('associations')}
@@ -346,6 +362,7 @@ function Selection({
               <label>
                 Saved review association
                 <select
+                  className={selectClass}
                   value={associationId}
                   disabled={disabled || busy}
                   onChange={(e) => {
@@ -369,6 +386,7 @@ function Selection({
               {associations.rows.length === 0 && <p>No saved associations on this page.</p>}
               {associations.nextCursor && (
                 <button
+                  className={buttonVariants({ variant: 'outline', size: 'sm' })}
                   type="button"
                   disabled={busy}
                   onClick={() => void load('associations', true)}
