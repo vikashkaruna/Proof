@@ -62,18 +62,60 @@ export async function checkDeploymentReadback(value: unknown, original: Deployme
   if (row.outcome !== 'not_recorded') {
     if (canonicalJson(row.intent) !== canonicalJson(original.intent))
       throw Error('Setup intent changed');
-    const expected = await sha256(
-      ownedDeploymentOperationCanonicalJSON({
-        tenantId: original.tenantId,
-        actorId: original.actorId,
-        requestId: original.requestId,
-        operationKey: original.intent.request.operationKey,
-        intent: original.intent,
-      }),
-    );
+    const expected = await deploymentIntentHash(original);
     if (row.canonicalRequestHash !== expected) throw Error('Setup receipt hash changed');
   }
+  if (
+    row.phaseResult?.phase === 'fence' &&
+    row.phaseResult.receipt.fenceReceiptId !== row.receiptId
+  )
+    throw Error('Setup retirement receipt changed');
   return row;
+}
+export async function deploymentIntentHash(original: DeploymentJournal) {
+  return sha256(
+    ownedDeploymentOperationCanonicalJSON({
+      tenantId: original.tenantId,
+      actorId: original.actorId,
+      requestId: original.requestId,
+      operationKey: original.intent.request.operationKey,
+      intent: original.intent,
+    }),
+  );
+}
+export async function retainDeploymentFence(
+  storage: Storage,
+  original: DeploymentJournal,
+  operationKey: string,
+) {
+  assertCurrentDeploymentJournal(storage, original);
+  const phase = original.intent.phase;
+  if (phase === 'install' || phase === 'fence')
+    throw Error('Installation effects cannot be retired in this screen');
+  const targetPhase = phase === 'request' || phase === 'preflight' ? phase : 'decision';
+  const next = deploymentJournal.parse({
+    ...original,
+    intent: {
+      phase: 'fence',
+      request: {
+        operationKey,
+        target: {
+          phase: targetPhase,
+          operationKey: original.intent.request.operationKey,
+          canonicalRequestHash: await deploymentIntentHash(original),
+        },
+        reason: 'superseded_after_no_effect',
+      },
+    },
+  });
+  assertCurrentDeploymentJournal(storage, original);
+  const sourceKey = `${deploymentJournalKey(original.tenantId, original.actorId)}:fence-source:${operationKey}`;
+  const text = JSON.stringify(original);
+  storage.setItem(sourceKey, text);
+  if (storage.getItem(sourceKey) !== text)
+    throw Error('Original setup intent could not be preserved');
+  assertCurrentDeploymentJournal(storage, original);
+  return retainDeploymentJournal(storage, next);
 }
 export async function withDeploymentLock<T>(tenant: string, actor: string, fn: () => Promise<T>) {
   if (!navigator.locks)

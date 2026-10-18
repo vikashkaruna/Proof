@@ -12,6 +12,7 @@ import {
   deploymentJournalKey,
   readDeploymentJournal,
   retainDeploymentJournal,
+  retainDeploymentFence,
   assertCurrentDeploymentJournal,
   completeDeploymentJournal,
   checkDeploymentReadback,
@@ -57,6 +58,7 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
     [reason, setReason] = useState(''),
     [ack, setAck] = useState(false),
     [code, setCode] = useState(''),
+    [retireAck, setRetireAck] = useState(false),
     [pending, setPending] = useState<DeploymentJournal | null>(null),
     [ready, setReady] = useState(false),
     [busy, setBusy] = useState(false),
@@ -154,7 +156,9 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
         throw Error('Recorded challenge is unavailable');
       const challenge = receipt.phaseResult.challenge;
       if (Date.parse(challenge.expiresAt) <= Date.now())
-        throw Error('The recorded challenge expired. Preserve the request for review.');
+        throw Error(
+          'The recorded challenge expired. Retire the old step after the server confirms that no approval or installation effect exists, then review a fresh request.',
+        );
       retainDeploymentJournal(localStorage, {
         ...original,
         intent: {
@@ -180,7 +184,12 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
     }
     completeDeploymentJournal(localStorage, original, receipt.receiptId);
     setCode('');
-    setMessage(`Step recorded. Receipt ${receipt.receiptId}.`);
+    setRetireAck(false);
+    setMessage(
+      receipt.phaseResult?.phase === 'fence'
+        ? `The server retired the original step and blocked its late retries. Receipt ${receipt.receiptId}. ${receipt.phaseResult.receipt.requiresPreflight ? 'Run fresh preparation checks before reviewing another approval.' : 'You can select and review a new step.'} No replacement approval or target change was made.`
+        : `Step recorded. Receipt ${receipt.receiptId}.`,
+    );
     await reload();
   }
   async function send(original: DeploymentJournal) {
@@ -191,7 +200,9 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
       return;
     }
     const suffix =
-      original.intent.phase === 'request' ? '' : `/${original.requestId}/${original.intent.phase}`;
+      original.intent.phase === 'request'
+        ? ''
+        : `/${original.requestId}/${original.intent.phase === 'fence' ? 'fence-intent' : original.intent.phase}`;
     try {
       await deploymentTransport(
         scope,
@@ -204,6 +215,22 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
     }
     assertCurrentDeploymentJournal(localStorage, original);
     await recover(original);
+  }
+  function retire(original: DeploymentJournal) {
+    void run(async () => {
+      if (!retireAck) throw Error('Confirm retirement of the original step first');
+      const current = await readback(original);
+      if (current.outcome === 'unconfirmed')
+        throw Error('An effect is still unconfirmed. Keep the original step for reconciliation.');
+      if (original.intent.phase === 'approve' && current.outcome === 'recorded') {
+        await recover(original, current);
+        return;
+      }
+      const fence = await retainDeploymentFence(localStorage, original, crypto.randomUUID());
+      setCode('');
+      setRetireAck(false);
+      await send(fence);
+    });
   }
   function begin(phase: 'request' | 'preflight' | 'challenge' | 'install') {
     void run(async () => {
@@ -354,6 +381,30 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
                   : 'Retry original step'}
             </button>
           </div>
+          {!['install', 'fence'].includes(pending.intent.phase) && (
+            <div className="space-y-2 border-t border-slate-200 pt-3">
+              <p className="text-sm">
+                If this step expired or you need to review a fresh request, ask the server to retire
+                it. Retirement is refused while an approval or uncertain installation effect exists.
+              </p>
+              <label className="flex gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={retireAck}
+                  onChange={(e) => setRetireAck(e.target.checked)}
+                />
+                I want to retire this exact step after the server confirms no mutating effect and
+                blocks late retries.
+              </label>
+              <button
+                className={button}
+                disabled={busy || !retireAck}
+                onClick={() => retire(pending)}
+              >
+                Check and retire the original step
+              </button>
+            </div>
+          )}
           <details>
             <summary>Frozen scope and request reference</summary>
             <p className="break-all text-xs">
@@ -362,12 +413,20 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
             <p className="text-sm">
               Local synthetic audit configuration only. Setup does not change the audit setting.
             </p>
-            <p className="break-all text-xs">
-              Manifest:{' '}
-              {'manifestSha256' in pending.intent.request
-                ? pending.intent.request.manifestSha256
-                : pending.intent.request.expectedManifestSha256}
-            </p>
+            {pending.intent.phase !== 'fence' && (
+              <p className="break-all text-xs">
+                Manifest:{' '}
+                {'manifestSha256' in pending.intent.request
+                  ? pending.intent.request.manifestSha256
+                  : pending.intent.request.expectedManifestSha256}
+              </p>
+            )}
+            {pending.intent.phase === 'fence' && (
+              <p className="break-all text-xs">
+                Retiring original operation {pending.intent.request.target.operationKey}; request
+                digest {pending.intent.request.target.canonicalRequestHash}.
+              </p>
+            )}
             {'expectedPreflightSha256' in pending.intent.request && (
               <p className="break-all text-xs">
                 Preparation: {pending.intent.request.expectedPreflightSha256} · Rollback:{' '}
@@ -528,13 +587,15 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
                     ))}
                   </ol>
                 )}
-                {['requested', 'preflight_refused'].includes(row.state) && (
+                {['requested', 'preflight_refused', 'preflight_ready'].includes(row.state) && (
                   <button
                     className={primary}
                     disabled={busy || !ready}
                     onClick={() => begin('preflight')}
                   >
-                    Run preparation checks
+                    {row.state === 'preflight_ready'
+                      ? 'Refresh preparation checks'
+                      : 'Run preparation checks'}
                   </button>
                 )}
                 {row.state === 'preflight_ready' &&

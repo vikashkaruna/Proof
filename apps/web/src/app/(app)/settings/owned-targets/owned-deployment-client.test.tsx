@@ -3,7 +3,8 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { sha256 } from '@axiom/ledger';
-import { ownedDeploymentOperationCanonicalJSON } from '@axiom/types';
+import { ownedDeploymentOperationCanonicalJSON, ownedDeploymentFence } from '@axiom/types';
+import { z } from 'zod';
 import { OwnedDeploymentClient } from './owned-deployment-client';
 import {
   deploymentJournal,
@@ -43,6 +44,116 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
+it.each(['challenge', 'request'] as const)(
+  'retires an expired %s through an exact server fence, recovering its lost reply after reload without starting replacement work',
+  async (phase) => {
+    const source = deploymentJournal.parse({
+      ...original,
+      requestId: phase === 'request' ? operationKey : requestId,
+      intent:
+        phase === 'challenge'
+          ? { phase, request: decision }
+          : {
+              phase,
+              request: {
+                operationKey,
+                engagementId: requestId,
+                connectorId: challengeId,
+                manifestSha256: 'a'.repeat(64),
+                reason: decision.reason,
+                acknowledgeOwnedSynthetic: true,
+              },
+            },
+    });
+    retainDeploymentJournal(localStorage, source);
+    let fence: z.infer<typeof ownedDeploymentFence> | null = null;
+    let postCount = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, options: RequestInit) => {
+        if (options.method === 'POST') {
+          expect(url.endsWith('/fence-intent')).toBe(true);
+          fence = ownedDeploymentFence.parse(JSON.parse(String(options.body)));
+          postCount++;
+          throw Error('Lost reply after atomic retirement');
+        }
+        if (!url.includes('/operations/')) return Response.json({ data: [] });
+        const isFence = url.includes('/operations/fence/');
+        const intent = isFence && fence ? { phase: 'fence', request: fence } : source.intent;
+        const key = isFence ? url.split('/').at(-1)! : operationKey;
+        const recorded = isFence ? fence !== null : phase === 'challenge';
+        const retirement = fence
+          ? {
+              requestId: source.requestId,
+              tenantId,
+              actorId,
+              operationKey: fence.operationKey,
+              target: fence.target,
+              disposition: 'fenced_no_mutation',
+              previousState: phase === 'challenge' ? 'expired_decision' : 'not_recorded',
+              requiresPreflight: true,
+              fenceReceiptId: '901',
+            }
+          : null;
+        return Response.json({
+          data: {
+            requestId: source.requestId,
+            tenantId,
+            actorId,
+            operationKey: key,
+            phase: isFence ? 'fence' : phase,
+            outcome: recorded ? 'recorded' : 'not_recorded',
+            canonicalRequestHash: recorded
+              ? await sha256(
+                  ownedDeploymentOperationCanonicalJSON({
+                    tenantId,
+                    actorId,
+                    requestId: source.requestId,
+                    operationKey: key,
+                    intent,
+                  }),
+                )
+              : null,
+            intent: recorded ? intent : null,
+            receiptId: recorded ? (isFence ? '901' : '900') : null,
+            result: null,
+            phaseResult: !recorded
+              ? null
+              : isFence
+                ? { phase: 'fence', receipt: retirement }
+                : {
+                    phase: 'challenge',
+                    challenge: { challengeId, expiresAt: '2020-01-01T00:00:00Z', maxAttempts: 3 },
+                  },
+          },
+        });
+      }),
+    );
+    const props = { tenantId, actorId, founder: true, engagements: [] };
+    const first = render(<OwnedDeploymentClient {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Check original step' }));
+    if (phase === 'challenge') await screen.findByRole('alert');
+    else await screen.findByRole('status');
+    fireEvent.click(
+      screen.getByLabelText(
+        'I want to retire this exact step after the server confirms no mutating effect and blocks late retries.',
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Check and retire the original step' }));
+    await waitFor(() => expect(postCount).toBe(1));
+    await screen.findByRole('alert');
+    expect(readDeploymentJournal(localStorage, tenantId, actorId)?.intent.phase).toBe('fence');
+    first.unmount();
+    render(<OwnedDeploymentClient {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Check original step' }));
+    await waitFor(() => expect(readDeploymentJournal(localStorage, tenantId, actorId)).toBeNull());
+    expect(postCount).toBe(1);
+    expect(screen.getByRole('status').textContent).toContain(
+      'No replacement approval or target change was made',
+    );
+    expect(Object.keys(localStorage).some((key) => key.includes(':fence-source:'))).toBe(true);
+  },
+);
 it('recovers a verification committed before a lost reply after reload, then approves once with the same frozen decision and no persisted code', async () => {
   retainDeploymentJournal(localStorage, original);
   const posts: { path: string; body: unknown }[] = [];
