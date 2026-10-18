@@ -48,6 +48,17 @@ class Local147(unittest.TestCase):
         self.assertNotIn("resolve_public_control_assessment_source", enqueue)
         self.assertNotIn("commit;", text)
 
+    def test_fixture_transport_iat_never_uses_clock_after_statement_start(self):
+        claim = FIXTURE.setup().split("create function local147_fixture.claim", 1)[1]
+        self.assertIn("'iat',floor(extract(epoch from statement_timestamp()))", claim)
+        self.assertIn(
+            "'exp',coalesce((changes->>'exp')::bigint,floor(extract(epoch from statement_timestamp()))",
+            claim,
+        )
+        self.assertNotIn("clock_timestamp()", claim)
+        # Explicit exp still drives the original short-lived credential case.
+        self.assertIn("(changes->>'exp')::bigint", claim)
+
     def test_committed_template_requires_owned_name_and_actual_maintenance_actor(self):
         text = FIXTURE.setup(committed=True)
         self.assertIn("^axiom_proof_local_147_[a-f0-9]{12}_template$", text)

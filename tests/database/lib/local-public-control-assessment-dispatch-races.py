@@ -250,6 +250,40 @@ class Runner(BASE.Runner):
         if failures:
             raise RuntimeError("owned147_database_cleanup_incomplete")
 
+    def statement_clock(self, database):
+        """A token predates SQL even when query execution crosses an epoch second.
+
+        This bounded sleep tests timestamp provenance only. It does not stand in
+        for a lock witness: every concurrency scenario still requires pg_locks
+        and pg_blocking_pids proof through the unchanged maintained barrier.
+        """
+        before = json.loads(self.sql(database, SNAPSHOT))
+        immutable = "select jsonb_build_object('ledger',(select encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(t) order by id),'[]'::jsonb)::text,'UTF8')),'hex') from public.audit_ledger t),'grants',(select encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(g) order by job_id),'[]'::jsonb)::text,'UTF8')),'hex') from public.assessment_local_custody_authorizations g))"
+        original = self.sql(database, immutable)
+        reply = json.loads(
+            self.sql(database, "select local147_fixture.claim(301) from pg_sleep(1.1)")
+        )
+        if reply.get("job_id") != "99134700-0000-4000-8000-000000000301" or reply.get(
+            "error"
+        ):
+            raise ValueError("statement_clock_claim_unconfirmed")
+        after = json.loads(self.sql(database, SNAPSHOT))
+        validate(before, after, {"operation": "claim"})
+        if self.sql(database, immutable) != original:
+            raise ValueError("statement_clock_historical_bytes_changed")
+        print(
+            json.dumps(
+                {
+                    "localDispatch147StatementClockProof": {
+                        "claimed": True,
+                        "historicalLedgerAndGrantsUnchanged": True,
+                        "historyUnchanged": before["history"] == after["history"],
+                    }
+                }
+            ),
+            flush=True,
+        )
+
     def race(self, database, case, index):
         folder = self.directory / f"{index:02d}-{case['name']}"
         folder.mkdir(mode=0o700)
@@ -309,7 +343,7 @@ class Runner(BASE.Runner):
         try:
             sys.argv = argv
             if BARRIER.main() != 0:
-                raise RuntimeError("observed147_race_failed")
+                raise RuntimeError("observed147_race_failed:" + case["name"])
         finally:
             sys.argv = prior
         output = (folder / "contender.log").read_text()
@@ -390,6 +424,12 @@ def main():
                 template,
                 "select local147_fixture.enqueue(301);set constraints all immediate;",
             )
+            clock_database = runner.create("clock", template)
+            runner.statement_clock(clock_database)
+            runner.run(
+                ["exec", runner.cid, "dropdb", "-U", "supabase_admin", clock_database]
+            )
+            runner.databases.remove(clock_database)
             for index, case in enumerate(scenarios()):
                 database = runner.create(str(index), template)
                 runner.race(database, case, index)
@@ -404,12 +444,15 @@ def main():
                 [*Path(raw).rglob("*.log"), *Path(raw).rglob("*.lock-proof.json")]
             ):
                 print(
-                    log.name + ": " + log.read_text(errors="replace"), file=sys.stderr
+                    str(log.relative_to(raw)) + ": " + log.read_text(errors="replace"),
+                    file=sys.stderr,
                 )
             raise
         finally:
             runner.cleanup()
-    print("Local147:15 observed races; owned databases removed; no retained state.")
+    print(
+        "Local147:statement-clock regression and 15 observed races; owned databases removed; no retained state."
+    )
 
 
 if __name__ == "__main__":
