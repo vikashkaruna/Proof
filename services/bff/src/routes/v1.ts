@@ -51,6 +51,7 @@ import { invokeGenericAgent } from '../services/generic-agent-invocation.js';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
+  ACTIVE_RUN_STALE_MS,
   IssueApprovalRequestSchema,
   ExecutePlanRequestSchema,
   type ExecutePlanRequest,
@@ -237,9 +238,6 @@ interface Deps {
   mfa: MfaService;
   realtime: RealtimeService;
 }
-
-/** Runs still running/queued this long after starting are reported as stalled. */
-const ACTIVE_RUN_STALE_MS = 60 * 60_000;
 
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
