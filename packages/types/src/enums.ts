@@ -366,6 +366,14 @@ export const LedgerActionType = {
   OWNED_PLAN_REQUEST_PREPARED: 'plan.owned_request.prepared',
   OWNED_PLAN_REQUEST_CANCELLED: 'plan.owned_request.cancelled',
   OWNED_EFFECT_OBSERVED: 'plan.owned_effect.observed',
+  OWNED_DEPLOYMENT_REQUESTED: 'deployment.owned_requested',
+  OWNED_DEPLOYMENT_PREFLIGHT: 'deployment.owned_preflight',
+  OWNED_DEPLOYMENT_APPROVED: 'deployment.owned_approved',
+  OWNED_DEPLOYMENT_STEP: 'deployment.owned_step',
+  OWNED_DEPLOYMENT_ACTIVE: 'deployment.owned_active',
+  OWNED_DEPLOYMENT_FENCED: 'deployment.owned_fenced',
+  OWNED_DEPLOYMENT_REVOKED: 'deployment.owned_revoked',
+  OWNED_DEPLOYMENT_CREDENTIAL: 'deployment.owned_credential',
 } as const;
 export type LedgerActionType = (typeof LedgerActionType)[keyof typeof LedgerActionType];
 

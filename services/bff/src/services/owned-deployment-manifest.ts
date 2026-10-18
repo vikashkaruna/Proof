@@ -27,6 +27,8 @@ export const ownedDeploymentManifest = z
     source: z
       .object({
         engineSha256: sha,
+        hostInstallerSha256: sha,
+        issuerConfigurationSha256: sha,
         capabilitySha256: z.literal(
           'a5b3db560e0707307c69aa70dc6bd62ad4a4ae0612c39f9420db6d99c4a20fb9',
         ),
@@ -40,6 +42,7 @@ export const ownedDeploymentManifest = z
         controllerImage: image,
         workerImage: image,
         bffImage: image,
+        bffContainerId: sha,
         workloadApiVolume: z.string().regex(/^axiom-workload-api-[a-z0-9-]{1,64}$/),
         nodeId: z
           .string()

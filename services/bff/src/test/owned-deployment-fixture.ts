@@ -17,6 +17,8 @@ export function makeOwnedDeploymentManifest() {
     label: 'Owned synthetic audit configuration',
     source: {
       engineSha256: 'a'.repeat(64),
+      hostInstallerSha256: 'e'.repeat(64),
+      issuerConfigurationSha256: 'f'.repeat(64),
       capabilitySha256: 'a5b3db560e0707307c69aa70dc6bd62ad4a4ae0612c39f9420db6d99c4a20fb9',
     },
     deployment: {
@@ -24,6 +26,7 @@ export function makeOwnedDeploymentManifest() {
       controllerImage: 'sha256:' + 'b'.repeat(64),
       workerImage: 'sha256:' + 'c'.repeat(64),
       bffImage: 'sha256:' + 'd'.repeat(64),
+      bffContainerId: 'b'.repeat(64),
       workloadApiVolume: 'axiom-workload-api-test',
       nodeId: 'spiffe://local.axiomproof.test/spire/agent/join_token/test',
       spiffeId: 'spiffe://local.axiomproof.test/agent/karya',
