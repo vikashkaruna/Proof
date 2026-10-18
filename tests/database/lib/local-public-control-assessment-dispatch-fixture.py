@@ -165,10 +165,14 @@ exception when others then reset role;raise;end $$;
 grant select on local147_fixture.review,local147_fixture.clock,local147_fixture.policy_saved to human_action_writer;
 create function local147_fixture.revoke_policy() returns jsonb language sql as $$select local147_fixture.policy_write(local147_fixture.policy_request(154,'revoke',(select (v->>'eventId')::uuid from local147_fixture.policy_saved where kind='activate')),3)$$;
 insert into controller_security.credentials(id,tenant_id,expires_at) values(local147_fixture.id(181),local147_fixture.id(31),clock_timestamp()+interval '1 hour');
+-- A real transport JWT is issued before this SQL statement begins. Minting
+-- its synthetic iat from wall time inside the statement can cross an epoch
+-- second and spuriously fail the legacy statement-time tenant guard. Only
+-- this fixture clock changes; production wall-time expiry fences stay intact.
 create function local147_fixture.claim(n int,changes jsonb default '{}') returns jsonb language plpgsql as $$
 declare p jsonb:=local147_fixture.policy();v jsonb;policy_sha text;begin
  policy_sha:=encode(sha256(convert_to(controller_security.canonical_questionnaire_json(p),'UTF8')),'hex');
- perform set_config('request.jwt.claims',jsonb_build_object('role','axiom_assessment_controller','sub',coalesce((changes->>'credentialId')::uuid,local147_fixture.id(181)),'tenant_id',coalesce(changes->>'tenantId',local147_fixture.id(31)::text),'iat',floor(extract(epoch from clock_timestamp()))::bigint,'exp',coalesce((changes->>'exp')::bigint,floor(extract(epoch from clock_timestamp()))::bigint+120))::text,true);
+ perform set_config('request.jwt.claims',jsonb_build_object('role','axiom_assessment_controller','sub',coalesce((changes->>'credentialId')::uuid,local147_fixture.id(181)),'tenant_id',coalesce(changes->>'tenantId',local147_fixture.id(31)::text),'iat',floor(extract(epoch from statement_timestamp()))::bigint,'exp',coalesce((changes->>'exp')::bigint,floor(extract(epoch from statement_timestamp()))::bigint+120))::text,true);
  set local role axiom_assessment_controller;
  v:=public.claim_local_assessment_dispatch(local147_fixture.id(31),local147_fixture.id(n),local147_fixture.id(91),coalesce(changes->>'policySha256',policy_sha),p->>'keyPolicySha256');reset role;return v;
 exception when others then reset role;raise;end $$;
