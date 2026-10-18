@@ -791,7 +791,7 @@ begin
  if not exists(select 1 from pg_catalog.pg_roles role where rolname='owned_target_controller'
  and not rolcanlogin and not rolinherit and not rolsuper and not rolcreatedb and not rolcreaterole and not rolreplication and not rolbypassrls
  and not exists(select 1 from pg_catalog.pg_auth_members edge where edge.member=role.oid)
- and not exists(select 1 from pg_catalog.pg_auth_members edge join pg_catalog.pg_roles member on member.oid=edge.member where edge.roleid=role.oid and member.rolname<>'authenticator'))
+ and not exists(select 1 from pg_catalog.pg_auth_members edge join pg_catalog.pg_roles member on member.oid=edge.member where edge.roleid=role.oid and member.rolname<>'authenticator' and not member.rolsuper and member.oid<>(select nspowner from pg_catalog.pg_namespace where nspname='owned_synthetic')))
  or not exists(select 1 from pg_catalog.pg_roles where rolname='authenticator' and not rolsuper and not rolcreaterole and not rolcreatedb and not rolbypassrls)
  or exists(select 1 from owned_synthetic.bindings where id=r.binding_id or(fixture_id,resource_id)=(r.fixture_id,r.resource_id))
  or exists(select 1 from owned_synthetic.resources where(fixture_id,resource_id)=(r.fixture_id,r.resource_id))
@@ -1200,7 +1200,7 @@ declare r owned_synthetic.deployment_requests;a owned_synthetic.deployment_appro
  elsif p_step='authorize_role_switch' then
   select oid into role_oid from pg_catalog.pg_roles where rolname='owned_target_controller' and not rolcanlogin and not rolinherit and not rolsuper and not rolcreatedb and not rolcreaterole and not rolreplication and not rolbypassrls;
   if role_oid is null or exists(select 1 from pg_catalog.pg_auth_members where member=role_oid)
-  or exists(select 1 from pg_catalog.pg_auth_members edge join pg_catalog.pg_roles member on member.oid=edge.member where edge.roleid=role_oid and member.rolname<>'authenticator')
+  or exists(select 1 from pg_catalog.pg_auth_members edge join pg_catalog.pg_roles member on member.oid=edge.member where edge.roleid=role_oid and member.rolname<>'authenticator' and not member.rolsuper and member.oid<>(select nspowner from pg_catalog.pg_namespace where nspname='owned_synthetic'))
   then raise exception 'owned deployment role graph refused' using errcode='42501';end if;
   grant owned_target_controller to authenticator;
   if not pg_has_role('authenticator','owned_target_controller','MEMBER') then raise exception 'owned deployment role switch readback refused' using errcode='42501';end if;
