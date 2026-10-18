@@ -51,7 +51,7 @@ async function forward(request: NextRequest, context: RouteContext) {
                 target.pathname,
               )
             ? 4096
-            : /^\/v1\/plans\/owned-synthetic(?:\/(?:cancel|outcome|observe-effect))?$/.test(
+            : /^\/v1\/(?:plans\/owned-synthetic(?:\/(?:cancel|outcome|observe-effect))?|owned-deployments(?:\/[0-9a-fA-F-]{36}\/(?:preflight|challenge|verify|approve|install))?)$/.test(
                   target.pathname,
                 )
               ? 16384
