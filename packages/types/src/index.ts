@@ -37,6 +37,7 @@ export * from './model-call-accounting';
 
 export * from './public-control-assessment-v2';
 
+export * from './catalogue-versions';
 export * from './public-control-review-set';
 
 export * from './assessment-source-operation';

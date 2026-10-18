@@ -1,3 +1,4 @@
+import { ApprovedLibraryVersionSchema } from '@axiom/types';
 /** Pure verification of a database-frozen human-review appendix. This does not
  * authenticate publication or live ledger custody; the source-freezing writer
  * must verify those before retaining the outer source bytes. No network calls. */
@@ -102,7 +103,7 @@ export const FrozenHumanControlReviewSchema = z
       .strict(),
     catalogue: z
       .object({
-        library_version: z.literal('0.1.1'),
+        library_version: ApprovedLibraryVersionSchema,
         questionnaire_digest: digest,
         mapping_version: z.literal('public-evidence-1'),
         manifest_text: text(2 * 1024 * 1024),
@@ -375,7 +376,7 @@ function verifyReview(
       .object({
         tenant_id: uuid,
         engagement_id: uuid,
-        library_version: z.literal('0.1.1'),
+        library_version: ApprovedLibraryVersionSchema,
         answers: z.record(z.string(), z.record(z.string(), z.boolean().nullable())),
         sdf_self_attested: z.boolean().nullable(),
         processes_children: z.boolean().nullable(),

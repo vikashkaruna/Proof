@@ -1,3 +1,4 @@
+import { ApprovedLibraryVersionSchema } from '@axiom/types';
 import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -26,10 +27,10 @@ const retained = z
     payloadText: z.string().min(2).max(524288),
     payloadSha256: z.string().regex(/^[a-f0-9]{64}$/),
     captureReceipt: z.string().regex(/^[1-9][0-9]*$/),
-    libraryVersion: z.literal('0.1.1'),
+    libraryVersion: ApprovedLibraryVersionSchema,
     library: z
       .object({
-        version: z.literal('0.1.1'),
+        version: ApprovedLibraryVersionSchema,
         published_at: z.iso.datetime({ offset: true }),
         published_by: z.string(),
         change_log: z.string(),
