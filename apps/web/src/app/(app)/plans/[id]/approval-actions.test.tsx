@@ -362,3 +362,56 @@ it('shows read-only reviewers where to inspect each action without offering sele
       .every((input) => (input as HTMLInputElement).disabled),
   ).toBe(true);
 });
+
+it('preserves the confirmed approval notice when refreshed server actions become approved', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ challengeId: 'challenge-1', expiresAt: '2026-10-01T00:00:00Z' }),
+      )
+      .mockResolvedValueOnce(Response.json({ challengeId: 'challenge-1', satisfied: true }))
+      .mockResolvedValueOnce(
+        Response.json({
+          token: { spec: { planId: 'plan-1', actionIds: ['action-1'] }, signature: 'a'.repeat(64) },
+        }),
+      ),
+  );
+  const view = render(<ApprovalActions {...props} canApprove canReject />);
+  fireEvent.click(screen.getByRole('button', { name: 'Approve 1 action' }));
+  fireEvent.change(await screen.findByLabelText(/6-digit code/), { target: { value: '123456' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Verify and approve' }));
+  await screen.findByText(/Signed approval token issued/);
+  view.rerender(
+    <ApprovalActions
+      {...props}
+      actions={props.actions.map((action) => ({ ...action, approval_status: 'approved' }))}
+      eligible={[]}
+      canApprove
+      canReject
+    />,
+  );
+  expect(screen.getByText(/Approved 1 action.*Signed approval token issued/)).toBeTruthy();
+  expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull();
+  expect(screen.queryByLabelText(/6-digit code/)).toBeNull();
+});
+
+it('refreshes newly eligible selection and invalidates a challenge when server scope changes', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ challengeId: 'challenge-1', expiresAt: '2026-10-01T00:00:00Z' }),
+      ),
+  );
+  const view = render(<ApprovalActions {...props} eligible={[]} canApprove />);
+  expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull();
+  view.rerender(<ApprovalActions {...props} canApprove />);
+  fireEvent.click(screen.getByRole('button', { name: 'Approve 1 action' }));
+  await screen.findByLabelText(/6-digit code/);
+  view.rerender(<ApprovalActions {...props} eligible={[]} canApprove />);
+  expect(screen.queryByLabelText(/6-digit code/)).toBeNull();
+  expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull();
+});

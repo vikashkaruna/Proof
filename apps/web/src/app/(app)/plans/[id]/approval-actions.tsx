@@ -94,6 +94,31 @@ export function ApprovalActions({
   const [stepUpCode, setStepUpCode] = useState('');
   const [needsEnrolment, setNeedsEnrolment] = useState(false);
 
+  // Refresh server authority/readiness without remounting the confirmed result.
+  // A changed snapshot invalidates the selection/challenge and execution token;
+  // notices survive so a successful operation does not disappear on refresh.
+  const serverSnapshot = JSON.stringify([
+    planStatus,
+    actions.map((action) => [action.id, action.approval_status]),
+    eligible.map((action) => action.id),
+    initialApprovalToken,
+    initialApprovedActionIds,
+    readinessAvailable,
+    canApprove,
+    canReject,
+    canExecute,
+  ]);
+  const [previousSnapshot, setPreviousSnapshot] = useState(serverSnapshot);
+  if (previousSnapshot !== serverSnapshot) {
+    setPreviousSnapshot(serverSnapshot);
+    setSettled(false);
+    setSelected(new Set(eligible.map((action) => action.id)));
+    setStepUp(null);
+    setStepUpCode('');
+    setApprovalToken(initialApprovalToken);
+    setApprovedActionIds(initialApprovedActionIds);
+  }
+
   function changeSelection(next: Set<string>) {
     setSelected(next);
     // The challenge was signed for the previous action set. A new selection
@@ -395,7 +420,8 @@ export function ApprovalActions({
   // Approval is only offered when the server would accept it. Starting a
   // step-up for a plan whose status rules approval out spent the approver's
   // codes on a refusal (owner finding, 2026-10-17).
-  const approvalOffered = canApprove && readinessAvailable && !planBlocker && !settled;
+  const approvalOffered =
+    canApprove && eligible.length > 0 && readinessAvailable && !planBlocker && !settled;
 
   return (
     <div className="flex flex-col gap-4">

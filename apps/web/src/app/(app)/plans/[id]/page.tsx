@@ -378,12 +378,7 @@ export default async function PlanDetailPage({ params }: PageProps) {
         </CardHeader>
         <CardContent>
           <ApprovalActions
-            key={JSON.stringify([
-              typedPlan.id,
-              typedPlan.status,
-              actions.map((a) => [a.id, a.approval_status, readinessByAction.get(a.id)?.ready]),
-              approvableEligible.map((a) => a.id),
-            ])}
+            key={`${typedPlan.tenant_id}/${typedPlan.id}`}
             planId={typedPlan.id}
             tenantId={typedPlan.tenant_id}
             planStatus={typedPlan.status}
