@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { loadEnv } from '@axiom/config';
 import { loadAssessmentProducer } from './workloads/assessment-producer.js';
+import { loadAssessmentProducerSocket } from './workloads/assessment-producer-socket.js';
 import { createApp } from './app.js';
 import { createEvidenceIngestionWriter, createHumanActionWriter } from '@axiom/supabase';
 import { logger as rootLogger } from './lib/logger.js';
@@ -16,7 +17,11 @@ createHumanActionWriter();
 createEvidenceIngestionWriter();
 const log = rootLogger.child({ module: 'bff' });
 
-const assessmentRequests = await loadAssessmentProducer(env.AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE);
+if (env.AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE && env.AXIOM_ASSESSMENT_PRODUCER_SOCKET_CONFIG_FILE)
+  throw new Error('Choose one assessment producer deployment mode');
+const assessmentRequests = env.AXIOM_ASSESSMENT_PRODUCER_SOCKET_CONFIG_FILE
+  ? await loadAssessmentProducerSocket(env.AXIOM_ASSESSMENT_PRODUCER_SOCKET_CONFIG_FILE)
+  : await loadAssessmentProducer(env.AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE);
 const app = createApp({ assessmentRequests });
 const port = Number(process.env.PORT || env.BFF_PORT);
 
