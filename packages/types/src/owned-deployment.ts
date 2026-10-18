@@ -56,6 +56,25 @@ export const ownedDeploymentMfaEnvelope = z
     code: z.string().min(1).max(256).optional(),
   })
   .strict();
+/** Human-only stop of the exact recorded enrollment. Never grants installation
+ * authority, replaces its founder approval, or undoes a target setting. */
+export const ownedDeploymentRevocation = z
+  .object({
+    operationKey: uuid,
+    expectedManifestSha256: hash,
+    expectedApprovalId: uuid,
+    reason,
+    acknowledgeOwnedSynthetic: z.literal(true),
+  })
+  .strict();
+export const ownedDeploymentRevocationMfaEnvelope = z
+  .object({
+    request: ownedDeploymentRevocation,
+    challengeId: uuid.optional(),
+    code: z.string().min(1).max(256).optional(),
+  })
+  .strict();
+export type OwnedDeploymentRevocation = z.infer<typeof ownedDeploymentRevocation>;
 /** Explicit human retirement of a request/read-only preflight/decision intent.
  * Server serializes with all old phase writers, proves no mutating/uncertain
  * installation effect, and appends an immutable fence checked by late callers.
@@ -65,7 +84,7 @@ export const ownedDeploymentFence = z
     operationKey: uuid,
     target: z
       .object({
-        phase: z.enum(['request', 'preflight', 'decision']),
+        phase: z.enum(['request', 'preflight', 'decision', 'revocation']),
         operationKey: uuid,
         canonicalRequestHash: hash,
       })
@@ -288,6 +307,9 @@ export const ownedDeploymentOperationPhase = z.enum([
   'approve',
   'install',
   'fence',
+  'revoke_challenge',
+  'revoke_verify',
+  'revoke',
 ]);
 export const ownedDeploymentOperationIntent = z.discriminatedUnion('phase', [
   z.object({ phase: z.literal('request'), request: ownedDeploymentRequest }).strict(),
@@ -301,6 +323,17 @@ export const ownedDeploymentOperationIntent = z.discriminatedUnion('phase', [
     .strict(),
   z.object({ phase: z.literal('install'), request: ownedDeploymentInstall }).strict(),
   z.object({ phase: z.literal('fence'), request: ownedDeploymentFence }).strict(),
+  z.object({ phase: z.literal('revoke_challenge'), request: ownedDeploymentRevocation }).strict(),
+  z
+    .object({
+      phase: z.literal('revoke_verify'),
+      request: ownedDeploymentRevocation,
+      challengeId: uuid,
+    })
+    .strict(),
+  z
+    .object({ phase: z.literal('revoke'), request: ownedDeploymentRevocation, challengeId: uuid })
+    .strict(),
 ]);
 export const ownedDeploymentOperationReadback = z
   .object({
@@ -325,6 +358,13 @@ export const ownedDeploymentOperationReadback = z
               })
               .strict(),
             z.object({ phase: z.literal('verify'), verified: z.literal(true) }).strict(),
+            z
+              .object({
+                phase: z.literal('revoke_challenge'),
+                challenge: ownedDeploymentChallenge.shape.data,
+              })
+              .strict(),
+            z.object({ phase: z.literal('revoke_verify'), verified: z.literal(true) }).strict(),
             z.object({ phase: z.literal('fence'), receipt: ownedDeploymentFenceReceipt }).strict(),
           ])
           .nullable(),
@@ -359,7 +399,9 @@ export const ownedDeploymentOperationReadback = z
           context.addIssue({ code: 'custom', message: 'Foreign phase result refused' });
         if (
           value.outcome === 'recorded' &&
-          ['challenge', 'verify', 'fence'].includes(value.phase) &&
+          ['challenge', 'verify', 'fence', 'revoke_challenge', 'revoke_verify'].includes(
+            value.phase,
+          ) &&
           !value.phaseResult
         )
           context.addIssue({ code: 'custom', message: 'Retained MFA phase result required' });
