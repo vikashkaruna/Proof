@@ -7,14 +7,12 @@ import json
 import re
 import uuid
 
+from .local_tenant_registry import tenant_bindings, validate_manifest
+
 UID, SCHEDULER_UID, SOCKET_GROUP = 20103, 20104, 20111
 DOMAIN = "local.axiomproof.test"
 WORKLOAD_ALIAS = "axiom-workload-api-local"
-TENANTS = {
-    "kosha": ("fd5e0001-0000-4000-8000-000000000001", 7443),
-    "sanjeevani": ("fd5e0002-0000-4000-8000-000000000002", 7444),
-    "nimbus": ("fd5e0003-0000-4000-8000-000000000003", 7445),
-}
+TENANTS = tenant_bindings()
 
 
 def canonical(value: dict) -> bytes:
@@ -89,7 +87,7 @@ def build_configuration(
         raise ValueError("Issuer refused")
     text = manifest["policyText"]
     sha = hashlib.sha256(text.encode()).hexdigest()
-    policy = json.loads(text)
+    policy = validate_manifest(slug, manifest)
     if (
         sha != manifest["policySha256"]
         or sha != active["policySha256"]

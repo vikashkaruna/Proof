@@ -40,6 +40,7 @@ from lib.local_controller_runtime import (
     issue_request,
     renewal_due,
 )
+from lib.local_tenant_registry import scheduler_port
 
 BASE = Path(
     os.environ.get(
@@ -612,7 +613,7 @@ def scheduler_args(slug: str, runtime: dict):
         "-e",
         "TEMPORAL_NAMESPACE=" + runtime["namespace"],
         "-e",
-        "PORT=" + str(8181 + list(TENANTS).index(slug)),
+        "PORT=" + str(scheduler_port(slug)),
         "--mount",
         f"type=volume,src={name(slug)}-socket,dst={SOCKET},readonly",
         "--entrypoint",

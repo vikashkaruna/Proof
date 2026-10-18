@@ -34,13 +34,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from lib.ci_fixture_images import fixture_image  # noqa: E402
+from lib.ci_fixture_images import fixture_image
+from lib.local_tenant_registry import tenant_bindings, validate_manifest
 
-TENANTS = {
-    "kosha": ("fd5e0001-0000-4000-8000-000000000001", 7443),
-    "sanjeevani": ("fd5e0002-0000-4000-8000-000000000002", 7444),
-    "nimbus": ("fd5e0003-0000-4000-8000-000000000003", 7445),
-}
+TENANTS = tenant_bindings()
 UID = 20101
 TRUST_DOMAIN = "local.axiomproof.test"
 SPIFFE = f"spiffe://{TRUST_DOMAIN}/service/local-key-service"
@@ -81,6 +78,7 @@ def manifest(tenant: str) -> dict:
     value = json.loads((ISSUER_ROOT / "manifests" / f"{tenant}.json").read_text())
     if hashlib.sha256(value["policyText"].encode("utf8")).hexdigest() != value["policySha256"]:
         raise SystemExit("manifest digest mismatch")
+    validate_manifest(tenant, value)
     return value
 
 
@@ -97,7 +95,7 @@ def database_policy_sha(tenant_id: str) -> str | None:
 
 
 def config(tenant: str, policy: dict, credentials: dict[str, str]) -> dict:
-    text = json.loads(policy["policyText"])
+    text = validate_manifest(tenant, policy)
     _, port = TENANTS[tenant]
     return {
         "policyFile": f"{CONF}/policy.json",

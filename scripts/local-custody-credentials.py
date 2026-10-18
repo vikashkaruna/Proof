@@ -31,13 +31,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from lib.local_custody_credentials import (  # noqa: E402
+from lib.local_custody_credentials import (
     DEFAULT_RENEW_MARGIN_S,
     KINDS,
     issue_request,
     last_expiry,
     renewal_due,
 )
+from lib.local_tenant_registry import tenant_alias, validate_manifest
 
 DB = "supabase_db_axiom-owner-test"
 ISSUER_ROOT = Path(
@@ -80,7 +81,9 @@ def active_policy(tenant: str) -> dict:
 def issue(tenant: str, kind: str, renew: bool) -> None:
     if kind not in KINDS:
         raise SystemExit("kind must be operator, producer or controller")
+    alias = tenant_alias(tenant)
     policy = active_policy(tenant)
+    validate_manifest(alias, policy)
     settings = ISSUER_ROOT / "settings.json"
     settings_sha = (ISSUER_ROOT / "settings.sha256").read_text().strip()
     base = ISSUER_ROOT / "credentials" / tenant
@@ -124,13 +127,6 @@ def issue(tenant: str, kind: str, renew: bool) -> None:
     print(f"{kind} credential {credential_id} published at {base / (kind + '.key')}")
 
 
-# Tenant ids the key-service launcher knows (scripts/local-key-service.py TENANTS).
-KEY_SERVICE_TENANTS = {
-    "fd5e0001-0000-4000-8000-000000000001": "kosha",
-    "fd5e0002-0000-4000-8000-000000000002": "sanjeevani",
-    "fd5e0003-0000-4000-8000-000000000003": "nimbus",
-}
-
 
 def due_kinds(base: Path, now: int, margin_s: int) -> list[str]:
     due = []
@@ -159,14 +155,14 @@ def renew_due(tenant: str | None, margin_s: int) -> int:
             kinds = due_kinds(root / tenant_id, int(time.time()), margin_s)
             for kind in kinds:
                 issue(tenant_id, kind, renew=True)
-            name = KEY_SERVICE_TENANTS.get(tenant_id)
-            if kinds and name:
+            if kinds:
+                name = tenant_alias(tenant_id)
                 subprocess.run(  # nosec B603 - fixed launcher path, isolated interpreter
                     [sys.executable, "-I", str(ROOT / "scripts/local-key-service.py"), "sync", "--tenant", name],
                     check=True, timeout=300,
                 )
             print(f"{tenant_id}: renewed {kinds or 'nothing (not due)'}")
-        except (SystemExit, subprocess.SubprocessError, OSError) as error:
+        except (SystemExit, subprocess.SubprocessError, OSError, ValueError, TypeError) as error:
             failures += 1
             print(f"{tenant_id}: renewal FAILED: {error}", file=sys.stderr)
     return failures

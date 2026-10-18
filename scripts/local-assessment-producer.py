@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage/check/serve the local, wrap-only assessment producer for all demo tenants.
+"""Stage/check/serve the local, wrap-only assessment producer for the selected local deployments.
 
 stage reads current active custody policies and exact retained manifests, then
 stages protected files. check runs read-only registration/configuration checks;
@@ -25,7 +25,8 @@ from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from lib.ci_fixture_images import fixture_image  # noqa: E402
+from lib.ci_fixture_images import fixture_image
+from lib.local_tenant_registry import tenant_bindings, validate_manifest
 
 UID, GROUP = 20102, 20110
 NAME = "axiom-assessment-producer"
@@ -39,11 +40,7 @@ CONF, SOCKET, CLIENT = (
 )
 PURPOSE = "local-assessment-producer"
 DOMAIN = "local.axiomproof.test"
-TENANTS = {
-    "kosha": ("fd5e0001-0000-4000-8000-000000000001", 7443),
-    "sanjeevani": ("fd5e0002-0000-4000-8000-000000000002", 7444),
-    "nimbus": ("fd5e0003-0000-4000-8000-000000000003", 7445),
-}
+TENANTS = tenant_bindings()
 ISSUER_ROOT = Path(
     os.environ.get(
         "AXIOM_LOCAL_CUSTODY_ISSUER_DIR", ROOT / ".axiom-runtime/local-custody-issuer"
@@ -78,6 +75,7 @@ def read_manifest(tenant: str) -> dict:
         != value["policySha256"]
     ):
         raise ValueError("Manifest refused")
+    validate_manifest(tenant, value)
     return value
 
 
@@ -111,7 +109,7 @@ def active_policies() -> list[dict]:
     )
     rows = json.loads(output.stdout)
     if not isinstance(rows, list):
-        raise ValueError("Active policies refused")
+        raise TypeError("Active policies refused")
     return rows
 
 
@@ -128,14 +126,14 @@ def build_config(
         len(policies) != len(expected)
         or {row["tenantId"] for row in policies} != expected
     ):
-        raise ValueError("One active policy per demo tenant is required")
+        raise ValueError("One active policy per selected deployment is required")
     rows = {row["tenantId"]: row for row in policies}
     entries = []
     for slug, (tenant_id, port) in TENANTS.items():
         row, manifest = rows[tenant_id], manifests[slug]
         text = manifest["policyText"]
         sha = hashlib.sha256(text.encode()).hexdigest()
-        policy = json.loads(text)
+        policy = validate_manifest(slug, manifest)
         if (
             row["policyText"] != text
             or row["policySha256"] != sha
@@ -425,7 +423,7 @@ def main() -> None:
             stage()
         else:
             container(args.action, args.image)
-    except (Exception, KeyboardInterrupt):
+    except (Exception, KeyboardInterrupt):  # noqa: BLE001 - credential-bearing failures must be sanitized
         # Never echo docker argv, backend output, file contents or exception text.
         print("Local assessment producer operation refused.", file=sys.stderr)
         raise SystemExit(1) from None
