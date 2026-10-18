@@ -27,11 +27,16 @@ def entry(uid):
 
 class WorkerIdentityTests(unittest.TestCase):
     def test_selector_matches_actual_fixed_supervisor_child_uid(self):
-        tree = ast.parse(
-            (
-                ROOT / "services/agent-runtime/src/axiom/assessment_supervisor.py"
-            ).read_text()
-        )
+        # Host script checks run on Python 3.12; the runtime uses 3.14.
+        # Parse the fixed assignment, not unrelated newer runtime syntax.
+        source = (
+            ROOT / "services/agent-runtime/src/axiom/assessment_supervisor.py"
+        ).read_text()
+        definitions = [
+            line for line in source.splitlines() if line.startswith("WORKER_UID = ")
+        ]
+        self.assertEqual(len(definitions), 1)
+        tree = ast.parse(definitions[0])
         assignments = {
             node.targets[0].id: ast.literal_eval(node.value)
             for node in tree.body
