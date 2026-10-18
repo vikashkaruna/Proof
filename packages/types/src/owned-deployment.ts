@@ -56,10 +56,45 @@ export const ownedDeploymentMfaEnvelope = z
     code: z.string().min(1).max(256).optional(),
   })
   .strict();
+/** Explicit human retirement of a request/read-only preflight/decision intent.
+ * Server serializes with all old phase writers, proves no mutating/uncertain
+ * installation effect, and appends an immutable fence checked by late callers.
+ * This NEVER authorizes target undo, installer retry or a new approval. */
+export const ownedDeploymentFence = z
+  .object({
+    operationKey: uuid,
+    target: z
+      .object({
+        phase: z.enum(['request', 'preflight', 'decision']),
+        operationKey: uuid,
+        canonicalRequestHash: hash,
+      })
+      .strict(),
+    reason: z.enum(['expired', 'superseded_after_no_effect']),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.operationKey === value.target.operationKey)
+      context.addIssue({ code: 'custom', message: 'Distinct fence operation key required' });
+  });
 export const ownedDeploymentInstall = z
   .object({ operationKey: uuid, expectedManifestSha256: hash, expectedApprovalId: uuid })
   .strict();
 const receipt = z.string().regex(/^[1-9][0-9]{0,18}$/);
+export const ownedDeploymentFenceReceipt = z
+  .object({
+    requestId: uuid,
+    tenantId: uuid,
+    actorId: uuid,
+    operationKey: uuid,
+    target: ownedDeploymentFence.shape.target,
+    disposition: z.literal('fenced_no_mutation'),
+    previousState: z.enum(['not_recorded', 'recorded_readonly_no_effect', 'expired_decision']),
+    requiresPreflight: z.boolean(),
+    fenceReceiptId: receipt,
+  })
+  .strict();
+export const ownedDeploymentFenceResult = z.object({ data: ownedDeploymentFenceReceipt }).strict();
 const date = z.iso.datetime({ offset: true });
 export const ownedDeploymentSummary = z
   .object({
@@ -221,6 +256,9 @@ export const ownedDeploymentError = z.enum([
   'owned_deployment_revoked',
   'owned_deployment_conflict',
   'owned_deployment_unconfirmed',
+  'owned_deployment_decision_fenced',
+  'owned_deployment_approval_exists',
+  'owned_deployment_effect_unresolved',
 ]);
 export const ownedDeploymentResult = z.object({ data: ownedDeploymentSummary }).strict();
 export const ownedDeploymentChallenge = z
@@ -249,6 +287,7 @@ export const ownedDeploymentOperationPhase = z.enum([
   'verify',
   'approve',
   'install',
+  'fence',
 ]);
 export const ownedDeploymentOperationIntent = z.discriminatedUnion('phase', [
   z.object({ phase: z.literal('request'), request: ownedDeploymentRequest }).strict(),
@@ -261,6 +300,7 @@ export const ownedDeploymentOperationIntent = z.discriminatedUnion('phase', [
     .object({ phase: z.literal('approve'), request: ownedDeploymentDecision, challengeId: uuid })
     .strict(),
   z.object({ phase: z.literal('install'), request: ownedDeploymentInstall }).strict(),
+  z.object({ phase: z.literal('fence'), request: ownedDeploymentFence }).strict(),
 ]);
 export const ownedDeploymentOperationReadback = z
   .object({
@@ -285,6 +325,7 @@ export const ownedDeploymentOperationReadback = z
               })
               .strict(),
             z.object({ phase: z.literal('verify'), verified: z.literal(true) }).strict(),
+            z.object({ phase: z.literal('fence'), receipt: ownedDeploymentFenceReceipt }).strict(),
           ])
           .nullable(),
       })
@@ -318,10 +359,23 @@ export const ownedDeploymentOperationReadback = z
           context.addIssue({ code: 'custom', message: 'Foreign phase result refused' });
         if (
           value.outcome === 'recorded' &&
-          ['challenge', 'verify'].includes(value.phase) &&
+          ['challenge', 'verify', 'fence'].includes(value.phase) &&
           !value.phaseResult
         )
           context.addIssue({ code: 'custom', message: 'Retained MFA phase result required' });
+        if (value.phaseResult?.phase === 'fence') {
+          const fence = value.phaseResult.receipt;
+          if (
+            fence.requestId !== value.requestId ||
+            fence.tenantId !== value.tenantId ||
+            fence.actorId !== value.actorId ||
+            fence.operationKey !== value.operationKey ||
+            value.intent?.phase !== 'fence' ||
+            ownedOperationCanonical(fence.target) !==
+              ownedOperationCanonical(value.intent.request.target)
+          )
+            context.addIssue({ code: 'custom', message: 'Foreign fence receipt refused' });
+        }
         if (value.outcome === 'recorded' && !value.receiptId)
           context.addIssue({ code: 'custom', message: 'Confirmed operation receipt required' });
         if (
@@ -381,6 +435,8 @@ export type OwnedDeploymentDecision = z.infer<typeof ownedDeploymentDecision>;
 export type OwnedDeploymentRequest = z.infer<typeof ownedDeploymentRequest>;
 export type OwnedDeploymentState = z.infer<typeof ownedDeploymentState>;
 export type OwnedDeploymentStep = z.infer<typeof ownedDeploymentStep>;
+export type OwnedDeploymentFence = z.infer<typeof ownedDeploymentFence>;
+export type OwnedDeploymentFenceReceipt = z.infer<typeof ownedDeploymentFenceReceipt>;
 export type OwnedDeploymentOptions = z.infer<typeof ownedDeploymentOptions>;
 /** Routes mounted under normal /v1 Auth/current-session/MFA/tenant middleware:
  * GET /owned-deployments, /owned-deployments/:id,
@@ -392,10 +448,12 @@ export type OwnedDeploymentOptions = z.infer<typeof ownedDeploymentOptions>;
  * POST /owned-deployments                      request
  * POST /owned-deployments/:id/preflight         preflight
  * POST /owned-deployments/:id/{challenge,verify,approve} MFA envelope
+ * POST /owned-deployments/:id/fence-intent fence (new key; never install scope)
  * POST /owned-deployments/:id/install           install
  * Mutations require X-Expected-Actor-Id and Idempotency-Key=operationKey.
  * challenge returns {data:{challengeId,expiresAt,maxAttempts}};
- * verify returns {data:{verified:true}}; all others {data:summary}.
+ * verify returns {data:{verified:true}}; fence returns {data:fenceReceipt};
+ * other mutations return {data:summary}.
  * Errors are {error:{code:ownedDeploymentError,message:string}}.
  * A request never returns a signing key, JWT, SVID or installation bearer.
  */

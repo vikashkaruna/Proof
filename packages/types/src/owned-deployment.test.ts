@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   OWNED_DEPLOYMENT_STEPS,
   ownedDeploymentRequest,
+  ownedDeploymentFence,
+  ownedDeploymentFenceResult,
   ownedDeploymentOperationReadback,
   ownedDeploymentOperationCanonicalJSON,
   ownedDeploymentSummary,
@@ -198,4 +200,41 @@ it('canonical operation codec is independently stable and phase/actor bound', ()
       actorId: '89110000-0000-4000-8000-000000000002',
     }),
   ).not.toBe(encoded);
+});
+
+it('allows explicit no-effect server fencing while refusing installer cancellation or client clearance', () => {
+  const operationKey = '89110000-0000-4000-8000-000000000002';
+  const target = { phase: 'decision', operationKey: id, canonicalRequestHash: hash };
+  expect(ownedDeploymentFence.safeParse({ operationKey, target, reason: 'expired' }).success).toBe(
+    true,
+  );
+  expect(
+    ownedDeploymentFence.safeParse({ operationKey: id, target, reason: 'expired' }).success,
+  ).toBe(false);
+  expect(
+    ownedDeploymentFence.safeParse({
+      operationKey,
+      target: { ...target, phase: 'install' },
+      reason: 'expired',
+    }).success,
+  ).toBe(false);
+  const receipt = {
+    data: {
+      requestId: id,
+      tenantId: id,
+      actorId: id,
+      operationKey,
+      target,
+      disposition: 'fenced_no_mutation',
+      previousState: 'expired_decision',
+      requiresPreflight: true,
+      fenceReceiptId: '8',
+    },
+  };
+  expect(ownedDeploymentFenceResult.safeParse(receipt).success).toBe(true);
+  expect(
+    ownedDeploymentFenceResult.safeParse({
+      data: { ...receipt.data, disposition: 'client_cleared' },
+    }).success,
+  ).toBe(false);
 });
