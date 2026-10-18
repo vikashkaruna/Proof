@@ -106,6 +106,8 @@ function RequestPanel({
   }, [raw, tenantId, actorId]);
   const { retained, ready } = journal;
   const reviewRequired = sourceRequirement === 'public_control_review_required' && !reviewRef;
+  const sourceModeUnknown = sourceRequirement === 'unknown' && !reviewRef;
+  const directSourceWithheld = reviewRequired || sourceModeUnknown;
   const [sourceRefusal, setSourceRefusal] = useState<AssessmentSourceRefusal | null>(null);
   const [confirmedUnknown, setConfirmedUnknown] = useState(false);
   const [intake, setIntake] = useState(false);
@@ -154,7 +156,7 @@ function RequestPanel({
       !ready ||
       !canRequest ||
       configuration === 'unconfigured' ||
-      reviewRequired ||
+      directSourceWithheld ||
       retained ||
       hasSavedResults ||
       completedHere ||
@@ -495,7 +497,7 @@ function RequestPanel({
       <p className="mt-2">
         {reviewRef
           ? 'Request an assessment from the exact recorded human review shown here.'
-          : reviewRequired
+          : directSourceWithheld
             ? 'Start in Discovery and save the exact public-control human review for this assessment.'
             : 'Enter reviewed questionnaire declarations or request an unknown-answer draft.'}{' '}
         Answers and applicability flags stay unknown until you explicitly choose otherwise.
@@ -509,6 +511,17 @@ function RequestPanel({
             ? 'Assessment producer configuration is present. Controller health and execution readiness have not been verified.'
             : 'Assessment configuration could not be verified. Availability is unknown; this does not establish execution readiness.'}
       </p>
+      {sourceModeUnknown && (
+        <p className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+          The deployment’s accepted source requirement could not be verified. Direct questionnaire
+          and unknown-answer submissions are withheld. Existing retained requests can still be
+          checked.{' '}
+          <Link href="/discovery" className="font-medium text-teal-800 underline">
+            Open Discovery for a saved public-control review
+          </Link>
+          .
+        </p>
+      )}
       {reviewRequired && (
         <p className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
           This deployment accepts assessments only from a saved public-control human review.
@@ -744,7 +757,7 @@ function RequestPanel({
               </Link>
               .
             </p>
-          ) : reviewRequired ? (
+          ) : directSourceWithheld ? (
             <p>
               New submission is unavailable until a saved source review is selected. Use its exact
               assessment link from Discovery.
@@ -811,7 +824,7 @@ function RequestPanel({
                   busy ||
                   !ready ||
                   configuration === 'unconfigured' ||
-                  reviewRequired ||
+                  directSourceWithheld ||
                   !confirmedUnknown ||
                   (intake && !reviewed)
                 }

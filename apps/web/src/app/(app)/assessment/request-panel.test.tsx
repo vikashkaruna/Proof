@@ -98,6 +98,7 @@ function panel(overrides: Partial<React.ComponentProps<typeof AssessmentRequestP
       engagementId={engagement}
       libraryVersion="0.1.1"
       canRequest
+      sourceRequirement="questionnaire_or_public_review"
       hasSavedResults={false}
       onFinalized={finalized}
       {...overrides}
@@ -1073,4 +1074,13 @@ it('keeps unsupported retained intent until exact server refusal and explicit ch
   expect(
     localStorage.getItem(assessmentJournalKey(tenant, actor) + ':rejected:' + operation),
   ).toContain('not_recorded');
+});
+
+it('does not offer direct source forms when producer requirements cannot be verified', () => {
+  render(panel({ configuration: 'configured', sourceRequirement: 'unknown' }));
+  expect(screen.getByText(/accepted source requirement could not be verified/)).toBeTruthy();
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Request unknown-answer assessment' })).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull();
 });
