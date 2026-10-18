@@ -360,6 +360,7 @@ export const LedgerActionType = {
   REPORT_DISPATCHED_EMAIL: 'report.dispatched.email',
   CATALOGUE_MAPPING_CONTEXTS_ADOPTED: 'catalogue.mapping_contexts_adopted',
   CATALOGUE_VERSION_APPROVED: 'catalogue.version_approved',
+  CATALOGUE_CURRENT_VERSION_CHANGED: 'catalogue.current_version_changed',
 } as const;
 export type LedgerActionType = (typeof LedgerActionType)[keyof typeof LedgerActionType];
 

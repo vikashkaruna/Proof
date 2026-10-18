@@ -42,3 +42,14 @@ export const CatalogueVersionApprovalRequestSchema = z
   })
   .strict();
 export type CatalogueVersionSummary = z.infer<typeof CatalogueVersionSummarySchema>;
+
+/** Explicit current selection is distinct from global catalogue-content approval. */
+export const CatalogueCurrentVersionRequestSchema = CatalogueVersionApprovalRequestSchema.omit({
+  libraryVersion: true,
+})
+  .extend({
+    libraryVersion: ApprovedLibraryVersionSchema,
+    transition: z.literal('make_current'),
+    previousCurrentVersion: ApprovedLibraryVersionSchema.nullable(),
+  })
+  .strict();

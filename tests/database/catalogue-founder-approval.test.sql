@@ -4,12 +4,12 @@ create function pg_temp.id(n int) returns uuid language sql immutable as $$selec
 create function pg_temp.ok(v boolean,m text) returns void language plpgsql as $$begin if v is distinct from true then raise exception 'ASSERTION: %',m;end if;end$$;
 create function pg_temp.refused(q text,m text) returns void language plpgsql as $$begin begin execute q;exception when others then return;end;raise exception 'ASSERTION: % was not refused',m;end$$;
 create table if not exists auth.sessions(id uuid primary key,user_id uuid not null references auth.users(id),not_after timestamptz);
-insert into auth.users(id,email) select pg_temp.id(n),'catalogue-'||n||'@example.invalid' from generate_series(1,4)n;
-insert into public.users(id,email,is_axiom_internal) select pg_temp.id(n),'catalogue-'||n||'@example.invalid',n in(1,3) from generate_series(1,4)n;
+insert into auth.users(id,email) select pg_temp.id(n),'catalogue-'||n||'@example.invalid' from generate_series(1,5)n;
+insert into public.users(id,email,is_axiom_internal) select pg_temp.id(n),'catalogue-'||n||'@example.invalid',n in(1,3,5) from generate_series(1,5)n;
 insert into public.tenants(id,slug,name) values(pg_temp.id(11),'catalogue-161','Synthetic catalogue founder test');
 insert into public.tenant_users(tenant_id,user_id,role) values(pg_temp.id(11),pg_temp.id(1),'founder'),(pg_temp.id(11),pg_temp.id(2),'owner'),(pg_temp.id(11),pg_temp.id(3),'axiom_analyst'),(pg_temp.id(11),pg_temp.id(4),'founder');
-insert into auth.sessions(id,user_id,not_after) select pg_temp.id(100+n),pg_temp.id(n),null from generate_series(1,4)n;
-insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypted) select pg_temp.id(40+n),pg_temp.id(n),'totp','active','synthetic-sealed' from generate_series(1,4)n;
+insert into auth.sessions(id,user_id,not_after) select pg_temp.id(100+n),pg_temp.id(n),null from generate_series(1,5)n;
+insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypted) select pg_temp.id(40+n),pg_temp.id(n),'totp','active','synthetic-sealed' from generate_series(1,5)n;
 select pg_temp.ok(not exists(select 1 from public.approved_catalogue_versions where library_version='0.2.0'),'publication does not approve candidate');
 select pg_temp.ok(not (select is_current from public.control_libraries where version='0.2.0'),'publication does not activate candidate');
 select pg_temp.ok((select manifest_sha256 from public.catalogue_version_manifests where library_version='0.1.1')='3bdf816d71e132b23f849f5d5b497d8f0a8874afa124aed31be8652ec6ab31c6','legacy exact bytes unchanged');
@@ -20,6 +20,12 @@ create function pg_temp.challenge(actor int,r text) returns uuid language plpgsq
  insert into public.mfa_challenges(id,user_id,tenant_id,factor_id,purpose,bound_resource_ref,bound_payload_sha256,created_at,expires_at,satisfied_at,consumed_at,consumed_for,satisfied_with)
  values(c,pg_temp.id(actor),pg_temp.id(11),pg_temp.id(40+actor),'catalogue_adoption',r::jsonb->>'operationKey',binding,clock_timestamp()-interval '2 seconds',clock_timestamp()+interval '4 minutes 50 seconds',clock_timestamp()-interval '1 second',clock_timestamp(),r::jsonb->>'operationKey','totp');return c;
 end$$;
+-- A protected platform designation supplies derived authority without explicit membership.
+insert into public.platform_founders(user_id,designated_by,designation_reason) values(pg_temp.id(5),'synthetic owner','Global founder regression');
+select pg_temp.ok(not exists(select 1 from public.tenant_users where tenant_id=pg_temp.id(11) and user_id=pg_temp.id(5) and membership_source='explicit'),'global founder has no explicit membership');
+select pg_temp.ok(jsonb_array_length(public.read_catalogue_versions(pg_temp.id(11),pg_temp.id(5),pg_temp.id(105))->'versions')=2,'derived global founder reaches catalogue');
+update public.platform_founders set revoked_at=clock_timestamp(),revoked_by='synthetic owner',revocation_reason='Live revocation regression' where user_id=pg_temp.id(5);
+select pg_temp.refused(format('select public.read_catalogue_versions(%L,%L,%L)',pg_temp.id(11),pg_temp.id(5),pg_temp.id(105)),'revoked global founder');
 -- Public and service credentials can neither approve nor directly modify any registry.
 select pg_temp.ok(not has_function_privilege(r,'public.approve_catalogue_version(uuid,uuid,uuid,text,uuid)','execute'),'no approval RPC for '||r) from unnest(array['anon','authenticated','service_role','agent_ledger_writer'])r;
 select pg_temp.ok(not has_table_privilege(r,'public.catalogue_version_approval_events',p),'no approval event '||p||' for '||r) from unnest(array['anon','authenticated','service_role','human_action_writer','agent_ledger_writer'])r,unnest(array['insert','update','delete','truncate'])p;

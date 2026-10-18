@@ -135,6 +135,10 @@ def plan(root: Path = ROOT) -> dict:
         "catalogue_registry159_suite_required",
     )
     need(
+        versions[-1] < 162 or "catalogue-current-version.test.sql" in files,
+        "catalogue_current162_suite_required",
+    )
+    need(
         versions[-1] < 161 or "catalogue-founder-approval.test.sql" in files,
         "catalogue_founder161_suite_required",
     )

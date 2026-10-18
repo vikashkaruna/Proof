@@ -80,13 +80,13 @@ import { requireCapability } from '../middleware/authorize.js';
 import {
   APPROVABLE_PLAN_STATUSES,
   Capability,
+  ApprovedLibraryVersionSchema,
   authorize,
   describePlanStatusBlocker,
 } from '@axiom/types';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
 import { loadEnv } from '@axiom/config';
-import { LIBRARY_VERSION } from '@axiom/control-library';
 
 const env = loadEnv();
 
@@ -3844,6 +3844,21 @@ export function v1Routes(deps: Deps) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '')
         .slice(0, 45) || 'organization';
+    const currentCatalogue = await admin.rpc('read_current_catalogue_version');
+    const currentVersion = z
+      .object({ version: ApprovedLibraryVersionSchema })
+      .strict()
+      .safeParse(currentCatalogue.data);
+    if (currentCatalogue.error || !currentVersion.success)
+      return c.json(
+        {
+          error: {
+            code: 'current_catalogue_unavailable',
+            message: 'The approved current control library could not be verified.',
+          },
+        },
+        503,
+      );
     const { data, error } = await createHumanActionWriter().rpc('onboard_organization', {
       p_user_id: user.id,
       p_slug: `${baseSlug}-${randomUUID()}`,
@@ -3855,7 +3870,7 @@ export function v1Routes(deps: Deps) {
       p_dpo_name: input.dpo_name ?? null,
       p_dpo_email: input.dpo_email ?? null,
       p_systems: input.systems ?? [],
-      p_library_version: LIBRARY_VERSION,
+      p_library_version: currentVersion.data.version,
       p_correlation_id: randomUUID(),
     });
     if (error) {

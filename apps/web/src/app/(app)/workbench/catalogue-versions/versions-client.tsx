@@ -5,12 +5,16 @@ import { canonicalJson } from '@axiom/ledger';
 import { generateUUID } from '@axiom/ui';
 import {
   CatalogueVersionApprovalRequestSchema,
+  CatalogueCurrentVersionRequestSchema,
+  ApprovedLibraryVersionSchema,
   CatalogueVersionSummarySchema,
   type CatalogueVersionSummary,
 } from '@axiom/types';
 import { formatDateTime } from '@/lib/display-time';
 const list = z.object({ data: z.object({ versions: z.array(CatalogueVersionSummarySchema) }) });
-type Intent = z.infer<typeof CatalogueVersionApprovalRequestSchema>;
+type Intent =
+  | z.infer<typeof CatalogueVersionApprovalRequestSchema>
+  | z.infer<typeof CatalogueCurrentVersionRequestSchema>;
 const button =
   'rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-[#1E2A4A] hover:bg-slate-50 disabled:opacity-50';
 export function CatalogueVersionsClient({
@@ -63,17 +67,20 @@ export function CatalogueVersionsClient({
     return () => controller.abort();
   }, [load]);
   async function send(step: string, request: Intent, extra: Record<string, string> = {}) {
-    const response = await fetch(`/api/bff/v1/catalogue-versions/${step}`, {
-      method: 'POST',
-      cache: 'no-store',
-      headers: {
-        'content-type': 'application/json',
-        'x-tenant-id': tenantId,
-        'x-expected-actor-id': actorId,
-        'idempotency-key': request.operationKey,
+    const response = await fetch(
+      `/api/bff/v1/catalogue-versions${'transition' in request ? '/current' : ''}/${step}`,
+      {
+        method: 'POST',
+        cache: 'no-store',
+        headers: {
+          'content-type': 'application/json',
+          'x-tenant-id': tenantId,
+          'x-expected-actor-id': actorId,
+          'idempotency-key': request.operationKey,
+        },
+        body: JSON.stringify({ request, ...extra }),
       },
-      body: JSON.stringify({ request, ...extra }),
-    });
+    );
     if (!response.ok)
       throw Error(
         'Approval was not confirmed. Refresh versions to check the recorded state before preparing a fresh approval.',
@@ -86,7 +93,7 @@ export function CatalogueVersionsClient({
     setError('');
     setMessage('');
     try {
-      const request = CatalogueVersionApprovalRequestSchema.parse({
+      const source = {
         version: 1,
         operationKey: generateUUID(),
         libraryVersion: selected.libraryVersion,
@@ -96,7 +103,15 @@ export function CatalogueVersionsClient({
         mappingVersion: selected.mappingVersion,
         reason,
         confirmed: true,
-      });
+      };
+      const request = selected.approved
+        ? CatalogueCurrentVersionRequestSchema.parse({
+            ...source,
+            transition: 'make_current',
+            previousCurrentVersion:
+              versions.find((version) => version.isCurrent)?.libraryVersion ?? null,
+          })
+        : CatalogueVersionApprovalRequestSchema.parse(source);
       const result = z
         .object({ data: z.object({ challengeId: z.uuid(), expiresAt: z.string() }) })
         .parse(await send('challenge', request));
@@ -122,13 +137,15 @@ export function CatalogueVersionsClient({
         .object({
           data: z.object({
             approved: z.literal(true),
-            libraryVersion: z.literal('0.2.0'),
+            libraryVersion: ApprovedLibraryVersionSchema,
             receiptId: z.string(),
           }),
         })
         .parse(await send('approve', intent, { challengeId: challenge }));
       setMessage(
-        `Version ${result.data.libraryVersion} approved. Audit receipt ${result.data.receiptId}. The current version has not been changed.`,
+        'transition' in intent
+          ? `Version ${result.data.libraryVersion} is now current for new assessments. Audit receipt ${result.data.receiptId}. Existing assessments retain their recorded version.`
+          : `Version ${result.data.libraryVersion} approved. Audit receipt ${result.data.receiptId}. The current version has not been changed.`,
       );
       setIntent(null);
       setChallenge('');
@@ -211,6 +228,20 @@ export function CatalogueVersionsClient({
                   ))}
                 </dl>
               </details>
+              {version.approved && !version.isCurrent && (
+                <button
+                  className={`${button} mt-3`}
+                  disabled={busy || !!intent}
+                  onClick={() => {
+                    setSelected(version);
+                    setConfirmed(false);
+                    setReason('');
+                    setMessage('');
+                  }}
+                >
+                  Make current for new assessments
+                </button>
+              )}
               {!version.approved && version.libraryVersion === '0.2.0' && (
                 <button
                   className={`${button} mt-3`}
@@ -242,13 +273,21 @@ export function CatalogueVersionsClient({
           aria-label="Approve catalogue version"
         >
           <h2 className="font-semibold text-[#1E2A4A]">
-            Approve version {selected.libraryVersion}
+            {selected.approved ? 'Make current: version ' : 'Approve version '}
+            {selected.libraryVersion}
           </h2>
           <p className="text-sm text-slate-600">
-            This global approval authorizes this exact catalogue and mapping. It does not change the
-            current version, revise existing assessments, or adopt sector mappings for any
-            organisation.
+            {selected.approved
+              ? 'This changes the default catalogue for new assessments. Existing assessments keep their recorded version. Select the previous approved version through this same workflow to change the default back.'
+              : 'This global approval authorizes this exact catalogue and mapping. It does not change the current version, revise existing assessments, or adopt sector mappings for any organisation.'}
           </p>
+          {selected.approved && (
+            <p className="text-sm font-medium text-[#1E2A4A]">
+              Current default:{' '}
+              {versions.find((version) => version.isCurrent)?.libraryVersion ?? 'None'} →{' '}
+              {selected.libraryVersion}
+            </p>
+          )}
           <label className="block text-sm">
             Approval reason
             <textarea
@@ -266,7 +305,9 @@ export function CatalogueVersionsClient({
               disabled={busy || !!intent}
               onChange={(e) => setConfirmed(e.target.checked)}
             />
-            I reviewed the version changes, control count and exact source fingerprints.
+            {selected.approved
+              ? 'I reviewed the current and target versions and approve changing the default for new assessments.'
+              : 'I reviewed the version changes, control count and exact source fingerprints.'}
           </label>
           {!intent ? (
             <button
@@ -303,7 +344,19 @@ export function CatalogueVersionsClient({
                 disabled={busy || !code.trim()}
                 onClick={() => void approve()}
               >
-                Approve reviewed version
+                {selected.approved ? 'Make reviewed version current' : 'Approve reviewed version'}
+              </button>
+              <button
+                className={button}
+                disabled={busy}
+                onClick={() => {
+                  setIntent(null);
+                  setChallenge('');
+                  setCode('');
+                  setMessage('Prepared review discarded. Prepare a fresh review before approving.');
+                }}
+              >
+                Discard prepared review
               </button>
             </>
           )}

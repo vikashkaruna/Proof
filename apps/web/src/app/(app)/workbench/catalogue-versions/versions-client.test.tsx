@@ -117,3 +117,32 @@ it('preserves an approval failure while refreshing rather than falsely confirmin
   expect(fetchMock.mock.calls.some(([url]) => (url as string).endsWith('/approve'))).toBe(false);
   expect(screen.queryByRole('button', { name: 'Approve reviewed version' })).toBeNull();
 });
+
+it('offers current selection only after approval and submits a distinct previous-version-bound intent', async () => {
+  fetchMock.mockImplementation(async (url: string) =>
+    url.endsWith('/current/challenge')
+      ? Response.json({
+          data: {
+            challengeId: '99161000-0000-4000-8000-000000000004',
+            expiresAt: '2026-10-19T00:05:00Z',
+          },
+        })
+      : Response.json({
+          data: { versions: [{ ...version, approved: true, approvedAt: '2026-10-19T00:00:00Z' }] },
+        }),
+  );
+  render(<CatalogueVersionsClient tenantId={tenant} actorId={actor} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Make current for new assessments' }));
+  expect(screen.getByText(/Existing assessments keep their recorded version/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Approval reason'), {
+    target: { value: 'Adopt corrected version for new assessments' },
+  });
+  fireEvent.click(screen.getByRole('checkbox'));
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare approval with MFA' }));
+  await screen.findByRole('button', { name: 'Make reviewed version current' });
+  const sent = fetchMock.mock.calls.find(([url]) => (url as string).endsWith('/current/challenge'));
+  expect(JSON.parse(sent![1].body)).toMatchObject({
+    request: { transition: 'make_current', previousCurrentVersion: null, libraryVersion: '0.2.0' },
+  });
+  expect(screen.queryByRole('button', { name: 'Approve reviewed version' })).toBeNull();
+});

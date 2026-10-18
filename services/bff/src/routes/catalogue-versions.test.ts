@@ -57,31 +57,25 @@ function post(step: string, body: unknown = { request }, headers: Record<string,
 }
 beforeEach(() => {
   role = 'founder';
-  read
-    .mockReset()
-    .mockImplementation(async () => ({
-      data: {
-        authorized: true,
-        requestSha256: createHash('sha256').update(canonicalJson(request)).digest('hex'),
-      },
-      error: null,
-    }));
-  write
-    .mockReset()
-    .mockResolvedValue({
-      data: { approved: true, libraryVersion: '0.2.0', receiptId: '161', replayed: false },
-      error: null,
-    });
+  read.mockReset().mockImplementation(async () => ({
+    data: {
+      authorized: true,
+      requestSha256: createHash('sha256').update(canonicalJson(request)).digest('hex'),
+    },
+    error: null,
+  }));
+  write.mockReset().mockResolvedValue({
+    data: { approved: true, libraryVersion: '0.2.0', receiptId: '161', replayed: false },
+    error: null,
+  });
   mfa.issueChallenge
     .mockReset()
     .mockResolvedValue({ ok: true, challengeId: id(4), expiresAt: '2026-10-19T01:00:00Z' });
-  mfa.verifyChallenge
-    .mockReset()
-    .mockResolvedValue({
-      ok: true,
-      purpose: 'catalogue_adoption',
-      boundResourceRef: request.operationKey,
-    });
+  mfa.verifyChallenge.mockReset().mockResolvedValue({
+    ok: true,
+    purpose: 'catalogue_adoption',
+    boundResourceRef: request.operationKey,
+  });
   mfa.consumeChallenge.mockReset().mockResolvedValue({ ok: true });
 });
 it.each(['owner', 'admin', 'axiom_analyst', 'approver', 'viewer', 'agent'] as const)(
@@ -161,4 +155,38 @@ it('requires explicit MFA verification before accepting the code and checks purp
   });
   expect((await post('verify', { request, challengeId: id(4), code: '123456' })).status).toBe(403);
   expect(write).not.toHaveBeenCalled();
+});
+
+it('uses a separate current-selection scope after approval and refuses swapping that intent onto the approval route', async () => {
+  const selecting = { ...request, transition: 'make_current', previousCurrentVersion: '0.1.1' };
+  read.mockResolvedValue({
+    data: {
+      authorized: true,
+      requestSha256: createHash('sha256').update(canonicalJson(selecting)).digest('hex'),
+    },
+    error: null,
+  });
+  expect((await post('challenge', { request: selecting })).status).toBe(400);
+  expect((await post('current/challenge', { request: selecting })).status).toBe(200);
+  const hash = createHash('sha256').update(canonicalJson(selecting)).digest('hex');
+  expect(mfa.issueChallenge).toHaveBeenCalledWith(
+    expect.objectContaining({
+      boundPayloadSha256: bindingSha256([
+        'axiom.catalogue-version.make-current',
+        1,
+        id(11),
+        id(2),
+        id(3),
+        hash,
+      ]),
+    }),
+  );
+  expect((await post('current/approve', { request: selecting, challengeId: id(4) })).status).toBe(
+    200,
+  );
+  expect(write).toHaveBeenCalledWith(
+    'set_current_catalogue_version',
+    expect.objectContaining({ p_request_text: canonicalJson(selecting) }),
+    expect.anything(),
+  );
 });
