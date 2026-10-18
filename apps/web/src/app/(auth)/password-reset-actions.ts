@@ -2,13 +2,10 @@
 
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@axiom/supabase';
+import { appOrigin } from '@/lib/app-origin';
 
 const NEUTRAL =
   'If an account exists for that address, a password reset link is on its way. It expires soon and works once.';
-
-function appOrigin() {
-  return (process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001').replace(/\/+$/, '');
-}
 
 /** Sends the provider's one-time recovery link. The answer never reveals
  * whether the address has an account, and provider errors are not echoed. */
