@@ -7,6 +7,7 @@ import {
   Capability,
   CreateInvitationRequestSchema,
   InvitationSchema,
+  UpdateMemberApprovalScopesRequestSchema,
 } from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
 import {
@@ -32,6 +33,8 @@ const failures: Record<string, [400 | 403 | 404 | 409 | 410, string]> = {
   expired: [410, 'This invitation has expired. Ask for a new one.'],
   email_mismatch: [403, 'Sign in with the email address this invitation was sent to.'],
   email_unconfirmed: [403, 'Confirm your email address before accepting.'],
+  self_change: [403, 'Ask another owner or admin to change your own approval scopes.'],
+  member_not_found: [404, 'That person is not a member of this organization.'],
 };
 type Settled =
   { status: 'sent'; providerMessageId: string } | { status: 'failed'; errorCode: string };
@@ -164,6 +167,50 @@ export function invitationRoutes(
     const invitation = InvitationSchema.safeParse(data?.invitation);
     if (!invitation.success) return c.json(unavailable, 503);
     return c.json({ data: invitation.data });
+  });
+
+  // 0158: change an existing approver's scopes. Empty means unrestricted.
+  app.patch('/tenant/members/:userId/approval-scopes', async (c) => {
+    const denied = requireCapability(c, Capability.USER_MANAGE);
+    if (denied) return denied;
+    const userId = c.req.param('userId');
+    if (!z.uuid().safeParse(userId).success) return c.json({ error: { code: 'invalid_id' } }, 400);
+    const parsed = UpdateMemberApprovalScopesRequestSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success)
+      return c.json({ error: { code: 'invalid_request', issues: parsed.error.issues } }, 400);
+    const { data, error } = await writer().rpc('update_member_approval_scopes', {
+      p_tenant_id: c.get('tenantId'),
+      p_actor_id: c.get('user').id,
+      p_user_id: userId,
+      p_approval_scopes: parsed.data.approvalScopes,
+      p_correlation_id: randomUUID(),
+    });
+    if (error) return c.json(unavailable, 503);
+    if (data?.error) {
+      const code = data.error === 'not_found' ? 'member_not_found' : String(data.error);
+      const refusal = refuse(code);
+      return refusal ? c.json(refusal[0], refusal[1]) : c.json(unavailable, 503);
+    }
+    const member = z
+      .object({
+        member: z.object({
+          user_id: z.uuid(),
+          role: z.literal('approver'),
+          approval_scopes: z.array(z.string()),
+        }),
+        changed: z.boolean(),
+      })
+      .safeParse(data);
+    if (!member.success) return c.json(unavailable, 503);
+    return c.json({
+      data: {
+        userId: member.data.member.user_id,
+        approvalScopes: member.data.member.approval_scopes,
+        changed: member.data.changed,
+      },
+    });
   });
 
   // Tenantless: the caller is not yet a member. Identity comes from the session.

@@ -6,8 +6,24 @@ import { MembersClient, type InvitationRow } from './members-client';
 
 const refresh = vi.hoisted(() => vi.fn());
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh }) }));
+const forms = vi.hoisted(
+  () =>
+    [] as {
+      path: string;
+      method: string;
+      body: (form: FormData) => Record<string, unknown>;
+    }[],
+);
 vi.mock('../../estate/estate-client', () => ({
-  MutationForm: ({ label }: { label: string }) => <button>{label}</button>,
+  MutationForm: (props: {
+    label: string;
+    path: string;
+    method: string;
+    body: (form: FormData) => Record<string, unknown>;
+  }) => {
+    forms.push(props);
+    return <button>{props.label}</button>;
+  },
 }));
 const base = {
   tenantId: 'tenant-1',
@@ -17,6 +33,7 @@ const base = {
       userId: 'user-1',
       email: 'owner@example.invalid',
       role: 'owner',
+      approvalScopes: [],
       acceptedAt: '2026-09-30T00:00:00Z',
     },
   ],
@@ -25,6 +42,7 @@ const base = {
 
 beforeEach(() => {
   refresh.mockReset();
+  forms.length = 0;
   vi.stubGlobal('crypto', { randomUUID: () => 'uuid-1' });
 });
 afterEach(() => {
@@ -140,4 +158,41 @@ it('distinguishes accepted, revoked and expired invitations from open ones', () 
     'Emailed',
   );
   expect(screen.getAllByRole('button', { name: /Revoke/ })).toHaveLength(1);
+});
+
+it("shows each approver's scopes and offers an audited change, never for the viewer's own row", () => {
+  const approver = (userId: string, email: string, approvalScopes: string[]) => ({
+    userId,
+    email,
+    role: 'approver',
+    approvalScopes,
+    acceptedAt: null,
+  });
+  render(
+    <MembersClient
+      {...base}
+      currentUserId="user-3"
+      members={[
+        ...base.members,
+        approver('user-2', 'scoped@example.invalid', ['execute', 'rollback']),
+        approver('user-3', 'me@example.invalid', []),
+      ]}
+    />,
+  );
+  expect(screen.getByTestId('member-scopes-scoped@example.invalid').textContent).toContain(
+    'execute, rollback',
+  );
+  expect(screen.getByTestId('member-scopes-me@example.invalid').textContent).toContain(
+    'unrestricted',
+  );
+  expect(screen.queryByTestId('member-scopes-owner@example.invalid')).toBeNull();
+  const scopeForms = forms.filter((f) => f.path.includes('/approval-scopes'));
+  expect(scopeForms.map((f) => [f.path, f.method])).toEqual([
+    ['/tenant/members/user-2/approval-scopes', 'PATCH'],
+  ]);
+  const form = new FormData();
+  form.set('scopes', ' execute , ,rollback ');
+  expect(scopeForms[0]!.body(form)).toEqual({ approvalScopes: ['execute', 'rollback'] });
+  form.set('scopes', '');
+  expect(scopeForms[0]!.body(form)).toEqual({ approvalScopes: [] });
 });

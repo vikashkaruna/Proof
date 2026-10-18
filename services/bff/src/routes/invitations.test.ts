@@ -13,6 +13,7 @@ import { invitationRoutes } from './invitations.js';
 const TENANT = '11111111-1111-4111-8111-111111111111';
 const USER = '00000000-0000-4000-8000-000000000001';
 const INVITATION = '33333333-3333-4333-8333-333333333333';
+const MEMBER = '44444444-4444-4444-8444-444444444444';
 const digest = (v: string) => createHash('sha256').update(v).digest('hex');
 let fake: FakeDb;
 let calls: Record<string, Record<string, unknown>[]>;
@@ -57,6 +58,14 @@ beforeEach(() => {
   record('revoke_tenant_invitation', () => ({
     invitation: row({ revoked_at: '2026-09-24T01:00:00.000Z', revoked_by: USER }),
   }));
+  record('update_member_approval_scopes', (a) =>
+    a.p_user_id === MEMBER
+      ? {
+          member: { user_id: MEMBER, role: 'approver', approval_scopes: a.p_approval_scopes },
+          changed: true,
+        }
+      : { error: a.p_user_id === USER ? 'self_change' : 'not_found' },
+  );
   record('accept_tenant_invitation', () => ({
     tenant_id: TENANT,
     role: 'viewer',
@@ -80,6 +89,12 @@ function app(role: UserRole | null = UserRole.OWNER) {
   hono.route('/v1', invitationRoutes({ client: () => fake.client as never, sendEmail: send }));
   return hono;
 }
+const patch = (path: string, body: unknown, role: UserRole | null = UserRole.OWNER) =>
+  app(role).request(`/v1${path}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 const post = (path: string, body: unknown, role: UserRole | null = UserRole.OWNER) =>
   app(role).request(`/v1${path}`, {
     method: 'POST',
@@ -239,6 +254,58 @@ describe('tenant invitations (C-W1-3)', () => {
       p_invitation_id: INVITATION,
     });
     expect((await post('/tenant/invitations/not-a-uuid/revoke', {})).status).toBe(400);
+  });
+
+  describe('member approval scopes (0158)', () => {
+    const path = `/tenant/members/${MEMBER}/approval-scopes`;
+    it.each([UserRole.OWNER, UserRole.ADMIN, UserRole.FOUNDER])(
+      "%s replaces an approver's scopes with trusted tenant and actor",
+      async (role) => {
+        const res = await patch(path, { approvalScopes: [' execute ', 'rollback'] }, role);
+        expect(res.status).toBe(200);
+        expect(await res.json()).toEqual({
+          data: { userId: MEMBER, approvalScopes: ['execute', 'rollback'], changed: true },
+        });
+        expect(calls.update_member_approval_scopes![0]).toMatchObject({
+          p_tenant_id: TENANT,
+          p_actor_id: USER,
+          p_user_id: MEMBER,
+          p_approval_scopes: ['execute', 'rollback'],
+        });
+      },
+    );
+
+    it.each([UserRole.VIEWER, UserRole.APPROVER, UserRole.REVIEWER, UserRole.AXIOM_ANALYST])(
+      '%s cannot change scopes',
+      async (role) => {
+        expect((await patch(path, { approvalScopes: [] }, role)).status).toBe(403);
+        expect(calls.update_member_approval_scopes).toBeUndefined();
+      },
+    );
+
+    it('refuses bad ids and bodies before storage, and maps database refusals', async () => {
+      expect(
+        (await patch('/tenant/members/nope/approval-scopes', { approvalScopes: [] })).status,
+      ).toBe(400);
+      for (const body of [
+        {},
+        { approvalScopes: [''] },
+        { approvalScopes: ['x'.repeat(65)] },
+        { approvalScopes: [], role: 'owner' },
+      ])
+        expect((await patch(path, body)).status).toBe(400);
+      expect(calls.update_member_approval_scopes).toBeUndefined();
+      const self = await patch(`/tenant/members/${USER}/approval-scopes`, { approvalScopes: [] });
+      expect(self.status).toBe(403);
+      const missing = await patch(
+        '/tenant/members/55555555-5555-4555-8555-555555555555/approval-scopes',
+        { approvalScopes: [] },
+      );
+      expect(missing.status).toBe(404);
+      expect(((await missing.json()) as { error: { code: string } }).error.code).toBe(
+        'member_not_found',
+      );
+    });
   });
 
   it('accepts as the session user without a tenant, hashing the token', async () => {

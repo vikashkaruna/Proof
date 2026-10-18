@@ -9,6 +9,7 @@ export interface MemberRow {
   userId: string;
   email: string;
   role: string;
+  approvalScopes: string[];
   acceptedAt: string | null;
 }
 export interface InvitationRow {
@@ -39,14 +40,22 @@ const deliveryLabel: Record<InvitationRow['delivery_status'], string> = {
   failed: 'Email failed — share the link yourself',
 };
 
+const parseScopes = (value: FormDataEntryValue | null) =>
+  String(value ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
 export function MembersClient({
   tenantId,
   canInviteOwners,
+  currentUserId,
   members,
   invitations,
 }: {
   tenantId: string;
   canInviteOwners: boolean;
+  currentUserId?: string;
   members: MemberRow[];
   invitations: InvitationRow[];
 }) {
@@ -64,10 +73,7 @@ export function MembersClient({
     if (busy) return;
     const form = new FormData(event.currentTarget);
     if (!pending.current) {
-      const scopes = String(form.get('scopes') ?? '')
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const scopes = parseScopes(form.get('scopes'));
       pending.current = {
         key: crypto.randomUUID(),
         body: JSON.stringify({
@@ -216,9 +222,37 @@ export function MembersClient({
         <CardContent>
           <ul className="divide-y text-sm" data-testid="member-list">
             {members.map((m) => (
-              <li key={m.userId} className="flex justify-between py-2">
-                <span>{m.email}</span>
-                <span className="capitalize text-slate-600">{m.role.replace('_', ' ')}</span>
+              <li key={m.userId} className="py-2">
+                <div className="flex justify-between">
+                  <span>{m.email}</span>
+                  <span className="capitalize text-slate-600">{m.role.replace('_', ' ')}</span>
+                </div>
+                {m.role === 'approver' && (
+                  <div className="mt-1 space-y-1" data-testid={`member-scopes-${m.email}`}>
+                    <p className="text-xs text-slate-600">
+                      Approval scopes:{' '}
+                      {m.approvalScopes.length ? m.approvalScopes.join(', ') : 'unrestricted'}
+                    </p>
+                    {m.userId !== currentUserId && (
+                      <MutationForm
+                        tenantId={tenantId}
+                        path={`/tenant/members/${m.userId}/approval-scopes`}
+                        method="PATCH"
+                        body={(form) => ({ approvalScopes: parseScopes(form.get('scopes')) })}
+                        label="Save scopes"
+                      >
+                        <Label htmlFor={`scopes-${m.userId}`} className="text-xs">
+                          Change scopes for {m.email} (comma separated; empty for unrestricted)
+                        </Label>
+                        <Input
+                          id={`scopes-${m.userId}`}
+                          name="scopes"
+                          defaultValue={m.approvalScopes.join(', ')}
+                        />
+                      </MutationForm>
+                    )}
+                  </div>
+                )}
               </li>
             ))}
           </ul>

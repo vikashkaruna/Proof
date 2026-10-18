@@ -18,6 +18,14 @@ export const CreateInvitationRequestSchema = z
   });
 export type CreateInvitationRequest = z.infer<typeof CreateInvitationRequestSchema>;
 
+/** Replace an existing approver's scopes (0158). Empty means unrestricted. */
+export const UpdateMemberApprovalScopesRequestSchema = z
+  .object({ approvalScopes: z.array(z.string().trim().min(1).max(64)).max(32) })
+  .strict();
+export type UpdateMemberApprovalScopesRequest = z.infer<
+  typeof UpdateMemberApprovalScopesRequestSchema
+>;
+
 export const AcceptInvitationRequestSchema = z
   .object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) })
   .strict();

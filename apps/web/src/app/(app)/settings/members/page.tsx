@@ -12,7 +12,7 @@ export default async function MembersPage() {
   const [members, invitations] = await Promise.all([
     ctx.supabase
       .from('tenant_users')
-      .select('user_id, role, accepted_at, users:user_id(email)')
+      .select('user_id, role, approval_scopes, accepted_at, users:user_id(email)')
       .eq('tenant_id', ctx.tenantId)
       .order('invited_at'),
     ctx.supabase
@@ -31,6 +31,7 @@ export default async function MembersPage() {
       userId: m.user_id,
       email: (user as { email?: string } | null)?.email ?? m.user_id,
       role: m.role,
+      approvalScopes: (m.approval_scopes as string[] | null) ?? [],
       acceptedAt: m.accepted_at,
     };
   });
@@ -48,6 +49,7 @@ export default async function MembersPage() {
           key={ctx.tenantId}
           tenantId={ctx.tenantId}
           canInviteOwners={ctx.role === 'owner' || ctx.role === 'founder'}
+          currentUserId={ctx.userId}
           members={memberRows}
           invitations={invitations.data ?? []}
         />

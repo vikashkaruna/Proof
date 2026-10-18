@@ -311,6 +311,7 @@ export const LedgerActionType = {
   TENANT_INVITATION_CREATED: 'tenant.invitation.created',
   TENANT_INVITATION_REVOKED: 'tenant.invitation.revoked',
   TENANT_INVITATION_ACCEPTED: 'tenant.invitation.accepted',
+  TENANT_MEMBER_APPROVAL_SCOPES_CHANGED: 'tenant.member.approval_scopes_changed',
   ONBOARDING_WIZARD_STARTED: 'onboarding.wizard.started',
   ONBOARDING_WIZARD_STEP_COMPLETED: 'onboarding.wizard.step_completed',
   ONBOARDING_WIZARD_COMPLETED: 'onboarding.wizard.completed',
