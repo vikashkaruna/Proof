@@ -44,6 +44,7 @@ create table owned_synthetic.deployment_approvals (
 create table owned_synthetic.deployment_decisions (
  tenant_id uuid not null,actor_id uuid not null references public.users(id),operation_key uuid not null,
  request_id uuid not null,session_id uuid not null,decision jsonb not null,
+ receipt_id bigint not null references public.audit_ledger(id),
  bound_payload_sha256 text not null check(bound_payload_sha256~'^[a-f0-9]{64}$'),
  created_at timestamptz not null default clock_timestamp(),
  primary key(tenant_id,actor_id,operation_key),
@@ -203,7 +204,10 @@ begin
  or d.decision->>'expectedRollbackSha256' is distinct from h.preflight->>'rollbackSha256'
  or h.preflight->'dryRunCompleted' is distinct from 'true'::jsonb
  or h.preflight->'rollbackValidated' is distinct from 'true'::jsonb
- or(h.preflight->>'expiresAt')::timestamptz<=clock_timestamp()
+ or h.preflight->>'expiresAt' is null or(h.preflight->>'expiresAt')::timestamptz<=clock_timestamp()
+ or jsonb_typeof(h.preflight->'checks') is distinct from 'array'
+ or jsonb_array_length(h.preflight->'checks') not between 1 and 30
+ or exists(select 1 from jsonb_array_elements(h.preflight->'checks') c where c->>'outcome' is distinct from 'passed')
  then raise exception 'owned deployment MFA preflight refused' using errcode='42501';end if;
  perform 1 from public.platform_founders f join public.users u on u.id=f.user_id where f.user_id=a and f.revoked_at is null and u.is_axiom_internal for share of f,u;
  if not found then raise exception 'owned deployment founder refused' using errcode='42501';end if;
@@ -662,3 +666,56 @@ begin
 end $$;
 revoke all on function public.claim_owned_deployment_preflight(uuid,uuid) from public,anon,authenticated,human_action_writer,agent_ledger_writer,owned_target_controller;
 grant execute on function public.claim_owned_deployment_preflight(uuid,uuid) to service_role;
+
+-- Preparing a founder decision grants no installer authority. Only a fresh
+-- completed observation and validated rollback can be bound to its MFA purpose.
+create function public.prepare_owned_deployment_decision(p_tenant_id uuid,p_actor_id uuid,p_session_id uuid,p_request_id uuid,p_decision jsonb) returns jsonb
+language plpgsql security definer set search_path='' set lock_timeout='5s' as $$
+declare r owned_synthetic.deployment_requests;h owned_synthetic.deployment_heads;
+ prior owned_synthetic.deployment_decisions;op uuid;digest text;receipt bigint;
+begin
+ perform owned_synthetic.human_authority(p_tenant_id,p_actor_id,p_session_id);
+ perform owned_synthetic.deployment_founder(p_tenant_id,p_actor_id,p_session_id);
+ if jsonb_typeof(p_decision) is distinct from 'object'
+ or not(p_decision?&array['operationKey','expectedManifestSha256','expectedPreflightSha256','expectedRollbackSha256','reason','acknowledgeOwnedSynthetic'])
+ or p_decision-array['operationKey','expectedManifestSha256','expectedPreflightSha256','expectedRollbackSha256','reason','acknowledgeOwnedSynthetic']<>'{}'::jsonb
+ or p_decision->'acknowledgeOwnedSynthetic' is distinct from 'true'::jsonb
+ or jsonb_typeof(p_decision->'reason') is distinct from 'string' or length(p_decision->>'reason') not between 20 and 2000
+ or p_decision->>'reason'<>btrim(p_decision->>'reason')
+ or jsonb_typeof(p_decision->'operationKey') is distinct from 'string'
+ or p_decision->>'expectedManifestSha256' !~ '^[a-f0-9]{64}$'
+ or p_decision->>'expectedPreflightSha256' !~ '^[a-f0-9]{64}$'
+ or p_decision->>'expectedRollbackSha256' !~ '^[a-f0-9]{64}$'
+ then raise exception 'owned deployment decision refused' using errcode='22023';end if;
+ op:=(p_decision->>'operationKey')::uuid;
+ perform pg_advisory_xact_lock_shared(hashtextextended(p_tenant_id::text,47));
+ perform owned_synthetic.deployment_unfenced(p_tenant_id,p_actor_id,p_request_id,'approve',op);
+ select * into strict r from owned_synthetic.deployment_requests where(tenant_id,id)=(p_tenant_id,p_request_id) for share;
+ perform owned_synthetic.deployment_live_source(r);
+ select * into strict h from owned_synthetic.deployment_heads where request_id=r.id for share;
+ if h.state<>'preflight_ready' or h.approval_id is not null or h.installation_key is not null
+ or p_decision->>'expectedManifestSha256' is distinct from r.manifest_sha256
+ or p_decision->>'expectedPreflightSha256' is distinct from h.preflight->>'sha256'
+ or p_decision->>'expectedRollbackSha256' is distinct from h.preflight->>'rollbackSha256'
+ or h.preflight->'dryRunCompleted' is distinct from 'true'::jsonb
+ or h.preflight->'rollbackValidated' is distinct from 'true'::jsonb
+ or h.preflight->>'expiresAt' is null or(h.preflight->>'expiresAt')::timestamptz<=clock_timestamp()
+ or jsonb_typeof(h.preflight->'checks') is distinct from 'array'
+ or jsonb_array_length(h.preflight->'checks') not between 1 and 30
+ or exists(select 1 from jsonb_array_elements(h.preflight->'checks') c where c->>'outcome' is distinct from 'passed')
+ then raise exception 'owned deployment decision requires fresh measured preflight and rollback' using errcode='42501';end if;
+ digest:=owned_synthetic.snapshot_sha256(jsonb_build_object('domain','owned_synthetic_enrollment_v1','tenantId',p_tenant_id,
+ 'actorId',p_actor_id,'sessionId',p_session_id,'requestId',p_request_id,'decision',p_decision));
+ select * into prior from owned_synthetic.deployment_decisions where(tenant_id,actor_id,operation_key)=(p_tenant_id,p_actor_id,op);
+ if found then
+  if(prior.request_id,prior.session_id,prior.decision,prior.bound_payload_sha256) is distinct from(p_request_id,p_session_id,p_decision,digest)
+  then raise exception 'owned deployment decision conflict' using errcode='23505';end if;
+ else
+  receipt:=public.append_ledger(p_tenant_id,op,'human',p_actor_id::text,null,null,null,'deployment.owned_requested',r.id::text,digest,r.manifest_sha256,null,null,null,null,'pending',jsonb_build_object('stage','founder_decision_prepared','target_mutations',0));
+  insert into owned_synthetic.deployment_decisions(tenant_id,actor_id,operation_key,request_id,session_id,decision,bound_payload_sha256,receipt_id)
+  values(p_tenant_id,p_actor_id,op,r.id,p_session_id,p_decision,digest,receipt);
+ end if;
+ return jsonb_build_object('requestId',r.id,'operationKey',op,'boundPayloadSha256',digest,'purpose','owned_synthetic_enrollment');
+end $$;
+revoke all on function public.prepare_owned_deployment_decision(uuid,uuid,uuid,uuid,jsonb) from public,anon,authenticated,service_role,agent_ledger_writer,owned_target_controller;
+grant execute on function public.prepare_owned_deployment_decision(uuid,uuid,uuid,uuid,jsonb) to human_action_writer;
