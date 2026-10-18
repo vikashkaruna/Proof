@@ -68,6 +68,8 @@ while IFS= read -r suite; do
     # The production migration deliberately grants no issuer membership to
     # postgres. Only this disposable test session assumes the private role.
     docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "tests/database/$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [ "$suite" = catalogue-founder-approval.test.sql ]; then
+    { echo "begin;"; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; cat "tests/database/$suite"; } | sql
   elif [ "$suite" = coverage-first-public-reports.test.sql ]; then
     python3 tests/database/lib/report-policy-phases.py current-program --directory "$phase_dir" | sql
   elif [ "$suite" = local-public-control-assessment-dispatch.test.sql ]; then

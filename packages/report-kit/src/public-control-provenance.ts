@@ -8,9 +8,9 @@ import { z } from 'zod';
 import { canonicalJson } from '@axiom/ledger';
 import {
   parseCatalogueJson,
-  PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT,
+  publicControlCatalogueManifestText,
   publicControlCatalogueV2Manifest,
-  buildLibrarySeed,
+  buildLibrarySeedForVersion,
 } from '@axiom/control-library';
 import {
   PUBLIC_CONTROL_REVIEW_REQUEST_CODEC,
@@ -221,7 +221,7 @@ function verifyReview(
     [v.catalogue.manifest_text, v.catalogue.manifest_sha256],
   ])
     same(hash(bytes!), digestValue);
-  same(v.catalogue.manifest_text, PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT);
+  same(v.catalogue.manifest_text, publicControlCatalogueManifestText(v.catalogue.library_version));
   const request = assetBound
     ? parsePublicControlReviewSetAnyRequestText(v.review.request_text)
     : parsePublicControlReviewSetRequestText(v.review.request_text);
@@ -291,7 +291,7 @@ function verifyReview(
       v.catalogue.questionnaire_digest,
     ],
   );
-  const seed = buildLibrarySeed();
+  const seed = buildLibrarySeedForVersion(v.catalogue.library_version);
   const questionnaire = {
     libraryVersion: seed.version,
     controls: seed.controls
@@ -394,7 +394,7 @@ function verifyReview(
     processes_children: request.applicability.processesChildren,
     processes_health: request.applicability.processesHealth,
   });
-  const manifest = publicControlCatalogueV2Manifest();
+  const manifest = publicControlCatalogueV2Manifest(v.catalogue.library_version);
   same(
     Object.keys(snapshot.normalizedAnswers).sort(),
     manifest.controls.map((c) => c.control.id).sort(),

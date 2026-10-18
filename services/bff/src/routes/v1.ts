@@ -20,6 +20,7 @@ import type { AssessmentRequestProducer } from '../workloads/assessment-producer
 import { assessmentRoutes } from './assessment.js';
 import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
+import { catalogueVersionRoutes } from './catalogue-versions.js';
 import { catalogueReferenceRoutes } from './catalogue-references.js';
 import { publicWebsiteControlReviewRoutes } from './public-website-control-review.js';
 import { publicControlReviewSetRoutes } from './public-control-review-sets.js';
@@ -270,6 +271,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', catalogueReferenceRoutes());
+  app.route('/', catalogueVersionRoutes({ mfa: deps.mfa }));
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', localCustodyPolicyRoutes({ mfa: deps.mfa }));
   app.route('/', mfaRecoveryRoutes({ mfa: deps.mfa }));

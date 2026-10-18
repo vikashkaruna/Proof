@@ -3,9 +3,9 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { canonicalJson } from '@axiom/ledger';
 import {
-  buildLibrarySeed,
+  buildLibrarySeedForVersion,
   parseCatalogueJson,
-  PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT,
+  publicControlCatalogueManifestText,
 } from '@axiom/control-library';
 import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import {
@@ -38,8 +38,8 @@ import {
 const uuid = z.uuid().transform((value) => value.toLowerCase());
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const hash = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
-function questionnaireHash() {
-  const seed = buildLibrarySeed();
+function questionnaireHash(version: string) {
+  const seed = buildLibrarySeedForVersion(version);
   return hash(
     canonicalJson({
       libraryVersion: seed.version,
@@ -194,13 +194,14 @@ export function verifyPublicControlReviewRow(value: unknown, scope: Scope) {
     )
       throw new Error('review_asset_refused');
   }
-  const seed = buildLibrarySeed();
+  const seed = buildLibrarySeedForVersion(request.expectedSource.libraryVersion);
   const controls = seed.controls;
   if (
     request.expectedSource.catalogueManifestSha256 !==
-      hash(PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT) ||
+      hash(publicControlCatalogueManifestText(request.expectedSource.libraryVersion)) ||
     request.expectedSource.libraryVersion !== seed.version ||
-    request.expectedSource.questionnaireDigest !== questionnaireHash()
+    request.expectedSource.questionnaireDigest !==
+      questionnaireHash(request.expectedSource.libraryVersion)
   )
     throw new Error('review_catalogue_refused');
   if (
@@ -312,7 +313,7 @@ export function publicControlReviewSetRoutes() {
       const verified = decodeRetainedPublicWebsiteReview(retained, { tenantId, ...wanted });
       if (
         verified.assessment.catalogue.manifestSha256 !== catalogueManifestSha256 ||
-        questionnaireHash() !== questionnaireDigest
+        questionnaireHash(retained.libraryVersion) !== questionnaireDigest
       )
         throw new Error();
       const review = head.data
