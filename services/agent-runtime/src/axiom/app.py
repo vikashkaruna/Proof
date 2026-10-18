@@ -384,7 +384,7 @@ async def invoke_source_sudhaar(request: SignedPlanningRequest, req: Request) ->
         value, correlation, context = verify_planning_request(
             request, source_key, peer_secret=app.state.settings.internal_token
         )
-    except (ValueError, TypeError, KeyError):
+    except ValueError, TypeError, KeyError:
         raise HTTPException(status_code=403, detail="planning_source_refused") from None
     agent = app.state.agents.get(AgentName.SUDHAAR)
     if not agent:
@@ -448,7 +448,9 @@ async def invoke_public_source_agent(
 
 
 @app.post("/staged-evidence/agents/saakshi/invoke", response_model=InvokeResponse)
-async def invoke_staged_evidence_agent(request: EvidenceInvokeRequest, req: Request) -> InvokeResponse:
+async def invoke_staged_evidence_agent(
+    request: EvidenceInvokeRequest, req: Request
+) -> InvokeResponse:
     require_internal_caller(req)
     transport = getattr(app.state, "staged_evidence_transport", None)
     if transport is None:
@@ -461,10 +463,16 @@ async def invoke_staged_evidence_agent(request: EvidenceInvokeRequest, req: Requ
     except Exception:
         raise HTTPException(status_code=503, detail="staged_evidence_unconfirmed") from None
     return InvokeResponse(
-        agent="saakshi", correlation_id=result.correlation_id, status=result.status,
+        agent="saakshi",
+        correlation_id=result.correlation_id,
+        status=result.status,
         latency_ms=int((time.monotonic() - started) * 1000),
-        input_tokens=result.input_tokens, output_tokens=result.output_tokens, cost_usd=result.cost_usd,
-        error=result.error, output=result.output, ledger_entry_ids=result.ledger_entry_ids,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+        cost_usd=result.cost_usd,
+        error=result.error,
+        output=result.output,
+        ledger_entry_ids=result.ledger_entry_ids,
     )
 
 
@@ -562,7 +570,10 @@ async def internal_execute(
     # migration-0061 functions; this handler owns the kill switch, the
     # token re-validation and the adapter loop.
     settings: Settings = req.app.state.settings
-    if not settings.feature_execution_engine or not settings.reference_write_origin:
+    if not settings.feature_execution_engine or (
+        not settings.reference_write_origin
+        and not getattr(settings, "owned_execution_enabled", False)
+    ):
         # No write path is configured: refuse rather than improvise a target.
         return JSONResponse(
             status_code=503,
@@ -589,13 +600,30 @@ async def internal_execute(
         return result.valid, result.reason
 
     try:
+        if getattr(settings, "owned_execution_enabled", False):
+            from .owned_execution_adapter import OwnedExecutionAdapter, OwnedSocketPort
+            from .write_adapters import WriteRefused
+
+            try:
+                if len(body.action_ids) != 1:
+                    raise WriteRefused("owned_singleton_scope_refused")
+                owned_row = db.action_row(body.tenant_id, body.action_ids[0])
+                if owned_row is None:
+                    raise WriteRefused("owned_action_unavailable")
+                adapter = OwnedExecutionAdapter(
+                    body, owned_row, OwnedSocketPort(settings.owned_execution_socket or "")
+                )
+            except WriteRefused as refusal:
+                raise ExecutorRefused(refusal.reason) from None
+        else:
+            adapter = ReferenceWriteAdapter(
+                settings.reference_write_origin or "", settings.internal_token or ""
+            )
         result = await execute_batch(
             body,
             db=db,
             kill_switch=KillSwitchReader.from_settings(settings),
-            adapter=ReferenceWriteAdapter(
-                settings.reference_write_origin, settings.internal_token or ""
-            ),
+            adapter=adapter,
             verify_token=verify_token,
             signing_key=settings.approval_signing_key,
         )
@@ -670,7 +698,10 @@ async def internal_rollback(
     # write like any other, and with no write origin configured the honest
     # answer is a refusal, not an improvised target.
     settings: Settings = req.app.state.settings
-    if not settings.feature_execution_engine or not settings.reference_write_origin:
+    if not settings.feature_execution_engine or (
+        not settings.reference_write_origin
+        and not getattr(settings, "owned_execution_enabled", False)
+    ):
         return JSONResponse(
             status_code=503,
             content={
@@ -689,10 +720,36 @@ async def internal_rollback(
 
     db = ExecutorDb(create_client(settings.supabase_url, settings.supabase_service_key))
     try:
+        if getattr(settings, "owned_execution_enabled", False):
+            from types import SimpleNamespace
+
+            from .owned_execution_adapter import OwnedExecutionAdapter, OwnedSocketPort
+            from .write_adapters import WriteRefused
+
+            try:
+                if len(body.action_ids) != 1:
+                    raise WriteRefused("owned_singleton_scope_refused")
+                row = db.action_row(body.tenant_id, body.action_ids[0])
+                if row is None:
+                    raise WriteRefused("owned_action_unavailable")
+                context = SimpleNamespace(
+                    tenant_id=body.tenant_id,
+                    action_ids=body.action_ids,
+                    **db.owned_rollback_context(body.tenant_id, body.batch_id),
+                )
+                adapter = OwnedExecutionAdapter(
+                    context, row, OwnedSocketPort(settings.owned_execution_socket or "")
+                )
+            except WriteRefused as refusal:
+                raise ExecutorRefused(refusal.reason) from None
+        else:
+            adapter = ReferenceWriteAdapter(
+                settings.reference_write_origin or "", settings.internal_token or ""
+            )
         outcomes = await run_manual_rollbacks(
             db,
             KillSwitchReader.from_settings(settings),
-            ReferenceWriteAdapter(settings.reference_write_origin, settings.internal_token or ""),
+            adapter,
             tenant_id=body.tenant_id,
             batch_id=body.batch_id,
             action_ids=body.action_ids,

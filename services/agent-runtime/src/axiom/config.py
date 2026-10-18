@@ -28,10 +28,16 @@ class Settings(BaseSettings):
     )
 
     # Optional persisted human evidence path. Partial configuration grants no staging.
-    saakshi_stage_enabled: bool = Field(default=False, validation_alias="AXIOM_SAAKSHI_STAGE_ENABLED")
+    saakshi_stage_enabled: bool = Field(
+        default=False, validation_alias="AXIOM_SAAKSHI_STAGE_ENABLED"
+    )
     saakshi_stage_url: str | None = Field(default=None, validation_alias="AXIOM_SAAKSHI_STAGE_URL")
-    saakshi_stage_peer_token: str | None = Field(default=None, repr=False, validation_alias="AXIOM_SAAKSHI_STAGE_PEER_TOKEN")
-    saakshi_stage_source_key: str | None = Field(default=None, repr=False, validation_alias="AXIOM_SAAKSHI_STAGE_SOURCE_KEY")
+    saakshi_stage_peer_token: str | None = Field(
+        default=None, repr=False, validation_alias="AXIOM_SAAKSHI_STAGE_PEER_TOKEN"
+    )
+    saakshi_stage_source_key: str | None = Field(
+        default=None, repr=False, validation_alias="AXIOM_SAAKSHI_STAGE_SOURCE_KEY"
+    )
 
     @field_validator("saakshi_stage_enabled", mode="before")
     @classmethod
@@ -186,6 +192,29 @@ class Settings(BaseSettings):
         default=None,
         description="Origin of the Axiom reference write service; execution refuses when unset",
     )
+
+    # Explicit owned-synthetic execution controller; never customer/production.
+    owned_execution_enabled: bool = Field(
+        default=False, validation_alias="AXIOM_OWNED_EXECUTION_ENABLED"
+    )
+    owned_execution_socket: str | None = Field(
+        default=None, validation_alias="AXIOM_OWNED_EXECUTION_SOCKET"
+    )
+
+    @field_validator("owned_execution_enabled", mode="before")
+    @classmethod
+    def explicit_owned_execution(cls, value: object) -> bool:
+        return value is True or value == "true"
+
+    @model_validator(mode="after")
+    def owned_execution_local_only(self) -> Settings:
+        if self.owned_execution_enabled and (
+            self.environment not in ("development", "test") or not self.owned_execution_socket
+        ):
+            raise ValueError(
+                "Owned synthetic execution requires reviewed local socket configuration"
+            )
+        return self
 
     # W6 — the continuous-compliance scheduler. Off by default: it must be
     # enabled per environment, like the write path above, so a deployment

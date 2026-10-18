@@ -104,7 +104,7 @@ def supervise(
         sys.platform != "linux"
         or os.geteuid() != 0
         or not 0 < seconds <= MAX_SECONDS
-        or worker_uid not in (20003, 20004)
+        or worker_uid not in (20003, 20004, 20005)
     ):
         raise RuntimeError("Supervisor confinement unavailable")
     if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:  # CHILD_SUBREAPER

@@ -1,3 +1,6 @@
+import { ownedExecutionRoutes } from './routes/owned-execution.js';
+import { createConfiguredOwnedExecution } from './services/owned-execution-composition.js';
+import type { OwnedExecutionBroker } from './services/owned-execution-broker.js';
 import type { DiscoveryRequestController } from './routes/postgresql-discovery.js';
 import type { publicWebsiteCheckRoutes } from './routes/public-website-checks.js';
 import { createConfiguredOwnedSynthetic } from './services/owned-synthetic-composition.js';
@@ -54,6 +57,7 @@ export function createApp(
   options: {
     discoveryController?: DiscoveryRequestController;
     ownedSynthetic?: OwnedSyntheticRouteDeps | null;
+    ownedExecution?: Pick<OwnedExecutionBroker, 'run'> | null;
     assessmentTools?: AssessmentTools;
     assessmentRequests?: AssessmentRequestProducer;
     publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
@@ -70,6 +74,7 @@ export function createApp(
     if (
       c.req.path.startsWith('/internal/workload-tools') ||
       c.req.path.startsWith('/internal/discovery') ||
+      c.req.path.startsWith('/internal/owned-execution') ||
       c.req.path === '/internal/staged-evidence/stage'
     )
       return next();
@@ -133,6 +138,14 @@ export function createApp(
   // Private workload authority is independent of human session middleware.
   app.route('/internal/workload-tools', workloadToolsRoutes(options.assessmentTools));
   app.route('/internal/discovery', discoveryRoutes(options.discovery));
+  app.route(
+    '/internal/owned-execution',
+    ownedExecutionRoutes(
+      options.ownedExecution === undefined
+        ? createConfiguredOwnedExecution(approvalEngine)
+        : options.ownedExecution,
+    ),
+  );
   app.route('/internal/staged-evidence', stagedEvidencePrivateRoutes(stagedEvidence?.internal));
 
   // Public routes (no auth) — gap-scan, public marketing endpoints

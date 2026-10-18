@@ -48,6 +48,15 @@ export function readOwnedSyntheticConfiguration(source: NodeJS.ProcessEnv = proc
   // The target PostgREST authenticates the signature; local claim checks catch misconfiguration.
   return { targetKey: key };
 }
+/** Scoped PostgREST transport. Installation must separately authorize the
+ * exact incoming authenticator membership; this factory never grants it. */
+export function ownedTargetControllerFactory(url: string, anonKey: string, targetKey: string) {
+  return () =>
+    createClient(url, anonKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+      global: { headers: { Authorization: `Bearer ${targetKey}` } },
+    });
+}
 export function createConfiguredOwnedSynthetic(isKilled: (tenantId: string) => Promise<boolean>) {
   const config = readOwnedSyntheticConfiguration();
   if (!config) return null;
@@ -55,10 +64,10 @@ export function createConfiguredOwnedSynthetic(isKilled: (tenantId: string) => P
   return createOwnedSyntheticController({
     isKilled,
     humanWriterFactory: createHumanActionWriter,
-    targetControllerFactory: () =>
-      createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-        auth: { autoRefreshToken: false, persistSession: false },
-        global: { headers: { Authorization: `Bearer ${config.targetKey}` } },
-      }),
+    targetControllerFactory: ownedTargetControllerFactory(
+      env.SUPABASE_URL,
+      env.SUPABASE_ANON_KEY,
+      config.targetKey,
+    ),
   });
 }

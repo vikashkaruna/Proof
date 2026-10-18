@@ -22,7 +22,8 @@ policy, credentials or keys.
 
 Usage:
   python3 scripts/local-spire.py up        # build image (once), start node
-  python3 scripts/local-spire.py register  # create/verify the role entries
+  python3 scripts/local-spire.py register  # original read/control role entries
+  python3 scripts/local-spire.py register-karya  # explicit synthetic writer identity only
   python3 scripts/local-spire.py status
   python3 scripts/local-spire.py down      # stop only; volumes are kept
   python3 scripts/local-spire.py reattest
@@ -77,6 +78,7 @@ ROLES = {
 LEGACY_ROLES = dict(ROLES)
 # Created only by the explicit register command, never by recovery.
 ROLES["drishti"] = (20004, f"spiffe://{TRUST_DOMAIN}/agent/drishti")
+ROLES["karya"] = (20005, f"spiffe://{TRUST_DOMAIN}/agent/karya")
 
 SERVER_CONF = f"""server {{
  bind_address = "127.0.0.1"
@@ -319,10 +321,15 @@ def entries() -> list[dict]:
     return json.loads(shown.stdout or "{}").get("entries") or []
 
 
-def register() -> None:
+def register(*, karya_only: bool = False) -> None:
     parent = node_id()
     current = {(e["spiffe_id"]["path"], e["parent_id"]["path"]): e for e in entries()}
-    for role, (uid, spiffe_id) in ROLES.items():
+    selected = (
+        {"karya": ROLES["karya"]}
+        if karya_only
+        else {name: value for name, value in ROLES.items() if name != "karya"}
+    )
+    for role, (uid, spiffe_id) in selected.items():
         path = spiffe_id.split(TRUST_DOMAIN, 1)[1]
         key = (path, parent.split(TRUST_DOMAIN, 1)[1])
         if key in current:
@@ -541,12 +548,18 @@ def reattest(resume: Path | None = None) -> None:
         old = node_id()
         current = entries()
         roles = dict(LEGACY_ROLES)
-        if any(
-            item.get("parent_id", {}).get("path") == old.split(TRUST_DOMAIN, 1)[1]
-            and item.get("spiffe_id", {}).get("path") == "/agent/drishti"
-            for item in current
-        ):
-            roles["drishti"] = ROLES["drishti"]
+        # Capture only optional reviewed children which ACTUALLY exist. Recovery
+        # never registers a new role or expands the retained four-role intent.
+        for name, (_uid, sid) in ROLES.items():
+            if name in LEGACY_ROLES:
+                continue
+            if any(
+                item.get("parent_id", {}).get("path") == old.split(TRUST_DOMAIN, 1)[1]
+                and item.get("spiffe_id", {}).get("path")
+                == sid.split(TRUST_DOMAIN, 1)[1]
+                for item in current
+            ):
+                roles[name] = ROLES[name]
         children = recovery_entries(old, current, roles)
         stamp = (
             time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + secrets.token_hex(6)
@@ -881,6 +894,7 @@ if __name__ == "__main__":
     actions = {
         "up": up,
         "register": register,
+        "register-karya": lambda: register(karya_only=True),
         "status": status,
         "down": down,
         "migrate-parikshan-uid": migrate_parikshan_uid,
