@@ -161,6 +161,27 @@ class OwnedDeploymentTests(unittest.TestCase):
                 MODULE.operator_request(config, "https://foreign.test", {})
             run.assert_not_called()
 
+    def test_one_original_deadline_shrinks_and_refuses_without_spawning(self):
+        with (
+            patch.object(MODULE.time, "monotonic", side_effect=[10, 29.5, 31]),
+            patch.object(MODULE.subprocess, "run") as spawn,
+        ):
+            MODULE.run(["docker", "inspect", "fixture"], deadline=30)
+            self.assertEqual(spawn.call_args.kwargs["timeout"], 20)
+            MODULE.run(["docker", "inspect", "fixture"], deadline=30)
+            self.assertEqual(spawn.call_args.kwargs["timeout"], 0.5)
+            with self.assertRaisesRegex(ValueError, "deadline elapsed"):
+                MODULE.run(["docker", "inspect", "fixture"], deadline=30)
+            self.assertEqual(spawn.call_count, 2)
+
+    def test_readonly_preflight_uses_one_fixed_overall_bound(self):
+        with (
+            patch.object(MODULE.time, "monotonic", return_value=100),
+            patch.object(MODULE, "_readonly_host_preflight", return_value={}) as body,
+        ):
+            self.assertEqual(MODULE.readonly_host_preflight({}, {}), {})
+            body.assert_called_once_with({}, {}, 130)
+
     def test_subprocess_wrapper_carries_private_input_without_shell(self):
         with patch.object(
             MODULE.subprocess,

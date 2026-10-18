@@ -15,6 +15,7 @@ import os
 import re
 import stat
 import subprocess  # nosec B404 - fixed argv, no shell and no credential argv
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -113,14 +114,22 @@ def host_source_sha256(root: Path = ROOT) -> str:
     ).hexdigest()
 
 
-def run(arguments: list[str], *, private_input: str | None = None):
+def run(
+    arguments: list[str],
+    *,
+    private_input: str | None = None,
+    deadline: float | None = None,
+):
+    remaining = 30.0 if deadline is None else min(30.0, deadline - time.monotonic())
+    if remaining <= 0:
+        raise ValueError("Protected operator deadline elapsed")
     return subprocess.run(
         arguments,
         check=True,
         capture_output=True,
         text=True,
         input=private_input,
-        timeout=30,
+        timeout=remaining,
     )
 
 
@@ -130,7 +139,7 @@ def image_id(value: object) -> str:
     return value
 
 
-def bff_container(configuration: dict) -> str:
+def bff_container(configuration: dict, *, deadline: float | None = None) -> str:
     name = configuration.get("bffContainer")
     if not isinstance(name, str) or not re.fullmatch(
         r"axiom-proof(?:-local)?-(?:bff|api)(?:-[a-z0-9]{1,12})?", name
@@ -140,7 +149,7 @@ def bff_container(configuration: dict) -> str:
     if not isinstance(pinned_id, str) or not re.fullmatch(r"[a-f0-9]{64}", pinned_id):
         raise ValueError("Pinned BFF container identity refused")
     expected = image_id(configuration.get("bffImage"))
-    info = json.loads(run(["docker", "inspect", name]).stdout)
+    info = json.loads(run(["docker", "inspect", name], deadline=deadline).stdout)
     if len(info) != 1:
         raise ValueError("Owned BFF container refused")
     actual = info[0]
@@ -213,6 +222,18 @@ def operator_request(configuration: dict, path: str, body: dict) -> object:
 
 
 def readonly_host_preflight(manifest: dict, configuration: dict) -> dict:
+    # Every inspection consumes one original bound; many individually bounded
+    # Docker calls must not stretch a five-minute retained task indefinitely.
+    deadline = time.monotonic() + 30
+    return _readonly_host_preflight(manifest, configuration, deadline)
+
+
+def _readonly_host_preflight(
+    manifest: dict, configuration: dict, deadline: float
+) -> dict:
+    def inspect(arguments: list[str]):
+        return run(arguments, deadline=deadline)
+
     if (
         manifest.get("environment") != "local"
         or manifest.get("purpose") != "owned_synthetic_enrollment_v1"
@@ -227,7 +248,7 @@ def readonly_host_preflight(manifest: dict, configuration: dict) -> dict:
     images = {}
     for field in ("controllerImage", "workerImage", "bffImage"):
         expected = image_id(deployment.get(field))
-        actual = run(
+        actual = inspect(
             ["docker", "image", "inspect", expected, "--format", "{{.Id}}"]
         ).stdout.strip()
         if actual != expected:
@@ -236,11 +257,11 @@ def readonly_host_preflight(manifest: dict, configuration: dict) -> dict:
     workload = deployment.get("workloadApiVolume", "")
     if not re.fullmatch(r"axiom-workload-api-[a-z0-9-]{1,64}", workload):
         raise ValueError("Reviewed workload mount refused")
-    volume = json.loads(run(["docker", "volume", "inspect", workload]).stdout)
+    volume = json.loads(inspect(["docker", "volume", "inspect", workload]).stdout)
     if len(volume) != 1 or volume[0].get("Name") != workload:
         raise ValueError("Reviewed workload mount refused")
     source = json.loads(
-        run(["docker", "volume", "inspect", "axiom-spire-workload"]).stdout
+        inspect(["docker", "volume", "inspect", "axiom-spire-workload"]).stdout
     )
     if (
         len(source) != 1
@@ -258,15 +279,15 @@ def readonly_host_preflight(manifest: dict, configuration: dict) -> dict:
         != "local-assessment-controller"
     ):
         raise ValueError("Workload API alias changed")
-    container = bff_container(configuration)
+    container = bff_container(configuration, deadline=deadline)
     # The existing SPIRE deployment is inspected, never created/re-attested.
-    node = run(
+    node = inspect(
         ["docker", "exec", "axiom-spire", "cat", "/var/lib/spire/node-id"]
     ).stdout.strip()
     if node != deployment.get("nodeId"):
         raise ValueError("Reviewed workload parent changed")
     entries = json.loads(
-        run(
+        inspect(
             [
                 "docker",
                 "exec",
