@@ -1,8 +1,15 @@
 import {
+  ownedDeploymentPrivateRoutes,
+  type OwnedDeploymentPrivateDeps,
+} from './routes/owned-deployments-private.js';
+import {
   ownedDeploymentRoutes,
   type OwnedDeploymentRouteController,
 } from './routes/owned-deployments.js';
-import { createConfiguredOwnedDeployment } from './services/owned-deployment-composition.js';
+import {
+  createConfiguredOwnedDeployment,
+  createConfiguredOwnedDeploymentPrivate,
+} from './services/owned-deployment-composition.js';
 import { ownedExecutionRoutes } from './routes/owned-execution.js';
 import { createConfiguredOwnedExecution } from './services/owned-execution-composition.js';
 import type { OwnedExecutionBroker } from './services/owned-execution-broker.js';
@@ -65,6 +72,7 @@ export function createApp(
     discoveryController?: DiscoveryRequestController;
     ownedSynthetic?: OwnedSyntheticRouteDeps | null;
     ownedDeployment?: OwnedDeploymentRouteController | null;
+    ownedDeploymentPrivate?: OwnedDeploymentPrivateDeps | null;
     ownedExecution?: Pick<OwnedExecutionBroker, 'run'> | null;
     assessmentTools?: AssessmentTools;
     assessmentRequests?: AssessmentRequestProducer;
@@ -83,27 +91,28 @@ export function createApp(
       c.req.path.startsWith('/internal/workload-tools') ||
       c.req.path.startsWith('/internal/discovery') ||
       c.req.path.startsWith('/internal/owned-execution') ||
+      c.req.path.startsWith('/internal/owned-deployments') ||
       c.req.path === '/internal/staged-evidence/stage'
     )
       return next();
     return logger()(c, next);
   });
   app.use('*', secureHeaders());
-  app.use(
-    '*',
-    cors({
-      origin: env.BFF_CORS_ORIGINS.split(',').map((o) => o.trim()),
-      allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: [
-        'Content-Type',
-        'Authorization',
-        'Idempotency-Key',
-        'X-Request-Id',
-        'X-Tenant-Id',
-        'X-Expected-Actor-Id',
-      ],
-      credentials: true,
-    }),
+  const publicCors = cors({
+    origin: env.BFF_CORS_ORIGINS.split(',').map((o) => o.trim()),
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: [
+      'Content-Type',
+      'Authorization',
+      'Idempotency-Key',
+      'X-Request-Id',
+      'X-Tenant-Id',
+      'X-Expected-Actor-Id',
+    ],
+    credentials: true,
+  });
+  app.use('*', (c, next) =>
+    c.req.path.startsWith('/internal/owned-deployments') ? next() : publicCors(c, next),
   );
   app.use('*', errorHandler());
   app.use(
@@ -146,6 +155,14 @@ export function createApp(
   // Private workload authority is independent of human session middleware.
   app.route('/internal/workload-tools', workloadToolsRoutes(options.assessmentTools));
   app.route('/internal/discovery', discoveryRoutes(options.discovery));
+  app.route(
+    '/internal/owned-deployments',
+    ownedDeploymentPrivateRoutes(
+      options.ownedDeploymentPrivate === undefined
+        ? createConfiguredOwnedDeploymentPrivate(approvalEngine)
+        : options.ownedDeploymentPrivate,
+    ),
+  );
   app.route(
     '/internal/owned-execution',
     ownedExecutionRoutes(

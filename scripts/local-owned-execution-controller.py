@@ -183,8 +183,29 @@ def stage(args):
     print("Protected owned-execution controller configuration staged.")
 
 
-def runtime_args(image: str, gid: int, serve: bool) -> list[str]:
+def bff_identity(container_id: str, expected_image: str) -> str:
+    if not re.fullmatch(r"[a-f0-9]{64}", container_id) or not re.fullmatch(
+        r"sha256:[a-f0-9]{64}", expected_image
+    ):
+        raise ValueError("Exact reviewed BFF identity required")
+    info = json.loads(run(["docker", "inspect", container_id]).stdout)
+    if (
+        len(info) != 1
+        or info[0].get("Id") != container_id
+        or info[0].get("Image") != expected_image
+        or info[0].get("State", {}).get("Running") is not True
+        or info[0].get("Config", {}).get("Labels", {}).get("com.docker.compose.service")
+        != "bff"
+    ):
+        raise ValueError("Reviewed BFF namespace changed")
+    return container_id
+
+
+def runtime_args(
+    image: str, gid: int, serve: bool, bff_container_id: str = "", bff_image: str = ""
+) -> list[str]:
     deployment_name()
+    bff = bff_identity(bff_container_id, bff_image)
     image_id(image)
     if not 0 <= gid <= 2147483647:
         raise ValueError("Reviewed daemon GID required")
@@ -215,7 +236,7 @@ def runtime_args(image: str, gid: int, serve: bool) -> list[str]:
         "--group-add",
         str(gid),
         "--network",
-        "container:axiom-bff",
+        "container:" + bff,
         "--read-only",
         "--cap-drop",
         "ALL",
@@ -257,6 +278,8 @@ def main():
         p = commands.add_parser(command)
         p.add_argument("--controller-image", required=True)
         p.add_argument("--docker-gid", type=int, required=True)
+        p.add_argument("--bff-container-id", required=True)
+        p.add_argument("--bff-image", required=True)
     commands.add_parser("down")
     args = parser.parse_args()
     try:
@@ -265,7 +288,11 @@ def main():
         elif args.command in ("check", "serve"):
             run(
                 runtime_args(
-                    args.controller_image, args.docker_gid, args.command == "serve"
+                    args.controller_image,
+                    args.docker_gid,
+                    args.command == "serve",
+                    args.bff_container_id,
+                    args.bff_image,
                 )
             )
             print("Owned execution controller " + args.command + " completed.")

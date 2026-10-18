@@ -50,6 +50,30 @@ select pg_temp.ok(pg_temp.owned168_resolve()->'before'=(select proof->'before' f
 select pg_temp.human167_refused('select pg_temp.owned168_execute(''rollback'')');
 select pg_temp.human167_refused('select pg_temp.owned168_execute(''arbitrary_sql'')','22023');
 reset role;
+-- Same action/batch/UUID/digest cannot make an enrollment-purpose token a
+-- remediation approval. Explicit null is foreign, not legacy absence.
+do $$declare foreign_purpose jsonb;begin
+ if to_regprocedure('public.reserve_owned_deployment_credential(uuid,uuid,uuid)') is not null then
+  foreach foreign_purpose in array array['"owned_synthetic_enrollment_v1"'::jsonb,'null'::jsonb] loop
+   begin
+    update public.approval_tokens set signed_payload=signed_payload||jsonb_build_object('conditions',jsonb_build_object('purpose',foreign_purpose)) where id=pg_temp.pg_id(241);
+    update owned168_saved set v=jsonb_set(v,'{spec,conditions}',jsonb_build_object('purpose',foreign_purpose)) where name='signed';
+    set local role owned_target_controller;
+    perform public.cas_owned_synthetic_target(pg_temp.pg_id(1),pg_temp.pg_id(191),pg_temp.pg_id(170),pg_temp.pg_id(265),(select proof->'before' from human167_saved where n=1),true);
+    raise exception 'foreign purpose direct CAS accepted';
+   exception when insufficient_privilege then
+    if sqlerrm<>'owned target remediation purpose refused' then raise;end if;
+   end;
+   begin
+    update public.approval_tokens set signed_payload=signed_payload||jsonb_build_object('conditions',jsonb_build_object('purpose',foreign_purpose)) where id=pg_temp.pg_id(241);
+    update owned168_saved set v=jsonb_set(v,'{spec,conditions}',jsonb_build_object('purpose',foreign_purpose)) where name='signed';
+    set local role owned_target_controller;perform pg_temp.owned168_resolve();raise exception 'foreign purpose resolver accepted';
+   exception when insufficient_privilege then
+    if sqlerrm<>'owned target remediation purpose refused' then raise;end if;
+   end;
+  end loop;
+ end if;
+end $$;
 -- Altered consumed scope, workload revocation and signature bytes are fences.
 do $$begin
  begin update public.workload_identities set status='disabled' where id=pg_temp.pg_id(240);

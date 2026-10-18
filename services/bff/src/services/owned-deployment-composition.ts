@@ -1,6 +1,12 @@
 /** Default-off local enrollment. Authority is the normal human writer, existing
  * approval signer and dedicated bound MFA; no installer receives signing keys. */
 import path from 'node:path';
+import { loadEnv } from '@axiom/config';
+import { OwnedDeploymentOperatorAuth } from './owned-deployment-operator.js';
+import {
+  OwnedDeploymentInstaller,
+  actualOwnedTransportVerifier,
+} from './owned-deployment-installer.js';
 import { createSupabaseAdmin, createHumanActionWriter } from '@axiom/supabase';
 import type { ApprovalEngine } from '@axiom/approval-engine';
 import type { MfaService } from './mfa.js';
@@ -50,4 +56,29 @@ export function createConfiguredOwnedDeployment(
     humanRpc: (name, args) => rpc(createHumanActionWriter(), name, args),
     serviceRpc: (name, args) => rpc(createSupabaseAdmin(), name, args),
   });
+}
+
+export function createConfiguredOwnedDeploymentPrivate(
+  approval: Pick<ApprovalEngine, 'issue' | 'sign'>,
+  source: NodeJS.ProcessEnv = process.env,
+) {
+  const config = ownedDeploymentConfiguration(source);
+  if (!config) return null;
+  const env = loadEnv(source);
+  return {
+    auth: new OwnedDeploymentOperatorAuth(config.transportFile, true),
+    installer: new OwnedDeploymentInstaller({
+      approval,
+      credentialDirectory: config.credentialDirectory,
+      manifests: () => readOwnedDeploymentManifests(config.manifestFile),
+      serviceRpc: async (name, args) => {
+        const result = await createSupabaseAdmin()
+          .rpc(name, args)
+          .abortSignal(AbortSignal.timeout(15000));
+        if (result.error) throw Error('Owned deployment private source unavailable');
+        return result.data as unknown;
+      },
+      verifyTransport: actualOwnedTransportVerifier(env.SUPABASE_URL, env.SUPABASE_ANON_KEY),
+    }),
+  };
 }

@@ -1,6 +1,8 @@
 """Launcher configuration only; no Docker writes or retained credentials."""
 
 import importlib.util
+import json
+import subprocess
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -49,19 +51,50 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "deployment refused"):
             launcher.configuration("sha256:" + "a" * 64, "axiom-workload-api-local", 0)
 
+    def test_exact_bff_identity_refuses_same_image_replacement_before_launch(self):
+        expected = "b" * 64
+        inspected = [
+            {
+                "Id": "a" * 64,
+                "Image": "sha256:" + "c" * 64,
+                "State": {"Running": True},
+                "Config": {"Labels": {"com.docker.compose.service": "bff"}},
+            }
+        ]
+        with patch.object(
+            launcher,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, json.dumps(inspected), ""),
+        ) as command:
+            with self.assertRaisesRegex(ValueError, "namespace changed"):
+                launcher.bff_identity(expected, "sha256:" + "c" * 64)
+            inspected[0]["Id"] = expected
+            command.return_value = subprocess.CompletedProcess(
+                [], 0, json.dumps(inspected), ""
+            )
+            self.assertEqual(
+                launcher.bff_identity(expected, "sha256:" + "c" * 64), expected
+            )
+
     def test_launch_has_dedicated_identity_and_no_backend_environment(self):
-        with patch.object(launcher, "image_id", lambda value: value):
+        with (
+            patch.object(launcher, "image_id", lambda value: value),
+            patch.object(launcher, "bff_identity", return_value="a" * 64),
+        ):
             args = launcher.runtime_args("sha256:" + "b" * 64, 0, True)
         self.assertIn("20106:20106", args)
         self.assertIn("20113", args)
-        self.assertIn("container:axiom-bff", args)
+        self.assertIn("container:" + "a" * 64, args)
         self.assertIn("--read-only", args)
         self.assertIn("no-new-privileges:true", args)
         self.assertNotIn("-e", args)
         self.assertEqual(args[-1], "/etc/axiom/owned-execution-controller/config.json")
 
     def test_check_runs_readonly_prerequisite_check_in_ephemeral_container(self):
-        with patch.object(launcher, "image_id", lambda value: value):
+        with (
+            patch.object(launcher, "image_id", lambda value: value),
+            patch.object(launcher, "bff_identity", return_value="a" * 64),
+        ):
             args = launcher.runtime_args("sha256:" + "b" * 64, 0, False)
         self.assertIn("--rm", args)
         self.assertNotIn("--restart", args)
