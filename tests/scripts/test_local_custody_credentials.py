@@ -89,3 +89,51 @@ class IssueRequestTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RenewalTiming(unittest.TestCase):
+    """renew-due decides from the last published request's own expiry."""
+
+    def test_due_inside_the_margin_and_after_expiry(self):
+        from lib.local_custody_credentials import renewal_due
+
+        now = 1_800_000_000
+        self.assertFalse(renewal_due(now + 1201, now))
+        self.assertTrue(renewal_due(now + 1200, now))
+        self.assertTrue(renewal_due(now - 5, now))
+        for margin in (59, 3600, 0):
+            with self.assertRaises(ValueError):
+                renewal_due(now + 10, now, margin)
+
+    def test_expiry_is_read_only_from_the_named_credentials_request(self):
+        from lib.local_custody_credentials import last_expiry
+
+        raw, _ = build(credential_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        value = json.loads(raw)
+        self.assertEqual(last_expiry(raw, value["credentialId"]), value["expiresAt"])
+        with self.assertRaises(ValueError):
+            last_expiry(raw, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+        for bad in ({**value, "purpose": "other"}, {**value, "expiresAt": "soon"}, {**value, "expiresAt": True}):
+            with self.assertRaises(ValueError):
+                last_expiry(json.dumps(bad).encode(), value["credentialId"])
+
+    def test_cli_picks_only_due_kinds_and_refuses_an_unreadable_expiry(self):
+        import tempfile
+
+        spec = importlib.util.spec_from_file_location("lcc_cli", ROOT / "scripts/local-custody-credentials.py")
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            for kind, issued in (("producer", 1_800_000_000), ("controller", 1_800_002_000)):
+                raw, _ = build(kind=kind, issued_at=issued)
+                cid = json.loads(raw)["credentialId"]
+                (base / f"{kind}.last").write_text(cid)
+                (base / f"{cid}.request.json").write_bytes(raw)
+            # producer expires at +3600 (due at +2400); controller at +5600.
+            self.assertEqual(cli.due_kinds(base, 1_800_002_400, 1200), ["producer"])
+            self.assertEqual(cli.due_kinds(base, 1_800_002_399, 1200), [])
+            self.assertEqual(cli.due_kinds(base, 1_800_004_400, 1200), ["producer", "controller"])
+            (base / "controller.last").write_text("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+            with self.assertRaises(SystemExit):
+                cli.due_kinds(base, 1_800_000_000, 1200)
