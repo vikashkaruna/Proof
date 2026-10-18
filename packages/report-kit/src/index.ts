@@ -15,3 +15,4 @@ export * from './assessment-interpretation';
 export * from './public-control-provenance';
 export * from './coverage-first-source';
 export * from './coverage-first-report';
+export * from './full-closure';

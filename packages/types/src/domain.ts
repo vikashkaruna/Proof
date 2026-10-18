@@ -564,6 +564,7 @@ export const PramaanDossierSchema = z.object({
   archiveStatus: z.enum(['pending', 'settled']).nullable().optional(),
   archiveVersionId: z.string().nullable().optional(),
   operationKey: z.string().uuid().nullable().optional(),
+  releaseStatus: z.enum(['withheld', 'released']).optional(),
 });
 export type PramaanDossier = z.infer<typeof PramaanDossierSchema>;
 

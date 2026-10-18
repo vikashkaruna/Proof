@@ -30,6 +30,9 @@ const dossier = (over: Partial<PramaanDossier> = {}): PramaanDossier => ({
 });
 const handlers = () => ({
   onClose: vi.fn(),
+  onPreview: vi.fn(),
+  onReview: vi.fn(),
+  onRelease: vi.fn(),
   onSeal: vi.fn(),
   onDownload: vi.fn(),
   onReconcile: vi.fn(),
@@ -145,4 +148,34 @@ it('closes on Escape, restores focus and traps Tab inside the dialog', () => {
   cleanup();
   expect(document.activeElement).toBe(opener);
   opener.remove();
+});
+
+it('full closure requires recorded review then seal then release before download', () => {
+  const draft = dossier({ dossierType: 'full_closure', releaseStatus: 'withheld' });
+  const h = view(draft);
+  expect(screen.queryByRole('button', { name: 'Download verified archive' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Seal as founder' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Download archive for review' }));
+  expect(h.onPreview).toHaveBeenCalledWith(draft);
+  const review = screen.getByRole('button', { name: 'Record review of this archive' });
+  expect(review.hasAttribute('disabled')).toBe(true);
+  fireEvent.change(screen.getByRole('textbox', { name: 'Founder review note' }), {
+    target: { value: 'Reviewed exact source scope and archive' },
+  });
+  fireEvent.click(review);
+  expect(h.onReview).toHaveBeenCalledWith(draft, 'Reviewed exact source scope and archive');
+  cleanup();
+  view({ ...draft, status: 'approved' });
+  expect(screen.getByRole('button', { name: 'Seal as founder' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Release exact archive' })).toBeNull();
+  cleanup();
+  const sealed = { ...draft, status: 'sealed' as const };
+  const releasing = view(sealed);
+  fireEvent.click(screen.getByRole('button', { name: 'Release exact archive' }));
+  expect(releasing.onRelease).toHaveBeenCalledWith(sealed);
+  expect(screen.queryByRole('button', { name: 'Download verified archive' })).toBeNull();
+  cleanup();
+  view({ ...sealed, releaseStatus: 'released' });
+  expect(screen.getByRole('button', { name: 'Download verified archive' })).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Release exact archive' })).toBeNull();
 });

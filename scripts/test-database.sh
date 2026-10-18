@@ -72,6 +72,8 @@ while IFS= read -r suite; do
     { echo "begin;"; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; sed '/^rollback;$/d' tests/database/catalogue-founder-approval.test.sql; cat "tests/database/$suite"; } | sql
   elif [ "$suite" = catalogue-founder-approval.test.sql ]; then
     { echo "begin;"; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; cat "tests/database/$suite"; } | sql
+  elif [ "$suite" = full-closure-source-graph.test.sql ]; then
+    { python3 tests/database/lib/full-closure-source-graph.py; cat "tests/database/$suite"; } | sql
   elif [ "$suite" = coverage-first-public-reports.test.sql ]; then
     python3 tests/database/lib/report-policy-phases.py current-program --directory "$phase_dir" | sql
   elif [ "$suite" = local-public-control-assessment-dispatch.test.sql ]; then
