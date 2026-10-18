@@ -51,14 +51,49 @@ export default async function SettingsPage() {
         </section>
       )}
 
-      <section aria-label="Local custody policies">
-        <h2>Local dispatch-key custody</h2>
-        <p>
-          Review tenant-scoped owner requests, founder approvals, nominated operator activation and
-          periodic reminders.
-        </p>
-        <Link href="/settings/local-custody">Manage local custody policies</Link>
+      <section
+        aria-labelledby="custody-settings-heading"
+        className="flex flex-col gap-4 rounded-2xl border border-[#e4e8ee] bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-6"
+      >
+        <div className="max-w-2xl">
+          <h2
+            id="custody-settings-heading"
+            className="font-heading text-base font-semibold text-[#1E2A4A]"
+          >
+            Local dispatch-key custody
+          </h2>
+          <p className="mt-1 text-sm leading-relaxed text-[#5b6270]">
+            Review tenant-scoped owner requests, founder approvals, nominated operator activation
+            and periodic reminders.
+          </p>
+          <ol
+            aria-label="Custody policy steps"
+            className="mt-3 flex flex-wrap items-center gap-2 text-xs font-medium text-[#1E2A4A]"
+          >
+            {['Owner requests', 'Founder approves', 'Operator activates'].map((step, index) => (
+              <li
+                key={step}
+                className="inline-flex items-center gap-1.5 rounded-full border border-[#e4e8ee] bg-slate-50 px-2.5 py-1"
+              >
+                <span
+                  aria-hidden="true"
+                  className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-indigo-900 text-[10px] text-white"
+                >
+                  {index + 1}
+                </span>
+                {step}
+              </li>
+            ))}
+          </ol>
+        </div>
+        <Link
+          href="/settings/local-custody"
+          className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
+        >
+          Manage local custody policies
+        </Link>
       </section>
+
       {/* 2 Main Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Account Card */}

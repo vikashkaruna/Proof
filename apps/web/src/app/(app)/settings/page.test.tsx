@@ -24,8 +24,18 @@ vi.mock('@/lib/tenant-context', () => ({
   }),
 }));
 vi.mock('next/link', () => ({
-  default: ({ children, href }: { children: React.ReactNode; href: string }) => (
-    <a href={href}>{children}</a>
+  default: ({
+    children,
+    href,
+    className,
+  }: {
+    children: React.ReactNode;
+    href: string;
+    className?: string;
+  }) => (
+    <a href={href} className={className}>
+      {children}
+    </a>
   ),
 }));
 
@@ -68,4 +78,9 @@ it('links to the gated local dispatch-key custody workflow', async () => {
   const html = renderToStaticMarkup(await SettingsPage());
   expect(html).toContain('href="/settings/local-custody"');
   expect(html).toContain('Local dispatch-key custody');
+  // The action reads as a primary button, and the three-step flow is listed.
+  const anchor = html.match(/<a[^>]*href="\/settings\/local-custody"[^>]*>/)?.[0] ?? '';
+  expect(anchor).toContain('bg-teal-700');
+  for (const step of ['Owner requests', 'Founder approves', 'Operator activates'])
+    expect(html).toContain(step);
 });
