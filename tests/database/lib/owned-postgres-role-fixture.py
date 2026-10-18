@@ -77,7 +77,14 @@ class Fixture:
             timeout=20,
         )  # nosec B603
 
-    def sql(self, database: str, sql: str, *, refused: bool = False) -> str:
+    def sql(
+        self,
+        database: str,
+        sql: str,
+        *,
+        refused: bool = False,
+        reason: str = "owned target controller role identity refused",
+    ) -> str:
         result = self.command(
             [
                 "psql",
@@ -98,7 +105,7 @@ class Fixture:
             if (
                 result.returncode == 0
                 or "42501" not in result.stderr
-                or "owned target controller role identity refused" not in result.stderr
+                or reason not in result.stderr
             ):
                 raise ValueError(
                     "Unsafe role was not refused by the actual source guard"
@@ -132,6 +139,60 @@ class Fixture:
                         raise ValueError("Source guard modified the unsafe role")
                 finally:
                     self.sql(database, f"alter role owned_target_controller {safe};")
+            # NOINHERIT still permits SET ROLE. An outgoing membership must
+            # fail even though all seven role flags remain safe. Incoming
+            # authenticator-style membership is a different direction.
+            parent = "owned166_parent_" + nonce
+            caller = "owned166_caller_" + nonce
+            self.sql(
+                database,
+                f"create role {parent} nologin noinherit createrole; create role {caller} nologin noinherit;",
+            )
+            sandbox_source = (
+                ROOT / "infra/supabase/migrations/0163_postgresql_sandbox_discovery.sql"
+            ).read_text()
+            sandbox = re.search(
+                r"do \$sandbox_role\$\n.*?\n\$sandbox_role\$;",
+                sandbox_source,
+                re.DOTALL,
+            )
+            if sandbox is None:
+                raise ValueError("Exact sandbox role guard missing")
+            try:
+                for role, source_guard, reason in (
+                    (
+                        "owned_target_controller",
+                        body,
+                        "owned target controller role identity refused",
+                    ),
+                    (
+                        "axiom_sandbox_connector_operator",
+                        sandbox.group(),
+                        "sandbox operator role identity refused",
+                    ),
+                ):
+                    self.sql(database, f"grant {parent} to {role};")
+                    try:
+                        self.sql(database, source_guard, refused=True, reason=reason)
+                        counts = json.loads(
+                            self.sql(
+                                database,
+                                "select json_object_agg(r.rolname,(select count(*) from pg_catalog.pg_auth_members m where m.member=r.oid)) from pg_catalog.pg_roles r where r.rolname in('owned_target_controller','axiom_sandbox_connector_operator');",
+                            )
+                        )
+                        if counts.get(role) != 1:
+                            raise ValueError(
+                                "Source guard repaired outgoing membership"
+                            )
+                    finally:
+                        self.sql(database, f"revoke {parent} from {role};")
+                    self.sql(database, f"grant {role} to {caller};")
+                    try:
+                        self.sql(database, source_guard)
+                    finally:
+                        self.sql(database, f"revoke {role} from {caller};")
+            finally:
+                self.sql(database, f"drop role {caller}; drop role {parent};")
             self.sql(database, body)
         finally:
             for database in reversed(self.databases):
@@ -145,6 +206,11 @@ class Fixture:
                     "owned166RoleGuard": {
                         "databases": 2,
                         "unsafeProfilesRefused": len(FLAGS),
+                        "outgoingMembershipRefusedWithoutRepair": [
+                            "owned_target_controller",
+                            "axiom_sandbox_connector_operator",
+                        ],
+                        "incomingMembershipAllowed": True,
                         "unsafeRolesNotAutoRepaired": True,
                         "fixtureDatabasesRemoved": True,
                     }

@@ -14,7 +14,8 @@ begin
  if not exists(select 1 from pg_catalog.pg_roles
   where rolname='axiom_sandbox_connector_operator'
    and not rolcanlogin and not rolinherit and not rolsuper and not rolcreatedb
-   and not rolcreaterole and not rolreplication and not rolbypassrls) then
+   and not rolcreaterole and not rolreplication and not rolbypassrls
+   and not exists(select 1 from pg_catalog.pg_auth_members membership where membership.member=pg_roles.oid)) then
   raise exception using errcode='42501',message='sandbox operator role identity refused';
  end if;
 end
