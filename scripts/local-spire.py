@@ -63,7 +63,7 @@ ROLES = {
     "local-key-service": (20101, f"spiffe://{TRUST_DOMAIN}/service/local-key-service"),
     "producer": (20102, f"spiffe://{TRUST_DOMAIN}/service/assessment-dispatch-producer"),
     "controller": (20103, f"spiffe://{TRUST_DOMAIN}/controller/assessment"),
-    "parikshan": (20000, f"spiffe://{TRUST_DOMAIN}/agent/parikshan"),
+    "parikshan": (20003, f"spiffe://{TRUST_DOMAIN}/agent/parikshan"),
 }
 
 SERVER_CONF = f"""server {{
@@ -232,6 +232,29 @@ def register() -> None:
         print(f"{role}: created ({spiffe_id}, unix uid {uid})")
 
 
+def migrate_parikshan_uid() -> None:
+    """Explicit reviewed correction of the old local UID selector only."""
+    parent = node_id()
+    spiffe_id = ROLES["parikshan"][1]
+    wanted_path = spiffe_id.split(TRUST_DOMAIN, 1)[1]
+    parent_path = parent.split(TRUST_DOMAIN, 1)[1]
+    matching = [entry for entry in entries() if entry["spiffe_id"]["path"] == wanted_path and entry["parent_id"]["path"] == parent_path]
+    if len(matching) != 1:
+        raise RuntimeError("Expected exactly one retained parikshan entry")
+    entry = matching[0]
+    selectors = {(item["type"], item["value"]) for item in entry["selectors"]}
+    if selectors == {("unix", "uid:20003")}:
+        print("parikshan: dedicated worker selector already correct")
+        return
+    if selectors != {("unix", "uid:20000")} or not isinstance(entry.get("id"), str) or not entry["id"]:
+        raise RuntimeError("Unexpected parikshan selector; explicit review required")
+    run(["docker", "exec", NAME, "spire-server", "entry", "update", "-socketPath", SERVER_SOCKET, "-entryID", entry["id"], "-parentID", parent, "-spiffeID", spiffe_id, "-selector", "unix:uid:20003", "-x509SVIDTTL", "3600", "-jwtSVIDTTL", "300"])
+    fresh = [item for item in entries() if item.get("id") == entry["id"]]
+    if len(fresh) != 1 or {(item["type"], item["value"]) for item in fresh[0]["selectors"]} != {("unix", "uid:20003")}:
+        raise RuntimeError("Worker selector update unconfirmed; inspect the retained entry")
+    print("parikshan: reviewed dedicated worker UID selector updated")
+
+
 def status() -> None:
     state = run(["docker", "inspect", NAME, "--format", "{{.State.Status}}"], check=False)
     print(f"{NAME}: {state.stdout.strip() or 'absent'}")
@@ -251,7 +274,7 @@ def down() -> None:
 
 
 if __name__ == "__main__":
-    actions = {"up": up, "register": register, "status": status, "down": down}
+    actions = {"up": up, "register": register, "status": status, "down": down, "migrate-parikshan-uid": migrate_parikshan_uid}
     if len(sys.argv) != 2 or sys.argv[1] not in actions:
         raise SystemExit(__doc__)
     actions[sys.argv[1]]()

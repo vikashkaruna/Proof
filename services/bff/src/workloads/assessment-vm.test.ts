@@ -626,14 +626,23 @@ it('composes the local co-located controller without scheduler identity, local c
 it('accepts plain HTTP backends only for the local controller and only on this machine or network', async () => {
   const f = await protectedFile();
   await writeFile(f.filename, JSON.stringify(backendCredential()));
-  for (const url of ['http://127.0.0.1:54321', 'http://supabase_kong_axiom-owner-test:8000']) {
+  for (const url of [
+    'http://127.0.0.1:54321',
+    'http://supabase_kong_axiom-owner-test:8000',
+    'http://host.docker.internal:57121',
+  ]) {
     const env = { ...backendEnvironment, SUPABASE_URL: url };
     await expect(controllerBackendCredentials(f.filename, env, tenant)).rejects.toThrow();
     expect(
       (await controllerBackendCredentials(f.filename, env, tenant, { localHttp: true })).url,
     ).toBe(url);
   }
-  for (const url of ['http://db.example.test', 'http://user:pw@127.0.0.1', 'ftp://127.0.0.1']) {
+  for (const url of [
+    'http://db.example.test',
+    'http://host.docker.internal.evil.test:57121',
+    'http://user:pw@127.0.0.1',
+    'ftp://127.0.0.1',
+  ]) {
     await expect(
       controllerBackendCredentials(
         f.filename,
