@@ -146,9 +146,37 @@ end $$;
 create function owned_synthetic.deployment_operation_sha256(t uuid,a uuid,r uuid,op uuid,intent jsonb) returns text
 language sql immutable set search_path='' as $$select owned_synthetic.snapshot_sha256(jsonb_build_object(
  'domain','axiom.owned-synthetic.deployment-operation.v1','tenantId',t,'actorId',a,'requestId',r,'operationKey',op,'intent',intent))$$;
+-- Private current-human-source check shared by service transport callbacks.
+-- It has no EXECUTE grants; public human RPCs retain their transport role gate.
+create function owned_synthetic.deployment_actor_authority(t uuid,a uuid,s uuid) returns void
+language plpgsql security definer set search_path='' set lock_timeout='5s' as $$
+begin
+ if t is null or a is null or s is null
+ then raise exception 'owned human authority refused' using errcode='42501';end if;
+ perform 1 from public.tenants where id=t for share;
+ if not found then raise exception 'owned human tenant refused' using errcode='42501';end if;
+ -- Match both existing PLAN_CREATE and PLAN_EXECUTE capabilities. Internal
+ -- employment and the analyst/reviewer/approver roles confer no write source.
+ -- A protected live founder designation grants cross-company access even
+ -- when derived membership is absent. Lock the actual source of authority.
+ perform 1 from public.platform_founders f join public.users u on u.id=f.user_id
+ where f.user_id=a and f.revoked_at is null and u.is_axiom_internal for share of f,u;
+ if not found then
+  perform 1 from public.tenant_users m join public.users u on u.id=m.user_id
+  where m.tenant_id=t and m.user_id=a and m.role in('owner','admin') for share of m,u;
+  if not found then raise exception 'owned human membership refused' using errcode='42501';end if;
+ end if;
+ perform public.assert_mfa_recovery_session_actor(a,s);
+ perform 1 from auth.sessions where id=s and user_id=a and(not_after is null or not_after>clock_timestamp()) for share;
+ if not found then raise exception 'owned human session refused' using errcode='42501';end if;
+ perform 1 from public.mfa_session_attestations m join public.user_mfa_factors f on f.id=m.factor_id and f.user_id=m.user_id
+ where m.user_id=a and m.session_id=s::text and m.revoked_at is null and m.expires_at>clock_timestamp()
+ and f.factor_type='totp' and f.status='active' and f.revoked_at is null for share of m,f;
+ if not found then raise exception 'owned human MFA refused' using errcode='42501';end if;
+end $$;
 create function owned_synthetic.deployment_founder(t uuid,a uuid,s uuid) returns void
 language plpgsql security definer set search_path='' as $$begin
- perform owned_synthetic.human_authority(t,a,s);
+ perform owned_synthetic.deployment_actor_authority(t,a,s);
  perform 1 from public.platform_founders f join public.users u on u.id=f.user_id
  where f.user_id=a and f.revoked_at is null and u.is_axiom_internal for share of f,u;
  if not found then raise exception 'owned deployment founder required' using errcode='42501';end if;
@@ -617,7 +645,7 @@ begin
  perform pg_advisory_xact_lock_shared(hashtextextended(task.tenant_id::text,47));
  perform owned_synthetic.deployment_unfenced(task.tenant_id,task.actor_id,task.request_id,'preflight',task.id);
  select * into strict r from owned_synthetic.deployment_requests where(tenant_id,id)=(task.tenant_id,task.request_id) for share;
- perform owned_synthetic.human_authority(task.tenant_id,task.actor_id,task.session_id);
+ perform owned_synthetic.deployment_actor_authority(task.tenant_id,task.actor_id,task.session_id);
  perform owned_synthetic.deployment_live_source(r);
  select * into strict h from owned_synthetic.deployment_heads where request_id=r.id for share;
  if task.expires_at<=clock_timestamp() or h.state<>'requested' or h.preflight_key is distinct from task.id
