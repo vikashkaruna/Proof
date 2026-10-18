@@ -176,6 +176,7 @@ export function createApp(
     '/v1/plans/owned-synthetic',
     '/v1/plans/owned-synthetic/cancel',
     '/v1/plans/owned-synthetic/outcome',
+    '/v1/plans/owned-synthetic/observe-effect',
   ])
     app.use(path, boundedJsonBody(16384));
   app.use('/v1/engagements', boundedJsonBody(4096));

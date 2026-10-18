@@ -104,7 +104,7 @@ it.each([
   },
 );
 
-it.each(['', '/cancel', '/outcome'])(
+it.each(['', '/cancel', '/outcome', '/observe-effect'])(
   'bounds owned original workflow stream%s before arrayBuffer or upstream dispatch',
   async (suffix) => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));

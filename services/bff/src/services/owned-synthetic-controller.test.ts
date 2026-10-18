@@ -139,3 +139,22 @@ it('source listing and recovery use only bounded known human RPCs, never target 
   ]);
   expect(f.target).not.toHaveBeenCalled();
 });
+
+it('effect observation uses current human authority RPC only, never an execution token or target credential', async () => {
+  const f = fixture();
+  const request = { operationKey: id(4), planId: id(10), actionId: id(11), batchId: id(12) };
+  await f.deps.observeEffect?.(context, request);
+  expect(f.calls.map((c) => [c.role, c.name])).toEqual([
+    ['human_action_writer', 'observe_owned_execution_effect'],
+  ]);
+  expect(f.calls[0]?.args).toEqual({
+    p_tenant_id: id(1),
+    p_actor_id: id(2),
+    p_session_id: id(3),
+    p_operation_key: id(4),
+    p_plan_id: id(10),
+    p_action_id: id(11),
+    p_batch_id: id(12),
+  });
+  expect(f.target).not.toHaveBeenCalled();
+});

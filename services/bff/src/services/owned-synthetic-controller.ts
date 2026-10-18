@@ -94,6 +94,14 @@ export function createOwnedSyntheticController(
     isKilled: config.isKilled,
     planPorts,
     cancellationPorts,
+    observeEffect: async (context, request) =>
+      humanRpc('observe_owned_execution_effect', {
+        ...authArgs(context),
+        p_operation_key: request.operationKey,
+        p_plan_id: request.planId,
+        p_action_id: request.actionId,
+        p_batch_id: request.batchId,
+      }),
     readTargets: async (context, engagementId) =>
       humanRpc('read_owned_human_targets', { ...authArgs(context), p_engagement_id: engagementId }),
     readOriginalOutcome: async (context, operationKey, requestHash) =>
