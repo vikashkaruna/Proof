@@ -63,7 +63,8 @@ class RenewalTests(unittest.TestCase):
             "tenants": ["kosha"],
             "runtimeBindings": {
                 "peers": [
-                    {"kind": "key", "tenant": "kosha", "image": "sha256:" + "c" * 64}
+                    {"kind": kind, "tenant": "kosha", "image": "sha256:" + "c" * 64}
+                    for kind in ("key", "controller", "scheduler")
                 ]
             },
             "sources": {source: renewal.digest((ROOT / source).read_bytes())},
@@ -80,6 +81,16 @@ class RenewalTests(unittest.TestCase):
         }
         for component in ("custody", "controller"):
             (base / component).mkdir(mode=0o700)
+        (base / "controller/kosha").mkdir(mode=0o700)
+        renewal.write_private(
+            base / "controller/kosha/runtime.json",
+            json.dumps(
+                {
+                    "controllerImage": "sha256:" + "c" * 64,
+                    "schedulerImage": "sha256:" + "c" * 64,
+                }
+            ).encode(),
+        )
         raw = json.dumps(config).encode()
         renewal.write_private(base / "config.json", raw)
         renewal.write_private(base / "renewal.lock", b"")
@@ -111,6 +122,53 @@ class RenewalTests(unittest.TestCase):
             state = json.loads(renewal.read_private(base / "status.json"))
             self.assertEqual([item["ok"] for item in state["outcomes"]], [False, True])
             self.assertEqual((base / "status.json").stat().st_mode & 0o777, 0o600)
+
+    def test_runtime_image_drift_refuses_controller_helper_before_any_restart(self):
+        for field in ("controllerImage", "schedulerImage"):
+            with tempfile.TemporaryDirectory() as temp:
+                base = Path(temp).resolve()
+                _config, record, sha = self.fixture(base)
+                runtime = base / "controller/kosha/runtime.json"
+                value = json.loads(runtime.read_bytes())
+                value[field] = "sha256:" + "d" * 64
+                runtime.write_text(json.dumps(value))
+                with (
+                    patch.object(renewal, "unexpired", return_value=True),
+                    patch.object(renewal, "run", return_value=0) as command,
+                ):
+                    self.assertEqual(renewal.once(record, sha), 1)
+                self.assertEqual(command.call_count, 1)
+                self.assertIn(
+                    "local-custody-credentials.py", command.call_args.args[0][2]
+                )
+                status = json.loads((base / "status.json").read_bytes())
+                self.assertTrue(
+                    status["outcomes"][1]["runtimeConfigurationUnconfirmed"]
+                )
+
+    def test_runtime_pin_guard_rejects_missing_duplicate_and_unprotected_metadata(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp).resolve()
+            config, _, _ = self.fixture(base)
+            renewal.validate_runtime_images(config, "kosha")
+            runtime = base / "controller/kosha/runtime.json"
+            runtime.chmod(0o644)
+            with self.assertRaises(ValueError):
+                renewal.validate_runtime_images(config, "kosha")
+            runtime.chmod(0o600)
+            peers = config["runtimeBindings"]["peers"]
+            config["runtimeBindings"]["peers"] = peers[:-1]
+            with self.assertRaises(ValueError):
+                renewal.validate_runtime_images(config, "kosha")
+            config["runtimeBindings"]["peers"] = peers + [peers[-1]]
+            with self.assertRaises(ValueError):
+                renewal.validate_runtime_images(config, "kosha")
+            runtime.write_text("[]")
+            with self.assertRaises(TypeError):
+                renewal.validate_runtime_images(config, "kosha")
+            runtime.unlink()
+            with self.assertRaises(OSError):
+                renewal.validate_runtime_images(config, "kosha")
 
     def test_overlap_skips_entire_cycle(self):
         with tempfile.TemporaryDirectory() as temp:

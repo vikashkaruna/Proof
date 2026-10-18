@@ -210,6 +210,16 @@ class NamespaceTests(unittest.TestCase):
         self.assertIn("stage", commands[2])
         self.assertIn(self.peer["image"], commands[2])
 
+    def test_runtime_image_drift_refuses_repair_before_stop(self):
+        for kind in ("controller", "scheduler"):
+            self.peer.update(kind=kind, tenant="kosha")
+            with patch.object(
+                m, "validate_runtime_images", side_effect=ValueError("drift")
+            ):
+                result, calls = self.reconciliation()
+            self.assertFalse(calls)
+            self.assertTrue(result[0]["runtimeConfigurationUnconfirmed"])
+
     def test_current_namespace_does_not_restart(self):
         result, calls = self.reconciliation(fresh=True)
         self.assertEqual((result, calls), ([], []))

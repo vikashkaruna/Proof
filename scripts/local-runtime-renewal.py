@@ -370,6 +370,30 @@ def worker_idle_state(config: dict) -> str:
         return "unknown"
 
 
+def validate_runtime_images(config: dict, alias: str) -> None:
+    """Refuse retained helper configuration drift before any stop/renewal."""
+    runtime = json.loads(
+        read_private(
+            Path(config["environment"]["AXIOM_LOCAL_CONTROLLER_DIR"])
+            / alias
+            / "runtime.json"
+        )
+    )
+    if not isinstance(runtime, dict):
+        raise TypeError("Retained runtime object required")
+    for kind, field in (
+        ("controller", "controllerImage"),
+        ("scheduler", "schedulerImage"),
+    ):
+        pins = [
+            peer["image"]
+            for peer in config["runtimeBindings"]["peers"]
+            if peer["kind"] == kind and peer.get("tenant") == alias
+        ]
+        if len(pins) != 1 or runtime.get(field) != pins[0]:
+            raise ValueError("Retained runtime image differs from reviewed peer pin")
+
+
 def repair_command(config: dict, peer: dict, action: str) -> list[str]:
     root = Path(config["workspace"]) / "scripts"
     prefix = [config["python"], "-I"]
@@ -446,6 +470,12 @@ def reconcile_namespaces(config: dict) -> list[dict]:
         }
         outcomes.append(outcome)
         try:
+            if peer["kind"] in ("controller", "scheduler"):
+                try:
+                    validate_runtime_images(config, peer["tenant"])
+                except (OSError, ValueError, TypeError, KeyError):
+                    outcome["runtimeConfigurationUnconfirmed"] = True
+                    raise
             idle = worker_idle_state(config)
             if idle != "idle":
                 outcome.update(deferredForWorkers=True, workerInventory=idle)
@@ -613,6 +643,19 @@ def once(record: Path, expected: str) -> int:
                             }
                         )
                         continue
+                    if component == "controller":
+                        try:
+                            validate_runtime_images(config, alias)
+                        except (OSError, ValueError, TypeError, KeyError):
+                            outcomes.append(
+                                {
+                                    "tenant": alias,
+                                    "component": component,
+                                    "ok": False,
+                                    "runtimeConfigurationUnconfirmed": True,
+                                }
+                            )
+                            continue
                     result = run(command, env=config["environment"], timeout=420)
                     outcomes.append(
                         {"tenant": alias, "component": component, "ok": result == 0}
