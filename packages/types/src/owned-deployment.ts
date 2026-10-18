@@ -370,6 +370,7 @@ export const ownedDeploymentOperationReadback = z
             fence.tenantId !== value.tenantId ||
             fence.actorId !== value.actorId ||
             fence.operationKey !== value.operationKey ||
+            fence.fenceReceiptId !== value.receiptId ||
             value.intent?.phase !== 'fence' ||
             ownedOperationCanonical(fence.target) !==
               ownedOperationCanonical(value.intent.request.target)

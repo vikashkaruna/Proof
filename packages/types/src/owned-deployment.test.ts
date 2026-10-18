@@ -238,3 +238,40 @@ it('allows explicit no-effect server fencing while refusing installer cancellati
     }).success,
   ).toBe(false);
 });
+
+it('binds recovered fence receipt identity to its outer recorded operation receipt', () => {
+  const operationKey = '89110000-0000-4000-8000-000000000002';
+  const request = {
+    operationKey,
+    target: { phase: 'decision', operationKey: id, canonicalRequestHash: hash },
+    reason: 'expired',
+  };
+  const receipt = {
+    requestId: id,
+    tenantId: id,
+    actorId: id,
+    operationKey,
+    target: request.target,
+    disposition: 'fenced_no_mutation',
+    previousState: 'expired_decision',
+    requiresPreflight: true,
+    fenceReceiptId: '8',
+  };
+  const data = {
+    requestId: id,
+    tenantId: id,
+    actorId: id,
+    operationKey,
+    phase: 'fence',
+    outcome: 'recorded',
+    canonicalRequestHash: hash,
+    intent: { phase: 'fence', request },
+    receiptId: '8',
+    result: null,
+    phaseResult: { phase: 'fence', receipt },
+  };
+  expect(ownedDeploymentOperationReadback.safeParse({ data }).success).toBe(true);
+  expect(
+    ownedDeploymentOperationReadback.safeParse({ data: { ...data, receiptId: '9' } }).success,
+  ).toBe(false);
+});
