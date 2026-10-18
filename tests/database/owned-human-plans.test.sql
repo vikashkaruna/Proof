@@ -54,6 +54,14 @@ select pg_temp.ok(public.verify_owned_human_plan_authority(pg_temp.pg_id(1),pg_t
 select pg_temp.human167_refused('select public.verify_owned_human_plan_authority(pg_temp.pg_id(1),pg_temp.id(2),pg_temp.id(102))');
 reset role;
 select public.designate_platform_founder(pg_temp.id(2),'synthetic native fixture','Explicit disposable founder authority fixture');
+-- Fault-inject missing derived membership in this disposable transaction.
+-- The protected designation, not that cached row, must remain authoritative.
+select set_config('axiom.platform_founder_sync','on',true);
+delete from public.tenant_users where tenant_id=pg_temp.pg_id(2) and user_id=pg_temp.id(2) and membership_source='platform_founder';
+select set_config('axiom.platform_founder_sync','off',true);
+select pg_temp.ok(not exists(select 1 from public.tenant_users where tenant_id=pg_temp.pg_id(2) and user_id=pg_temp.id(2)),'fixture actually has no cross-company membership');
+set local role human_action_writer;
+select pg_temp.ok(public.verify_owned_human_plan_authority(pg_temp.pg_id(2),pg_temp.id(2),pg_temp.id(102))='{"verified":true}','live founder accesses company without membership');
 set local role human_action_writer;
 select pg_temp.ok(public.verify_owned_human_plan_authority(pg_temp.pg_id(1),pg_temp.id(2),pg_temp.id(102))='{"verified":true}','live designated internal founder accepted');
 select pg_temp.ok(jsonb_array_length(public.read_owned_human_targets(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),pg_temp.pg_id(170))->'targets')=4,'normal owner target list returns enrolled synthetic resources');

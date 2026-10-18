@@ -39,12 +39,14 @@ begin
  if not found then raise exception 'owned human tenant refused' using errcode='42501';end if;
  -- Match both existing PLAN_CREATE and PLAN_EXECUTE capabilities. Internal
  -- employment and the analyst/reviewer/approver roles confer no write source.
- perform 1 from public.tenant_users m join public.users u on u.id=m.user_id
- where m.tenant_id=t and m.user_id=a and(m.role in('owner','admin')
- or(m.role='founder' and u.is_axiom_internal and public.is_live_platform_founder(a))) for share of m,u;
- if not found then raise exception 'owned human membership refused' using errcode='42501';end if;
- if public.is_live_platform_founder(a) then
-  perform 1 from public.platform_founders where user_id=a and revoked_at is null for share;
+ -- A protected live founder designation grants cross-company access even
+ -- when derived membership is absent. Lock the actual source of authority.
+ perform 1 from public.platform_founders f join public.users u on u.id=f.user_id
+ where f.user_id=a and f.revoked_at is null and u.is_axiom_internal for share of f,u;
+ if not found then
+  perform 1 from public.tenant_users m join public.users u on u.id=m.user_id
+  where m.tenant_id=t and m.user_id=a and m.role in('owner','admin') for share of m,u;
+  if not found then raise exception 'owned human membership refused' using errcode='42501';end if;
  end if;
  perform public.assert_mfa_recovery_session_actor(a,s);
  perform 1 from auth.sessions where id=s and user_id=a and(not_after is null or not_after>clock_timestamp()) for share;
