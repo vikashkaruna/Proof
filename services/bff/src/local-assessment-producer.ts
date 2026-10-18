@@ -1,3 +1,4 @@
+import { requireLocalX509Material } from './workloads/local-x509-preflight.js';
 import { pathToFileURL } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { decodeJwt } from 'jose';
@@ -98,6 +99,11 @@ export async function prepareLocalProducer(args: string[], env: NodeJS.ProcessEn
     const db = client(backend.serviceKey);
     const writer = client(backend.humanWriterKey);
     const producer = await composeAssessmentProducer(config.producer, db, { writer: () => writer });
+    if (args[0] === '--check')
+      for (const tenant of config.producer.tenants) {
+        if (tenant.keys.provider !== 'local') throw new Error();
+        await requireLocalX509Material(tenant.keys.workload, 'client');
+      }
     return {
       mode: args[0] as '--check' | '--serve',
       serve: () => startAssessmentProducerSocket({ ...config.socket, producer }),

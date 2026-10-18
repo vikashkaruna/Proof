@@ -4,9 +4,11 @@ import { prepareLocalProducer } from './local-assessment-producer.js';
 const mocks = vi.hoisted(() => ({
   read: vi.fn<(filename: string) => Promise<Buffer>>(),
   compose: vi.fn(),
+  x509: vi.fn(),
   start: vi.fn(),
   client: vi.fn(),
 }));
+vi.mock('./workloads/local-x509-preflight.js', () => ({ requireLocalX509Material: mocks.x509 }));
 vi.mock('./workloads/controller-files.js', async (original) => ({
   ...(await original<typeof import('./workloads/controller-files.js')>()),
   readControllerFile: mocks.read,
@@ -93,6 +95,7 @@ beforeEach(() => {
   });
   mocks.client.mockReturnValueOnce(db).mockReturnValueOnce(writer);
   mocks.compose.mockResolvedValue(producer);
+  mocks.x509.mockResolvedValue(undefined);
   mocks.start.mockResolvedValue({ socketPath: '/run/assessment-producer/producer.sock' });
 });
 
@@ -105,6 +108,7 @@ describe('dedicated local producer entrypoint', () => {
         TSX_DISABLE_CACHE: '1',
       });
       expect(prepared.mode).toBe(mode);
+      expect(mocks.x509).toHaveBeenCalledTimes(mode === '--check' ? 1 : 0);
       expect(mocks.read.mock.calls).toEqual([[configFile], [backendFile]]);
       expect(mocks.client).toHaveBeenCalledTimes(2);
       expect(mocks.client.mock.calls[0]).toMatchObject([
@@ -133,6 +137,18 @@ describe('dedicated local producer entrypoint', () => {
     },
   );
 
+  it('refuses --check when live own X509 material is unavailable without starting the socket', async () => {
+    mocks.x509.mockRejectedValueOnce(new Error('material unavailable'));
+    await expect(prepareLocalProducer(['--check', configFile], {})).rejects.toThrow(
+      'startup refused',
+    );
+    expect(mocks.x509).toHaveBeenCalledWith(
+      configuration().producer.tenants[0]!.keys.workload,
+      'client',
+    );
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(backendBytes.every((value) => value === 0)).toBe(true);
+  });
   it.each([
     'SUPABASE_SERVICE_ROLE_KEY',
     'SUPABASE_HUMAN_ACTION_WRITER_KEY',

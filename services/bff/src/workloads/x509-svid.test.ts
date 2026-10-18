@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { prepareX509Material, X509Refused, type X509Material } from './x509-svid.js';
 import { WorkloadApiX509Source, type OpenX509Stream } from './workload-api-x509.js';
+import { requireLocalX509Material } from './local-x509-preflight.js';
 import {
   fetchX509Svid,
   fetchJwtBundles,
@@ -15,6 +16,17 @@ import {
 } from './workload-api-protocol.js';
 
 const grpc = vi.hoisted(() => ({ construct: vi.fn(), request: vi.fn(), close: vi.fn() }));
+vi.mock('./issuer-sync-health.js', () => ({
+  IssuerSyncHealth: class {
+    readonly domain: string;
+    constructor(nodeId: string) {
+      this.domain = new URL(nodeId).hostname;
+    }
+    async validUntil() {
+      return Date.now() + 10000;
+    }
+  },
+}));
 vi.mock('@grpc/grpc-js', () => ({
   Client: class {
     constructor(...args: unknown[]) {
@@ -322,6 +334,40 @@ describe('bounded material, explicitly not peer PKIX authority', () => {
         /^X509 workload material refused$/,
       );
   });
+});
+
+describe('read-only live own-material CLI preflight', () => {
+  it.each(['current', 'expired-only'])(
+    'qualifies %s material without peer/key/application operations and erases received keys',
+    async (kind) => {
+      const input = reply();
+      if (kind === 'expired-only') input.svids[0]!.bundle = der('expired-root');
+      const receivedKey = input.svids[0]!.x509SvidKey;
+      const stream = Object.assign(new EventEmitter(), { cancel: vi.fn() });
+      grpc.request.mockImplementationOnce(() => {
+        queueMicrotask(() => stream.emit('data', input));
+        return stream;
+      });
+      const checked = requireLocalX509Material(
+        {
+          socketPath: '/run/workload/api.sock',
+          spiffeId: identity,
+          issuerNodeId: 'spiffe://local.axiomproof.test/spire/agent/join_token/local',
+        },
+        'client',
+      );
+      if (kind === 'current') await expect(checked).resolves.toBeUndefined();
+      else await expect(checked).rejects.toThrow(X509Refused);
+      expect(receivedKey.every((byte) => byte === 0)).toBe(true);
+      expect(stream.cancel).toHaveBeenCalledOnce();
+      expect(grpc.construct).toHaveBeenLastCalledWith(
+        'unix:/run/workload/api.sock',
+        'owned-unix-only',
+        expect.any(Object),
+      );
+      expect(grpc.request.mock.lastCall?.[0]).toBe('/SpiffeWorkloadAPI/FetchX509SVID');
+    },
+  );
 });
 
 function sourceFixture(health = vi.fn(async (): Promise<number | null> => Date.now() + 10000)) {
