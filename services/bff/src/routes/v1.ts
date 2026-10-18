@@ -237,6 +237,9 @@ interface Deps {
   realtime: RealtimeService;
 }
 
+/** Runs still running/queued this long after starting are reported as stalled. */
+const ACTIVE_RUN_STALE_MS = 60 * 60_000;
+
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
   // Exact owned paths precede generic /plans/:id; middleware never escapes this source scope.
@@ -3946,7 +3949,23 @@ export function v1Routes(deps: Deps) {
         503,
       );
     }
-    return c.json({ active_runs: data });
+    // A run still 'running'/'queued' long after it started is stalled (e.g. a
+    // seeded or crashed run that never finished), not live work: report it
+    // separately so the UI never shows an agent as working on its account.
+    const cutoff = Date.now() - ACTIVE_RUN_STALE_MS;
+    const started = (run: { started_at?: unknown }) =>
+      typeof run.started_at === 'string' ? Date.parse(run.started_at) : NaN;
+    const active = data.filter((run) => !(started(run) < cutoff));
+    const stalled = data.filter((run) => started(run) < cutoff);
+    return c.json({
+      active_runs: active,
+      stalled_runs: stalled.map((run) => ({
+        id: run.id,
+        agent: run.agent,
+        status: run.status,
+        started_at: run.started_at,
+      })),
+    });
   });
 
   app.post('/agents/:name/run', async (c) => {

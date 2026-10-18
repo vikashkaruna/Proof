@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { UserRole } from '@axiom/types';
 import { createFakeDb, type FakeDb } from '../test/fake-postgrest.js';
@@ -24,6 +24,11 @@ let fake: FakeDb;
 beforeEach(() => {
   fake = createFakeDb();
   database.current = fake;
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-10-01T01:59:00Z'));
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 async function request() {
@@ -113,5 +118,47 @@ describe('GET /v1/agents/runs/active', () => {
     expect(await response.json()).toEqual({
       error: { code: 'query_failed', message: 'Unable to read active agent runs.' },
     });
+  });
+});
+
+describe('stalled runs', () => {
+  it('reports runs still running/queued over an hour after starting as stalled, not active', async () => {
+    vi.setSystemTime(new Date('2026-10-01T02:30:00Z'));
+    fake.seed('agent_runs', {
+      id: 'live',
+      tenant_id: TENANT,
+      agent: 'drishti',
+      status: 'running',
+      started_at: '2026-10-01T02:10:00Z',
+    });
+    fake.seed('agent_runs', {
+      id: 'seeded-forever',
+      tenant_id: TENANT,
+      agent: 'nazar',
+      status: 'running',
+      started_at: '2026-09-25T08:00:00Z',
+    });
+    fake.seed('agent_runs', {
+      id: 'queued-long-ago',
+      tenant_id: TENANT,
+      agent: 'drishti',
+      status: 'queued',
+      started_at: '2026-10-01T01:00:00Z',
+    });
+    const body = (await (await request()).json()) as {
+      active_runs: Array<{ id: string }>;
+      stalled_runs: Array<{ id: string; agent: string; status: string }>;
+    };
+    expect(body.active_runs.map((r) => r.id)).toEqual(['live']);
+    expect(body.stalled_runs.map((r) => r.id).sort()).toEqual([
+      'queued-long-ago',
+      'seeded-forever',
+    ]);
+    expect(Object.keys(body.stalled_runs[0]!).sort()).toEqual([
+      'agent',
+      'id',
+      'started_at',
+      'status',
+    ]);
   });
 });
