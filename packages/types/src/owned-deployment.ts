@@ -238,6 +238,75 @@ export const ownedDeploymentFailure = z
     error: z.object({ code: ownedDeploymentError, message: z.string().min(1).max(300) }).strict(),
   })
   .strict();
+/** Readback is exact to the durable request and phase. The same decision key
+ * is deliberately shared by challenge/verify/approve, with distinct phase rows.
+ * Canonical hashes cover {requestId, phase, operationKey, request}; verification
+ * includes challengeId, NEVER the TOTP/recovery code or a hash of that code. */
+export const ownedDeploymentOperationPhase = z.enum([
+  'request',
+  'preflight',
+  'challenge',
+  'verify',
+  'approve',
+  'install',
+]);
+const operationIntent = z.discriminatedUnion('phase', [
+  z.object({ phase: z.literal('request'), request: ownedDeploymentRequest }).strict(),
+  z.object({ phase: z.literal('preflight'), request: ownedDeploymentPreflight }).strict(),
+  z.object({ phase: z.literal('challenge'), request: ownedDeploymentDecision }).strict(),
+  z
+    .object({ phase: z.literal('verify'), request: ownedDeploymentDecision, challengeId: uuid })
+    .strict(),
+  z
+    .object({ phase: z.literal('approve'), request: ownedDeploymentDecision, challengeId: uuid })
+    .strict(),
+  z.object({ phase: z.literal('install'), request: ownedDeploymentInstall }).strict(),
+]);
+export const ownedDeploymentOperationReadback = z
+  .object({
+    data: z
+      .object({
+        requestId: uuid,
+        tenantId: uuid,
+        operationKey: uuid,
+        phase: ownedDeploymentOperationPhase,
+        outcome: z.enum(['not_recorded', 'recorded', 'unconfirmed']),
+        canonicalRequestHash: hash.nullable(),
+        intent: operationIntent.nullable(),
+        receiptId: receipt.nullable(),
+        result: ownedDeploymentSummary.nullable(),
+      })
+      .strict()
+      .superRefine((value, context) => {
+        if (value.outcome === 'not_recorded') {
+          if (value.canonicalRequestHash || value.intent || value.receiptId || value.result)
+            context.addIssue({
+              code: 'custom',
+              message: 'Absent operation must not claim a retained receipt',
+            });
+          return;
+        }
+        if (
+          !value.canonicalRequestHash ||
+          !value.intent ||
+          value.intent.phase !== value.phase ||
+          value.intent.request.operationKey !== value.operationKey
+        )
+          context.addIssue({
+            code: 'custom',
+            message: 'Exact retained phase and canonical intent required',
+          });
+        if (value.outcome === 'recorded' && !value.receiptId)
+          context.addIssue({ code: 'custom', message: 'Confirmed operation receipt required' });
+        if (
+          value.result &&
+          (value.result.requestId !== value.requestId || value.result.tenantId !== value.tenantId)
+        )
+          context.addIssue({ code: 'custom', message: 'Foreign operation result refused' });
+      }),
+  })
+  .strict();
+export type OwnedDeploymentOperationReadback = z.infer<typeof ownedDeploymentOperationReadback>;
 export type OwnedDeploymentSummary = z.infer<typeof ownedDeploymentSummary>;
 export type OwnedDeploymentDecision = z.infer<typeof ownedDeploymentDecision>;
 export type OwnedDeploymentRequest = z.infer<typeof ownedDeploymentRequest>;
@@ -247,6 +316,10 @@ export type OwnedDeploymentOptions = z.infer<typeof ownedDeploymentOptions>;
 /** Routes mounted under normal /v1 Auth/current-session/MFA/tenant middleware:
  * GET /owned-deployments, /owned-deployments/:id,
  *     /owned-deployments/options/:engagementId
+ * GET /owned-deployments/:id/operations/:phase/:operationKey
+ * requestId is the initial request operationKey. Exact readback authorizes
+ * current tenant/session before returning not_recorded or retained phase state.
+ * Lost approve replies recover the original receipt before MFA consume checks.
  * POST /owned-deployments                      request
  * POST /owned-deployments/:id/preflight         preflight
  * POST /owned-deployments/:id/{challenge,verify,approve} MFA envelope

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   OWNED_DEPLOYMENT_STEPS,
   ownedDeploymentRequest,
+  ownedDeploymentOperationReadback,
   ownedDeploymentSummary,
   type OwnedDeploymentSummary,
 } from './owned-deployment';
@@ -115,4 +116,54 @@ describe('owned deployment shared browser contract', () => {
       ).toBe(false);
     }
   });
+});
+
+it('requires exact phase/key-bound readback and never returns verification codes', () => {
+  const request = {
+    operationKey: id,
+    expectedManifestSha256: hash,
+    expectedPreflightSha256: hash,
+    expectedRollbackSha256: hash,
+    reason: 'Explicit synthetic fixture validation only',
+    acknowledgeOwnedSynthetic: true,
+  };
+  const value = {
+    data: {
+      requestId: id,
+      tenantId: id,
+      operationKey: id,
+      phase: 'approve',
+      outcome: 'recorded',
+      canonicalRequestHash: hash,
+      intent: { phase: 'approve', request, challengeId: id },
+      receiptId: '9',
+      result: fixture(),
+    },
+  };
+  expect(ownedDeploymentOperationReadback.safeParse(value).success).toBe(true);
+  expect(
+    ownedDeploymentOperationReadback.safeParse({ data: { ...value.data, phase: 'verify' } })
+      .success,
+  ).toBe(false);
+  expect(
+    ownedDeploymentOperationReadback.safeParse({
+      data: { ...value.data, intent: { ...value.data.intent, code: '123456' } },
+    }).success,
+  ).toBe(false);
+  expect(
+    ownedDeploymentOperationReadback.safeParse({ data: { ...value.data, outcome: 'not_recorded' } })
+      .success,
+  ).toBe(false);
+  expect(
+    ownedDeploymentOperationReadback.safeParse({
+      data: {
+        ...value.data,
+        outcome: 'not_recorded',
+        canonicalRequestHash: null,
+        intent: null,
+        receiptId: null,
+        result: null,
+      },
+    }).success,
+  ).toBe(true);
 });
