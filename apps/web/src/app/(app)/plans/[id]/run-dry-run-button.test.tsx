@@ -13,14 +13,12 @@ afterEach(() => {
 it('refreshes plan readiness for the actual dry-run array and summary response', async () => {
   vi.stubGlobal(
     'fetch',
-    vi
-      .fn()
-      .mockResolvedValue(
-        Response.json({
-          data: [{ actionId: 'a1', status: 'recorded', dryRunId: 'run1' }],
-          summary: { requested: 1, recorded: 1, refused: 0, unavailable: 0 },
-        }),
-      ),
+    vi.fn().mockResolvedValue(
+      Response.json({
+        data: [{ actionId: 'a1', status: 'recorded', dryRunId: 'run1' }],
+        summary: { requested: 1, recorded: 1, refused: 0, unavailable: 0 },
+      }),
+    ),
   );
   render(<RunDryRunButton planId="p1" tenantId="t1" />);
   fireEvent.click(screen.getByRole('button', { name: 'Run dry run' }));
