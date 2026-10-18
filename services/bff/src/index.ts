@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server';
 import { loadEnv } from '@axiom/config';
 import { loadAssessmentProducer } from './workloads/assessment-producer.js';
 import { loadAssessmentProducerSocket } from './workloads/assessment-producer-socket.js';
+import { loadSandboxPostgresql } from './connectors/postgresql-sandbox.js';
 import { createApp } from './app.js';
 import { createEvidenceIngestionWriter, createHumanActionWriter } from '@axiom/supabase';
 import { logger as rootLogger } from './lib/logger.js';
@@ -22,7 +23,11 @@ if (env.AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE && env.AXIOM_ASSESSMENT_PRODUCER_S
 const assessmentRequests = env.AXIOM_ASSESSMENT_PRODUCER_SOCKET_CONFIG_FILE
   ? await loadAssessmentProducerSocket(env.AXIOM_ASSESSMENT_PRODUCER_SOCKET_CONFIG_FILE)
   : await loadAssessmentProducer(env.AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE);
-const app = createApp({ assessmentRequests });
+const discovery = await loadSandboxPostgresql(
+  env.AXIOM_POSTGRESQL_SANDBOX_CONFIG_FILE,
+  env.ENVIRONMENT ?? '',
+);
+const app = createApp({ assessmentRequests, discovery });
 const port = Number(process.env.PORT || env.BFF_PORT);
 
 log.info({ port }, 'starting BFF');

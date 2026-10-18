@@ -370,3 +370,133 @@ describe('SqlDiscoveryGate (W4.6)', () => {
     expect(opened).toBe(0);
   });
 });
+
+describe('reviewed SQL endpoint binding fence', () => {
+  const binding = () => ({
+    tenantId: request.tenantId,
+    estateId: request.estateId,
+    connectorId: request.connectorId,
+    systemId: '77777777-7777-4777-8777-777777777777',
+    descriptorId: '41410000-0000-4000-8000-000000000001',
+    descriptorSha256: 'b'.repeat(64),
+    endpointRef: 'crm_sql',
+    targetBinding: 'production' as const,
+    connectorVersion: 1,
+  });
+  const bound = (pin = binding()) =>
+    new SqlDiscoveryGate(identity, sessions, { client: () => fake.client as never, binding: pin });
+  it.each([
+    { endpointRef: 'other_endpoint' },
+    { descriptorSha256: 'c'.repeat(64) },
+    { targetBinding: 'sandbox' },
+    { connectorVersion: 2 },
+    { systemId: '88888888-8888-4888-8888-888888888888' },
+  ])('refuses a mismatching first grant before opening a session: %j', async (delta) => {
+    answers = [grant(delta)];
+    await expect(bound().enumerate(request)).rejects.toMatchObject({ reason: 'no_grant' });
+    expect(opened).toBe(0);
+  });
+  it.each([
+    { endpointRef: 'other_endpoint' },
+    { descriptorSha256: 'c'.repeat(64) },
+    { targetBinding: 'sandbox' },
+    { connectorVersion: 2 },
+    { systemId: '88888888-8888-4888-8888-888888888888' },
+  ])('withholds results when the pinned binding changes before release: %j', async (delta) => {
+    answers = [grant(), grant(delta)];
+    await expect(bound().enumerate(request)).rejects.toMatchObject({ reason: 'grant_changed' });
+    expect(opened).toBe(1);
+  });
+  it.each(['tenantId', 'estateId', 'connectorId'] as const)(
+    'refuses a request outside configured%s before opening',
+    async (field) => {
+      await expect(
+        bound().enumerate({ ...request, [field]: '99999999-9999-4999-8999-999999999999' }),
+      ).rejects.toMatchObject({ reason: 'no_grant' });
+      expect(opened).toBe(0);
+    },
+  );
+  it('clones the reviewed pin so caller mutation cannot redirect an in-flight gate', async () => {
+    const pin = binding();
+    const service = bound(pin);
+    pin.endpointRef = 'other_endpoint';
+    await expect(service.enumerate(request)).resolves.toMatchObject({ records: expect.any(Array) });
+    expect(opened).toBe(1);
+  });
+});
+
+describe('PostgreSQL original deadline cancels stalled work', () => {
+  it('aborts a never-settling first grant lookup before any session opens', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    let settled = false;
+    let observedSignal: AbortSignal | undefined;
+    const pending = Object.assign(new Promise<never>(() => {}), {
+      abortSignal(signal: AbortSignal) {
+        observedSignal = signal;
+        return this;
+      },
+    });
+    const stalledClient = { rpc: () => pending };
+    const bounded = new SqlDiscoveryGate(identity, sessions, {
+      client: () => stalledClient as never,
+      now: () => Date.now(),
+    });
+    const operation = bounded.enumerate(request).catch(() => {
+      settled = true;
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(30001);
+      expect(settled).toBe(true);
+      expect(observedSignal?.aborted).toBe(true);
+      expect(opened).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      void operation;
+    }
+  });
+  it('closes a live session and stops its stalled read before returning an expiry refusal', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    let settled = false;
+    let active = false;
+    let ended = false;
+    let rejectRead: ((error: Error) => void) | undefined;
+    const open = async (): Promise<SqlSession> => ({
+      query: async (text) => {
+        if (text.includes('transaction_read_only'))
+          return { rows: [{ read_only: true, privileged: false, can_write: false }] };
+        if (text.includes('select n.nspname')) {
+          active = true;
+          return new Promise((_, reject) => {
+            rejectRead = reject;
+          });
+        }
+        return { rows: [] };
+      },
+      end: async () => {
+        active = false;
+        ended = true;
+        rejectRead?.(new Error('fixture transport closed'));
+      },
+    });
+    const bounded = new SqlDiscoveryGate(identity, open, {
+      client: () => fake.client as never,
+      now: () => Date.now(),
+    });
+    const operation = bounded.enumerate(request).catch(() => {
+      settled = true;
+      expect(active).toBe(false);
+      expect(ended).toBe(true);
+    });
+    try {
+      await vi.advanceTimersByTimeAsync(30001);
+      expect(settled).toBe(true);
+      expect(active).toBe(false);
+      expect(ended).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      void operation;
+    }
+  });
+});

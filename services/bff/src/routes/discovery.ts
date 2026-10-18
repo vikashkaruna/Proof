@@ -25,7 +25,7 @@ export function discoveryRoutes(service?: Pick<DiscoveryService, 'run'>) {
     )
       return c.json({ error: 'discovery_refused' }, 403);
     try {
-      return c.json({ data: await service.run(await c.req.json(), proof) });
+      return c.json({ data: await service.run(await c.req.json(), proof, c.req.raw.signal) });
     } catch {
       // Refusal reasons can describe grant state; the caller learns only refusal.
       return c.json({ error: 'discovery_refused' }, 403);
