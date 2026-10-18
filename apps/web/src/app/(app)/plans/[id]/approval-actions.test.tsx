@@ -147,7 +147,7 @@ it('spends a verified challenge on the exact selected scope, then exposes the se
       }),
     );
   vi.stubGlobal('fetch', fetcher);
-  render(<ApprovalActions {...props} canApprove canExecute />);
+  render(<ApprovalActions {...props} canApprove canReject canExecute />);
   fireEvent.click(screen.getByRole('button', { name: 'Approve 1 action' }));
   await waitFor(() => expect(screen.getByLabelText(/6-digit code/)).toBeTruthy());
   fireEvent.change(screen.getByLabelText(/6-digit code/), { target: { value: '123456' } });
@@ -167,6 +167,8 @@ it('spends a verified challenge on the exact selected scope, then exposes the se
     mfaChallengeId: 'challenge-1',
   });
   expect(refresh).toHaveBeenCalled();
+  expect(screen.queryByRole('button', { name: /^Approve/ })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Reject plan' })).toBeNull();
 });
 
 it('reports an ambiguous execution outcome without claiming acceptance', async () => {
@@ -344,4 +346,19 @@ it('keeps an approval request recoverable and sends nothing without secure rando
   fireEvent.click(screen.getByRole('button', { name: 'Approve 1 action' }));
   await screen.findByLabelText(/6-digit code/);
   expect(fetcher).toHaveBeenCalledOnce();
+});
+
+it('shows read-only reviewers where to inspect each action without offering selections', () => {
+  render(<ApprovalActions {...props} />);
+  expect(
+    screen
+      .getAllByRole('link', { name: 'View dry-run & rollback details' })[0]
+      ?.getAttribute('href'),
+  ).toBe('/plans/plan-1/actions/action-1');
+  expect(
+    screen
+      .getAllByRole('checkbox')
+      .filter((input) => input.id !== 'stop')
+      .every((input) => (input as HTMLInputElement).disabled),
+  ).toBe(true);
 });

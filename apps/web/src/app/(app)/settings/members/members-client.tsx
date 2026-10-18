@@ -1,4 +1,5 @@
 'use client';
+import { z } from 'zod';
 
 import { useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
@@ -222,7 +223,7 @@ export function MembersClient({
         <CardContent>
           <ul className="divide-y text-sm" data-testid="member-list">
             {members.map((m) => (
-              <li key={m.userId} className="py-2">
+              <li key={`${m.userId}:${m.approvalScopes.join(',')}`} className="py-2">
                 <div className="flex justify-between">
                   <span>{m.email}</span>
                   <span className="capitalize text-slate-600">{m.role.replace('_', ' ')}</span>
@@ -240,6 +241,18 @@ export function MembersClient({
                         method="PATCH"
                         body={(form) => ({ approvalScopes: parseScopes(form.get('scopes')) })}
                         label="Save scopes"
+                        validateResult={(result) => {
+                          const parsed = z
+                            .object({
+                              data: z.object({
+                                userId: z.literal(m.userId),
+                                approvalScopes: z.array(z.string()),
+                                changed: z.boolean(),
+                              }),
+                            })
+                            .safeParse(result);
+                          return parsed.success;
+                        }}
                       >
                         <Label htmlFor={`scopes-${m.userId}`} className="text-xs">
                           Change scopes for {m.email} (comma separated; empty for unrestricted)

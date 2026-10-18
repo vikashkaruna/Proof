@@ -17,6 +17,7 @@ const TENANT = 'fd5e0001-0000-4000-8000-000000000001';
 
 const state = vi.hoisted(() => ({
   role: 'approver' as string,
+  scopes: [] as string[],
   planStatus: 'approved',
   approvalStatus: 'approved',
   readiness: null as unknown,
@@ -44,7 +45,7 @@ vi.mock('@/lib/tenant-context', async () => {
       tenantId: TENANT,
       role: state.role,
       email: 'persona-approver@example.invalid',
-      approvalScopes: [],
+      approvalScopes: state.scopes,
       isAxiomInternal: false,
       supabase: {
         rpc: async () => ({ data: state.readiness, error: state.readinessError }),
@@ -132,6 +133,7 @@ async function render() {
 
 beforeEach(() => {
   state.role = 'approver';
+  state.scopes = [];
   state.planStatus = 'approved';
   state.approvalStatus = 'approved';
   state.readinessError = null;
@@ -221,4 +223,23 @@ it('offers a dry-run request to a plan author when an unapproved action is block
   state.approvalStatus = 'approved';
   state.readiness = readinessFor();
   expect((await render()).querySelector('[data-testid="run-dry-run"]')).toBeNull();
+});
+
+it('lets a scoped approver approve matching ready actions and refuses other action classes', async () => {
+  state.planStatus = 'review';
+  state.approvalStatus = 'awaiting_approval';
+  state.readiness = readinessFor({ ready: true, blockers: [] });
+  state.scopes = ['data.mask'];
+  let doc = await render();
+  expect(
+    [...doc.querySelectorAll('button')].some((b) => b.textContent === 'Approve 1 action'),
+  ).toBe(true);
+  state.scopes = ['identity.deprovision'];
+  doc = await render();
+  expect(doc.body.textContent).toContain('Outside your approval scope');
+  expect(
+    [...doc.querySelectorAll('input[type="checkbox"]')].filter(
+      (input) => !(input as HTMLInputElement).disabled && input.id !== 'stop',
+    ),
+  ).toHaveLength(0);
 });
