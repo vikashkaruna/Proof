@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { loadMonitoringOutcomes } from '@/lib/monitoring-outcomes';
 import { Capability, can } from '@axiom/types';
 import {
@@ -101,6 +102,11 @@ export default async function MonitoringPage() {
     routeCapability('/monitoring'),
   );
   const canManage = can(Capability.ESTATE_MANAGE, { role });
+  const scheduledReads =
+    role === 'owner' &&
+    process.env.AXIOM_SCHEDULED_POSTGRESQL_READ_ENABLED === 'true' &&
+    ['local', 'test'].includes(process.env.ENVIRONMENT ?? '') &&
+    (process.env.AXIOM_AUTH_MODE ?? 'strict') === 'strict';
 
   const [schedulesRes, driftRes, alertsRes] = await Promise.all([
     supabase
@@ -230,6 +236,13 @@ export default async function MonitoringPage() {
         />
       </StatGrid>
 
+      {scheduledReads && (
+        <p className="text-sm text-slate-600">
+          The observer outcomes below belong to the existing monitoring journal. Scheduled
+          PostgreSQL reads have separate approval and supervised fire receipts; open a schedule’s
+          read-only scope to review them.
+        </p>
+      )}
       {/* ─── Continuous Monitoring Alerts ─── */}
       <Card>
         <CardHeader>
@@ -329,7 +342,7 @@ export default async function MonitoringPage() {
                       Last recorded attempt
                     </th>
                     <th scope="col" className="px-3 py-2 font-medium">
-                      Latest retained outcome
+                      Legacy observer outcome
                     </th>
                     <th scope="col" className="px-3 py-2 font-medium">
                       Next run
@@ -342,7 +355,20 @@ export default async function MonitoringPage() {
                     const outcome = outcomeBySchedule.get(s.id);
                     return (
                       <tr key={s.id} className={isOverdue ? 'bg-ember-50/50' : undefined}>
-                        <td className="px-3 py-2 font-medium text-slate-700">{s.name}</td>
+                        <td className="px-3 py-2 font-medium text-slate-700">
+                          {s.name}
+                          {scheduledReads && s.kind === 'rediscovery' && (
+                            <>
+                              <br />
+                              <Link
+                                className="text-teal-700 underline"
+                                href={`/monitoring/${s.id}/read-access`}
+                              >
+                                Review read-only scope
+                              </Link>
+                            </>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-slate-600">
                           {s.estates?.name ?? s.estate_id.slice(0, 8)}
                         </td>

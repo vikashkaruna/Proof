@@ -125,6 +125,7 @@ export type MfaChallengePurpose =
   | 'catalogue_adoption'
   | 'local_custody_policy'
   | 'owned_synthetic_enrollment'
+  | 'monitoring_read_scope'
   | 'mfa_recovery';
 
 export interface ApprovalBinding {
@@ -244,6 +245,7 @@ export interface MfaStatus {
 const DATABASE_CLOCK_MFA_PURPOSES = {
   local_custody_policy: 'local_custody',
   owned_synthetic_enrollment: 'owned_deployment',
+  monitoring_read_scope: 'monitoring_read',
 } as const;
 function databaseClockPurpose(
   purpose: string,

@@ -13,6 +13,7 @@ import {
   composeVmAssessmentController,
   vmControllerConfiguration,
 } from './assessment-vm.js';
+import * as discoverySocket from './discovery-socket.js';
 import * as controllerIdentity from './controller-identity.js';
 import * as containerRuntime from './assessment-container.js';
 import { WorkloadApiJwtTrust } from './workload-api-trust.js';
@@ -613,6 +614,33 @@ it('composes the local co-located controller without scheduler identity, local c
   const ports = { localWrapper: (() => ({ wrap: vi.fn(), unwrap: vi.fn() })) as never };
   const service = await composeLocalAssessmentController(local, f.db, ports);
   expect(service.controller).toBeDefined();
+  expect(service.monitoring).toBeUndefined();
+  const check = vi.fn(async () => {});
+  const run = vi.fn(async () => ({
+    workerStatus: 'read_completed' as const,
+    cleanupConfirmed: true,
+  }));
+  vi.spyOn(discoverySocket, 'discoverySocketClient').mockReturnValue({ check, run });
+  const monitoring = {
+    socketPath: '/run/axiom-discovery/discovery.sock',
+    controllerUid: 20105,
+    socketGroup: 20112,
+  };
+  const enabled = await composeLocalAssessmentController({ ...local, monitoring }, f.db, ports);
+  expect(enabled.monitoring).toBeDefined();
+  expect(check).toHaveBeenCalledOnce();
+  check.mockRejectedValueOnce(Error('stale metadata'));
+  await expect(enabled.monitoring!.reserve()).rejects.toThrow('stale metadata');
+  expect(f.rpc).not.toHaveBeenCalled();
+  expect(run).not.toHaveBeenCalled();
+  for (const wrong of [
+    { ...monitoring, controllerUid: 20103 },
+    { ...monitoring, socketGroup: 20111 },
+    { ...monitoring, socketPath: '/tmp/untrusted.sock' },
+  ])
+    await expect(
+      composeLocalAssessmentController({ ...local, monitoring: wrong }, f.db, ports),
+    ).rejects.toThrow('Local assessment controller configuration refused');
   expect(service).not.toHaveProperty('identity');
   expect(f.from).not.toHaveBeenCalledWith('assessment_dispatch_key_policies');
   // Cloud keys and a scheduler block both belong to the VM entrypoint only.

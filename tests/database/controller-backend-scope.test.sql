@@ -38,6 +38,7 @@ select pg_temp.ok(not exists(select 1 from pg_proc p join pg_namespace n on n.oi
  -- Only this exact new overload is authorized; future same-name overloads
  -- remain inside the exhaustive refusal gate.
  and p.oid<>'public.claim_local_assessment_dispatch(uuid,uuid,uuid,text,text)'::regprocedure
+ and p.oid not in ('public.reserve_monitoring_read_dispatch(uuid)'::regprocedure,'public.read_monitoring_read_dispatch(uuid,uuid)'::regprocedure,'public.claim_monitoring_read_dispatch(uuid,uuid)'::regprocedure,'public.settle_monitoring_read_dispatch(uuid,uuid,uuid,text,boolean)'::regprocedure)
  and p.proname not in ('has_tenant_role','current_assessment_controller_tenant','read_workload_task','start_workload_assessment',
  'complete_workload_assessment','confirm_workload_assessment','claim_assessment_dispatch','reserve_assessment_schedules','acknowledge_assessment_schedule')),'no additional definer authority');
 reset role;

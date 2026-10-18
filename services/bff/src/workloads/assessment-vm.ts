@@ -28,6 +28,8 @@ import { issuerNodeId, IssuerSyncHealth, SyncedWorkloadTrust } from './issuer-sy
 import { WorkloadAuthenticator, SupabaseWorkloadRegistrationStore } from './registration.js';
 import { WorkloadTaskAuthority, SupabaseWorkloadTaskStore } from './tasks.js';
 import { GoogleSchedulerIdentity, schedulerIdentityConfiguration } from './scheduler-identity.js';
+import { MonitoringReadDispatch } from './monitoring-read-dispatch.js';
+import { discoverySocketClient } from './discovery-socket.js';
 import { localCustodyKeysConfiguration, localDispatchKeyWrapper } from './local-custody-client.js';
 
 export const vmControllerConfiguration = z
@@ -85,7 +87,17 @@ export async function composeVmAssessmentController(
  * authenticate the co-located scheduler. Everything else is the VM core. */
 export const localControllerConfiguration = vmControllerConfiguration
   .omit({ scheduler: true, keys: true })
-  .extend({ keys: localCustodyKeysConfiguration.extend({ workloadId: z.uuid() }).strict() })
+  .extend({
+    keys: localCustodyKeysConfiguration.extend({ workloadId: z.uuid() }).strict(),
+    monitoring: z
+      .object({
+        socketPath: z.literal('/run/axiom-discovery/discovery.sock'),
+        controllerUid: z.literal(20105),
+        socketGroup: z.literal(20112),
+      })
+      .strict()
+      .optional(),
+  })
   .strict();
 export async function composeLocalAssessmentController(
   configuration: unknown,
@@ -106,7 +118,9 @@ type ControllerPorts = {
   localWrapper?: typeof localDispatchKeyWrapper;
 };
 async function composeControllerCore(
-  config: Omit<z.output<typeof vmControllerConfiguration>, 'scheduler'>,
+  config: Omit<z.output<typeof vmControllerConfiguration>, 'scheduler'> & {
+    monitoring?: z.output<typeof localControllerConfiguration>['monitoring'];
+  },
   db: SupabaseClient,
   ports: ControllerPorts,
 ) {
@@ -203,5 +217,20 @@ async function composeControllerCore(
     tenantId: tenant,
     namespace: config.namespace,
   });
-  return { controller, scheduling };
+  let monitoring: MonitoringReadDispatch | undefined;
+  if (config.monitoring) {
+    if (keys.provider !== 'local')
+      throw new Error('Scheduled reads require local reviewed configuration');
+    const discovery = discoverySocketClient(config.monitoring);
+    await discovery.check();
+    monitoring = new MonitoringReadDispatch(db, tenant, discovery, async () => {
+      await health.requireFresh();
+      await requireControllerIdentity(
+        { socketPath: config.workloadSocket, trustDomain: config.trustDomain },
+        trust,
+      );
+      await discovery.check();
+    });
+  }
+  return { controller, scheduling, monitoring };
 }

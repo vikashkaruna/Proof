@@ -236,6 +236,60 @@ class LauncherTests(unittest.TestCase):
         self.assertNotIn("--add-host", args)
         self.assertIn("20111", args)
 
+    def test_scheduled_reads_default_off_and_mount_only_reviewed_socket_when_explicit(
+        self,
+    ):
+        self.assertNotIn("20112", launcher.controller_args("kosha", runtime(), "serve"))
+        self.assertNotIn(
+            "--monitoring-read-pump", launcher.scheduler_args("kosha", runtime())
+        )
+        approved = dict(runtime(), monitoringReadDispatch=True)
+        volume = {
+            "Name": "axiom-discovery-controller-socket",
+            "Driver": "local",
+            "Labels": {"axiom.purpose": "local-discovery-controller"},
+        }
+        with patch.object(
+            launcher, "run", return_value=SimpleNamespace(stdout=json.dumps([volume]))
+        ):
+            controller = launcher.controller_args("kosha", approved, "serve")
+        self.assertIn("20112", controller)
+        self.assertIn(
+            "type=volume,src=axiom-discovery-controller-socket,dst=/run/axiom-discovery,readonly",
+            controller,
+        )
+        scheduler = launcher.scheduler_args("kosha", approved)
+        self.assertIn("--monitoring-read-pump", scheduler)
+        self.assertNotIn("20112", scheduler)
+        self.assertNotIn("axiom-discovery-controller-socket", str(scheduler))
+
+    def test_missing_foreign_monitoring_socket_refuses_before_stop(self):
+        approved = dict(runtime(), monitoringReadDispatch=True)
+        for volume in (
+            [],
+            [{"Name": "foreign"}],
+            [
+                {
+                    "Name": "axiom-discovery-controller-socket",
+                    "Driver": "local",
+                    "Labels": {},
+                }
+            ],
+        ):
+            with (
+                patch.object(
+                    launcher,
+                    "run",
+                    return_value=SimpleNamespace(stdout=json.dumps(volume)),
+                ),
+                patch.object(launcher, "remove_owned") as remove,
+            ):
+                with self.assertRaises(ValueError):
+                    launcher.serve("kosha", approved, "serve")
+                remove.assert_not_called()
+        with self.assertRaises(TypeError):
+            launcher.validate_runtime(dict(runtime(), monitoringReadDispatch="true"))
+
     def test_scheduler_receives_no_backend_or_docker_credentials(self):
         args = launcher.scheduler_args("kosha", runtime())
         self.assertIn("20104:20104", args)

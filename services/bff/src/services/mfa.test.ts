@@ -652,6 +652,7 @@ describe('atomic activation and recovery set', () => {
 describe.each([
   { purpose: 'local_custody_policy', suffix: 'local_custody' },
   { purpose: 'owned_synthetic_enrollment', suffix: 'owned_deployment' },
+  { purpose: 'monitoring_read_scope', suffix: 'monitoring_read' },
 ] as const)('$purpose dedicated step-up', ({ purpose, suffix }) => {
   const binding = 'e'.repeat(64);
   let custodyDbNow: number | null;

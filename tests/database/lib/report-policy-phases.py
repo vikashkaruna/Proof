@@ -165,6 +165,8 @@ def plan(root: Path = ROOT) -> dict:
             {"owned-execution-binding.test.sql"},
             "owned_execution168_suite_required",
         ),
+        (170, {"owned-effect-observations.test.sql"}, "owned_effect170_suite_required"),
+        (171, {"scheduled-postgresql-reads.test.sql"}, "scheduled_read171_suite_required"),
     ):
         need(versions[-1] < minimum or suites <= set(files), code)
     return {

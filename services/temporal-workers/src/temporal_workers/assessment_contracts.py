@@ -57,10 +57,23 @@ class ScheduleAcknowledgement(ScheduleExecution):
     leaseId: UUID
 
 
+class MonitoringReadReference(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    tenantId: UUID
+    fireId: UUID
+
+
 def transport_payload(operation: str, payload: dict) -> dict:
     """Reject private/unknown fields before any socket or HTTPS transmission."""
     if operation in {"run", "reconcile"}:
         return JobReference.model_validate(payload).model_dump(mode="json")
+    if operation in {"monitoring/run", "monitoring/reconcile"}:
+        value = MonitoringReadReference.model_validate(payload)
+        if value.tenantId.int == 0 or value.fireId.int == 0:
+            raise ValueError("Monitoring reference refused")
+        return value.model_dump(mode="json")
+    if operation == "monitoring/poll" and type(payload) is dict and not payload:
+        return {}
     if operation == "scheduling/poll" and type(payload) is dict and not payload:
         return {}
     if operation == "scheduling/ack":

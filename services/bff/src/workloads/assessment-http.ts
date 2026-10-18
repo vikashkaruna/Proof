@@ -1,5 +1,10 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { z } from 'zod';
+import {
+  scheduledReadReference,
+  scheduledReadOutcome,
+  type MonitoringReadDispatch,
+} from './monitoring-read-dispatch.js';
 import type { AssessmentController } from './assessment-controller.js';
 import {
   type AssessmentScheduling,
@@ -11,6 +16,7 @@ import {
 export interface AssessmentEndpointOptions {
   controller: Pick<AssessmentController, 'run' | 'reconcile'>;
   scheduling?: Pick<AssessmentScheduling, 'reserve' | 'acknowledge'>;
+  monitoring?: Pick<MonitoringReadDispatch, 'reserve' | 'run' | 'reconcile'>;
   deadlineMs?: number;
 }
 export function assessmentDeadline(value?: number) {
@@ -95,6 +101,9 @@ export function assessmentRequestListener(
           '/assessment/reconcile',
           '/assessment/scheduling/poll',
           '/assessment/scheduling/ack',
+          '/assessment/monitoring/poll',
+          '/assessment/monitoring/run',
+          '/assessment/monitoring/reconcile',
         ].includes(request.url ?? '') ||
         request.headers['content-type'] !== 'application/json' ||
         request.headers['content-encoding']
@@ -111,7 +120,25 @@ export function assessmentRequestListener(
       }
       const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body));
       if (abort.signal.aborted || expiresAt <= Date.now()) throw new Error('Private request ended');
-      if (request.url === '/assessment/scheduling/poll') {
+      if (request.url?.startsWith('/assessment/monitoring/')) {
+        if (!options.monitoring) throw new Error('Scheduled reads unavailable');
+        if (request.url === '/assessment/monitoring/poll') {
+          z.object({}).strict().parse(value);
+          const result = z
+            .object({ fires: z.array(scheduledReadReference).max(1) })
+            .strict()
+            .parse(await options.monitoring.reserve(abort.signal));
+          if (!abort.signal.aborted) send(response, 200, result);
+        } else {
+          const reference = scheduledReadReference.parse(value);
+          const result = scheduledReadOutcome.parse(
+            await (request.url === '/assessment/monitoring/run'
+              ? options.monitoring.run(reference, abort.signal)
+              : options.monitoring.reconcile(reference, abort.signal)),
+          );
+          if (!abort.signal.aborted) send(response, 200, result);
+        }
+      } else if (request.url === '/assessment/scheduling/poll') {
         z.object({}).strict().parse(value);
         if (!options.scheduling) throw new Error('Scheduling unavailable');
         const result = z

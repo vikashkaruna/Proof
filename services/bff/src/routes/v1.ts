@@ -1,3 +1,4 @@
+import { monitoringReadScopeRoutes } from './monitoring-read-scopes.js';
 import {
   postgresqlDiscoveryRoutes,
   type DiscoveryRequestController,
@@ -274,6 +275,10 @@ export function v1Routes(deps: Deps) {
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', postgresqlDiscoveryRoutes(deps.discoveryController));
+  app.route(
+    '/',
+    monitoringReadScopeRoutes({ mfa: deps.mfa, controller: deps.discoveryController }),
+  );
   app.route('/', catalogueReferenceRoutes());
   app.route('/', catalogueVersionRoutes({ mfa: deps.mfa }));
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
