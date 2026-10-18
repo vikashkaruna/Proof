@@ -3,6 +3,7 @@ import {
   OWNED_DEPLOYMENT_STEPS,
   ownedDeploymentRequest,
   ownedDeploymentOperationReadback,
+  ownedDeploymentOperationCanonicalJSON,
   ownedDeploymentSummary,
   type OwnedDeploymentSummary,
 } from './owned-deployment';
@@ -131,6 +132,7 @@ it('requires exact phase/key-bound readback and never returns verification codes
     data: {
       requestId: id,
       tenantId: id,
+      actorId: id,
       operationKey: id,
       phase: 'approve',
       outcome: 'recorded',
@@ -138,6 +140,7 @@ it('requires exact phase/key-bound readback and never returns verification codes
       intent: { phase: 'approve', request, challengeId: id },
       receiptId: '9',
       result: fixture(),
+      phaseResult: null,
     },
   };
   expect(ownedDeploymentOperationReadback.safeParse(value).success).toBe(true);
@@ -166,4 +169,33 @@ it('requires exact phase/key-bound readback and never returns verification codes
       },
     }).success,
   ).toBe(true);
+});
+
+it('canonical operation codec is independently stable and phase/actor bound', () => {
+  const request = {
+    operationKey: id,
+    engagementId: id,
+    connectorId: id,
+    manifestSha256: hash,
+    reason: 'Explicit synthetic fixture validation only',
+    acknowledgeOwnedSynthetic: true,
+  };
+  const value = {
+    tenantId: id,
+    actorId: id,
+    requestId: id,
+    operationKey: id,
+    intent: { phase: 'request', request },
+  };
+  const encoded = ownedDeploymentOperationCanonicalJSON(value);
+  expect(encoded).toBe(
+    ownedDeploymentOperationCanonicalJSON({ ...value, intent: { request, phase: 'request' } }),
+  );
+  expect(encoded.startsWith('{"actorId":')).toBe(true);
+  expect(
+    ownedDeploymentOperationCanonicalJSON({
+      ...value,
+      actorId: '89110000-0000-4000-8000-000000000002',
+    }),
+  ).not.toBe(encoded);
 });

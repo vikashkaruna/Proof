@@ -250,7 +250,7 @@ export const ownedDeploymentOperationPhase = z.enum([
   'approve',
   'install',
 ]);
-const operationIntent = z.discriminatedUnion('phase', [
+export const ownedDeploymentOperationIntent = z.discriminatedUnion('phase', [
   z.object({ phase: z.literal('request'), request: ownedDeploymentRequest }).strict(),
   z.object({ phase: z.literal('preflight'), request: ownedDeploymentPreflight }).strict(),
   z.object({ phase: z.literal('challenge'), request: ownedDeploymentDecision }).strict(),
@@ -268,18 +268,36 @@ export const ownedDeploymentOperationReadback = z
       .object({
         requestId: uuid,
         tenantId: uuid,
+        actorId: uuid,
         operationKey: uuid,
         phase: ownedDeploymentOperationPhase,
         outcome: z.enum(['not_recorded', 'recorded', 'unconfirmed']),
         canonicalRequestHash: hash.nullable(),
-        intent: operationIntent.nullable(),
+        intent: ownedDeploymentOperationIntent.nullable(),
         receiptId: receipt.nullable(),
         result: ownedDeploymentSummary.nullable(),
+        phaseResult: z
+          .discriminatedUnion('phase', [
+            z
+              .object({
+                phase: z.literal('challenge'),
+                challenge: ownedDeploymentChallenge.shape.data,
+              })
+              .strict(),
+            z.object({ phase: z.literal('verify'), verified: z.literal(true) }).strict(),
+          ])
+          .nullable(),
       })
       .strict()
       .superRefine((value, context) => {
         if (value.outcome === 'not_recorded') {
-          if (value.canonicalRequestHash || value.intent || value.receiptId || value.result)
+          if (
+            value.canonicalRequestHash ||
+            value.intent ||
+            value.receiptId ||
+            value.result ||
+            value.phaseResult
+          )
             context.addIssue({
               code: 'custom',
               message: 'Absent operation must not claim a retained receipt',
@@ -296,6 +314,14 @@ export const ownedDeploymentOperationReadback = z
             code: 'custom',
             message: 'Exact retained phase and canonical intent required',
           });
+        if (value.phaseResult && value.phaseResult.phase !== value.phase)
+          context.addIssue({ code: 'custom', message: 'Foreign phase result refused' });
+        if (
+          value.outcome === 'recorded' &&
+          ['challenge', 'verify'].includes(value.phase) &&
+          !value.phaseResult
+        )
+          context.addIssue({ code: 'custom', message: 'Retained MFA phase result required' });
         if (value.outcome === 'recorded' && !value.receiptId)
           context.addIssue({ code: 'custom', message: 'Confirmed operation receipt required' });
         if (
@@ -306,6 +332,49 @@ export const ownedDeploymentOperationReadback = z
       }),
   })
   .strict();
+export const ownedDeploymentOperationIdentity = z
+  .object({
+    tenantId: uuid,
+    actorId: uuid,
+    requestId: uuid,
+    operationKey: uuid,
+    intent: ownedDeploymentOperationIntent,
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.intent.request.operationKey !== value.operationKey)
+      context.addIssue({ code: 'custom', message: 'Operation key mismatch' });
+  });
+function ownedOperationCanonical(value: unknown): string {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean')
+    return JSON.stringify(value);
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(ownedOperationCanonical).join(',') + ']';
+  if (typeof value === 'object' && value !== null)
+    return (
+      '{' +
+      Object.keys(value)
+        .sort()
+        .map(
+          (key) =>
+            JSON.stringify(key) +
+            ':' +
+            ownedOperationCanonical((value as Record<string, unknown>)[key]),
+        )
+        .join(',') +
+      '}'
+    );
+  throw Error('Owned deployment canonical intent refused');
+}
+/** SHA-256 over UTF-8 of this exact string. Browser uses crypto.subtle.digest;
+ * server/SQL must use the same codec. No MFA code or code hash is included. */
+export function ownedDeploymentOperationCanonicalJSON(raw: unknown): string {
+  const value = ownedDeploymentOperationIdentity.parse(raw);
+  return ownedOperationCanonical({
+    domain: 'axiom.owned-synthetic.deployment-operation.v1',
+    ...value,
+  });
+}
 export type OwnedDeploymentOperationReadback = z.infer<typeof ownedDeploymentOperationReadback>;
 export type OwnedDeploymentSummary = z.infer<typeof ownedDeploymentSummary>;
 export type OwnedDeploymentDecision = z.infer<typeof ownedDeploymentDecision>;
