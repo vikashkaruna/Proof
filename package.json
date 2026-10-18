@@ -25,6 +25,7 @@
     "prepare": "husky || true",
     "seed:controls": "tsx packages/control-library/scripts/seed.ts",
     "seed:users": "tsx scripts/seed-users.ts",
+    "seed:demo": "bash scripts/seed-demo-sectors.sh",
     "infra:plan": "cd infra/terraform/envs/prod && terraform plan",
     "infra:apply": "cd infra/terraform/envs/prod && terraform apply",
     "db:migrate": "if [ -n \"$SUPABASE_DB_URL\" ]; then supabase db push --db-url \"$SUPABASE_DB_URL\" --workdir infra; else supabase db push --local --workdir infra; fi",
