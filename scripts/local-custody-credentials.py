@@ -4,14 +4,18 @@ issuer, for an ACTIVE custody policy on the local owner-test stack.
 
   python3 scripts/local-custody-credentials.py issue --tenant-id <uuid> --kind producer
   python3 scripts/local-custody-credentials.py issue --tenant-id <uuid> --kind producer --renew
+  python3 scripts/local-custody-credentials.py renew-due              # all tenants, once
+  python3 scripts/local-custody-credentials.py renew-due --watch 600  # keep renewing
 
 It reads the active policy head, policy text and activation event (read-only),
 builds the canonical request (scripts/lib/local_custody_credentials.py), runs
 the unchanged issuer (python -I) into a fresh 0700 output directory, then
 atomically publishes the credential at the stable path the key service reads:
 ``<root>/credentials/<tenant>/<kind>.key`` (0600, regular file). ``--renew``
-names the last issued credential as predecessor. Each bearer lasts <= 1 h, so
-renew at least every ~45 minutes. Nothing here activates a policy.
+names the last issued credential as predecessor. Each bearer lasts <= 1 h.
+``renew-due`` renews every published credential with <= 20 minutes left and
+re-stages that tenant's key service (``local-key-service.py sync``), which reads
+the credential per request. Nothing here activates a policy.
 """
 
 from __future__ import annotations
@@ -27,7 +31,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from lib.local_custody_credentials import KINDS, issue_request  # noqa: E402
+from lib.local_custody_credentials import (  # noqa: E402
+    DEFAULT_RENEW_MARGIN_S,
+    KINDS,
+    issue_request,
+    last_expiry,
+    renewal_due,
+)
 
 DB = "supabase_db_axiom-owner-test"
 ISSUER_ROOT = Path(
@@ -114,6 +124,54 @@ def issue(tenant: str, kind: str, renew: bool) -> None:
     print(f"{kind} credential {credential_id} published at {base / (kind + '.key')}")
 
 
+# Tenant ids the key-service launcher knows (scripts/local-key-service.py TENANTS).
+KEY_SERVICE_TENANTS = {
+    "fd5e0001-0000-4000-8000-000000000001": "kosha",
+    "fd5e0002-0000-4000-8000-000000000002": "sanjeevani",
+    "fd5e0003-0000-4000-8000-000000000003": "nimbus",
+}
+
+
+def due_kinds(base: Path, now: int, margin_s: int) -> list[str]:
+    due = []
+    for kind in KINDS:
+        last = base / f"{kind}.last"
+        if not last.exists():
+            continue
+        credential_id = last.read_text().strip()
+        request = base / f"{credential_id}.request.json"
+        try:
+            expires_at = last_expiry(request.read_bytes(), credential_id)
+        except (OSError, ValueError) as error:
+            raise SystemExit(f"{base.name} {kind}: cannot read the last credential's expiry ({error}); renew it by hand")
+        if renewal_due(expires_at, now, margin_s):
+            due.append(kind)
+    return due
+
+
+def renew_due(tenant: str | None, margin_s: int) -> int:
+    """Renew what is due; return how many tenants failed (0 = all fine)."""
+    root = ISSUER_ROOT / "credentials"
+    tenants = [str(uuid.UUID(tenant))] if tenant else sorted(p.name for p in root.iterdir() if p.is_dir()) if root.exists() else []
+    failures = 0
+    for tenant_id in tenants:
+        try:
+            kinds = due_kinds(root / tenant_id, int(time.time()), margin_s)
+            for kind in kinds:
+                issue(tenant_id, kind, renew=True)
+            name = KEY_SERVICE_TENANTS.get(tenant_id)
+            if kinds and name:
+                subprocess.run(  # nosec B603 - fixed launcher path, isolated interpreter
+                    [sys.executable, "-I", str(ROOT / "scripts/local-key-service.py"), "sync", "--tenant", name],
+                    check=True, timeout=300,
+                )
+            print(f"{tenant_id}: renewed {kinds or 'nothing (not due)'}")
+        except (SystemExit, subprocess.SubprocessError, OSError) as error:
+            failures += 1
+            print(f"{tenant_id}: renewal FAILED: {error}", file=sys.stderr)
+    return failures
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -121,6 +179,19 @@ if __name__ == "__main__":
     p.add_argument("--tenant-id", required=True)
     p.add_argument("--kind", required=True, choices=KINDS)
     p.add_argument("--renew", action="store_true")
+    r = sub.add_parser("renew-due")
+    r.add_argument("--tenant-id")
+    r.add_argument("--margin", type=int, default=DEFAULT_RENEW_MARGIN_S)
+    r.add_argument("--watch", type=int, metavar="SECONDS", help="repeat every SECONDS (60..1200)")
     args = parser.parse_args()
     os.umask(0o077)
-    issue(args.tenant_id, args.kind, args.renew)
+    if args.command == "issue":
+        issue(args.tenant_id, args.kind, args.renew)
+    else:
+        if args.watch is not None and not 60 <= args.watch <= 1200:
+            raise SystemExit("--watch must be 60..1200 seconds")
+        while True:
+            failed = renew_due(args.tenant_id, args.margin)
+            if args.watch is None:
+                raise SystemExit(1 if failed else 0)
+            time.sleep(args.watch)

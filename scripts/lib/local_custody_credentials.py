@@ -15,6 +15,10 @@ KINDS = ("operator", "producer", "controller")
 # Each signed bearer is <= 1 h (issuer contract); the registry lease may be
 # longer, but renewal re-issues with predecessorId well before expiry.
 DEFAULT_LIFETIME_S = 3600
+# Renew once a bearer has 20 minutes or less left. With a <= 1 h bearer and a
+# 10-minute check interval, every credential is renewed at least once with
+# >= 10 minutes to spare, even if one check is missed.
+DEFAULT_RENEW_MARGIN_S = 1200
 
 
 def canonical(value: dict) -> bytes:
@@ -75,3 +79,25 @@ def issue_request(
         raise ValueError("issuer settings are not this policy's deployment binding")
     raw = canonical(value)
     return raw, hashlib.sha256(raw).hexdigest()
+
+
+def renewal_due(expires_at: int, now: int, margin_s: int = DEFAULT_RENEW_MARGIN_S) -> bool:
+    """True when a bearer expiring at ``expires_at`` must be renewed at ``now``."""
+    if margin_s < 60 or margin_s >= DEFAULT_LIFETIME_S:
+        raise ValueError("renewal margin refused")
+    return expires_at - now <= margin_s
+
+
+def last_expiry(request_bytes: bytes, credential_id: str) -> int:
+    """The expiry recorded in the issue request of the last published credential.
+
+    Refuses a request whose credentialId is not the one ``<kind>.last`` names, so a
+    stale or swapped request file can never postpone a renewal.
+    """
+    value = json.loads(request_bytes)
+    if value.get("purpose") != "local-custody-credential-issue" or value.get("credentialId") != credential_id:
+        raise ValueError("request does not belong to the last credential")
+    expires_at = value.get("expiresAt")
+    if not isinstance(expires_at, int) or isinstance(expires_at, bool):
+        raise ValueError("request has no expiry")
+    return expires_at
