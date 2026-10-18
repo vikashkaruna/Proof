@@ -1,3 +1,4 @@
+import { ApprovedLibraryVersionSchema } from './catalogue-versions';
 import { z } from 'zod';
 
 export const PUBLIC_CONTROL_V2_IDS = [
@@ -239,7 +240,7 @@ export const publicControlAssessmentV2Schema = z
     source: publicControlSourceV2Schema,
     catalogue: z
       .object({
-        libraryVersion: z.literal('0.1.1'),
+        libraryVersion: ApprovedLibraryVersionSchema,
         baseline: z.literal('IN-DPDP@2026-09-20'),
         manifestSha256: digest,
         mappingVersion: z.literal('public-evidence-1'),

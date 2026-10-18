@@ -1,3 +1,4 @@
+import { ApprovedLibraryVersionSchema } from '@axiom/types';
 /** Pure unmounted document5. No score, exposure or compliance conclusion is
  * inferred from public evidence or unverified declarations. */
 import { canonicalJson } from '@axiom/ledger';
@@ -88,7 +89,7 @@ export const CoverageFirstDocumentV5Schema = z
       .max(500),
     provenance: z
       .object({
-        libraryVersion: z.literal('0.1.1'),
+        libraryVersion: ApprovedLibraryVersionSchema,
         reviewId: uuid,
         reviewActorId: uuid,
         reviewedAt: z.iso.datetime({ offset: true }),
