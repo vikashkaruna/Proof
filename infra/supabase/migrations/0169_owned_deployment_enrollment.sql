@@ -981,6 +981,10 @@ declare r owned_synthetic.deployment_requests;a owned_synthetic.deployment_appro
  perform owned_synthetic.deployment_live_source(r);
  select * into strict h from owned_synthetic.deployment_heads where request_id=rid for share;
  select * into strict a from owned_synthetic.deployment_approvals where(tenant_id,id,request_id)=(t,h.approval_id,rid) for share;
+ perform 1 from public.platform_founders founder join public.users u on u.id=founder.user_id
+ where founder.user_id=a.actor_id and founder.revoked_at is null and u.is_axiom_internal for share of founder,u;
+ if not found then raise exception 'owned deployment approving founder revoked' using errcode='42501';end if;
+
  if h.state not in('approved','installing','active') or a.scope_expires_at<=clock_timestamp() or a.scope_expires_at<>r.expires_at
  or a.preflight_sha256 is distinct from h.preflight->>'sha256' or a.rollback_sha256 is distinct from h.preflight->>'rollbackSha256'
  or not exists(select 1 from public.platform_founders founder join public.users u on u.id=founder.user_id where founder.user_id=a.actor_id and founder.revoked_at is null and u.is_axiom_internal)
