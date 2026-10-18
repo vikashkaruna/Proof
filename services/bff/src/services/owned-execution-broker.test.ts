@@ -195,3 +195,11 @@ describe('owned singleton broker', () => {
     expect(first).toMatch(/^[a-f0-9-]{14}8/);
   });
 });
+
+it('never sends a correctly signed enrollment token to the target port', async () => {
+  const f = await fixture();
+  f.input.token.spec.conditions = { purpose: 'owned_synthetic_enrollment_v1' };
+  f.input.token.signature = await f.engine.sign(f.input.tenantId, f.input.token.spec);
+  await expect(f.run('forward')).rejects.toThrow('Owned execution refused');
+  expect(f.call).not.toHaveBeenCalled();
+});

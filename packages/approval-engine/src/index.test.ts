@@ -53,6 +53,26 @@ describe('ApprovalEngine', () => {
     });
   });
 
+  it.each(['owned_synthetic_enrollment_v1', 'unknown', null, 123])(
+    'refuses a correctly signed foreign purpose %s despite identical action IDs',
+    async (purpose) => {
+      const token = await engine.issue(tenantId, {
+        planId: 'p1',
+        actionIds: ['a1'],
+        approverId: 'u1',
+        mode: 'batch',
+        concurrency: 1,
+        stopOnFailure: true,
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        conditions: { purpose },
+      });
+      expect(await engine.verify(tenantId, token)).toEqual({
+        valid: false,
+        reason: 'purpose_mismatch',
+      });
+    },
+  );
+
   describe('rejection', () => {
     it('rejects when signature is wrong', async () => {
       const token = await engine.issue(tenantId, {

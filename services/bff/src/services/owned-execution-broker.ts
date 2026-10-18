@@ -80,6 +80,8 @@ export class OwnedExecutionBroker {
     // and the target's durable operation journal enforces one actual transition.
     const expected = await this.deps.approval.sign(input.tenantId, input.token.spec);
     if (
+      (input.token.spec.conditions?.purpose !== undefined &&
+        input.token.spec.conditions.purpose !== 'remediation_execution_v1') ||
       !/^[a-f0-9]{64}$/.test(expected) ||
       !timingSafeEqual(Buffer.from(expected), Buffer.from(input.token.signature)) ||
       Date.parse(input.token.spec.expiresAt) <= Date.now() ||

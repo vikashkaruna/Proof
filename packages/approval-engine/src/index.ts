@@ -61,6 +61,13 @@ export interface SignedApprovalToken {
   signature: string;
 }
 
+/** A missing purpose identifies existing remediation approvals only. Any other
+ * signed domain must be verified by its own gated workflow, never execution. */
+export function isRemediationApproval(spec: ApprovalTokenSpec): boolean {
+  const purpose = spec.conditions?.purpose;
+  return purpose === undefined || purpose === 'remediation_execution_v1';
+}
+
 export interface ValidationResult {
   valid: boolean;
   reason?:
@@ -69,7 +76,8 @@ export interface ValidationResult {
     | 'revoked'
     | 'consumed'
     | 'nonce_replay'
-    | 'action_not_in_scope';
+    | 'action_not_in_scope'
+    | 'purpose_mismatch';
   details?: Record<string, unknown>;
 }
 
@@ -179,6 +187,10 @@ export class ApprovalEngine {
     const b = Buffer.from(token.signature, 'utf-8');
     if (a.length !== b.length || !timingSafeEqual(a, b)) {
       return { valid: false, reason: 'signature_mismatch' };
+    }
+
+    if (!isRemediationApproval(token.spec)) {
+      return { valid: false, reason: 'purpose_mismatch' };
     }
 
     // 2. Expiry
