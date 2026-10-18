@@ -28,6 +28,9 @@ class RenewalTests(unittest.TestCase):
         mocked = patch.object(renewal, "reconcile_namespaces", return_value=[])
         mocked.start()
         self.addCleanup(mocked.stop)
+        workers = patch.object(renewal, "worker_idle_state", return_value="idle")
+        workers.start()
+        self.addCleanup(workers.stop)
 
     def fixture(self, base):
         raw_registry = json.dumps(
@@ -304,6 +307,144 @@ class RenewalTests(unittest.TestCase):
             self.assertRaises(ValueError),
         ):
             renewal.job_loaded(LABEL, Path("/owned/job.plist"))
+
+
+class WorkerRenewalGates(unittest.TestCase):
+    fixture = RenewalTests.fixture
+
+    def cycle(
+        self, base, *, idle="busy", authority=True, network=None, inventory_error=False
+    ):
+        _config, record, sha = self.fixture(base)
+        from contextlib import ExitStack
+
+        with ExitStack() as stack:
+            stack.enter_context(
+                patch.object(
+                    renewal, "reconcile_namespaces", return_value=network or []
+                )
+            )
+            stack.enter_context(
+                patch.object(
+                    renewal,
+                    "unexpired",
+                    **(
+                        {"side_effect": authority}
+                        if isinstance(authority, list)
+                        else {"return_value": authority}
+                    ),
+                )
+            )
+            if inventory_error:
+                stack.enter_context(
+                    patch.object(
+                        renewal,
+                        "idle_workers",
+                        side_effect=subprocess.TimeoutExpired("docker", 30),
+                    )
+                )
+            else:
+                stack.enter_context(
+                    patch.object(
+                        renewal,
+                        "worker_idle_state",
+                        **(
+                            {"side_effect": idle}
+                            if isinstance(idle, list)
+                            else {"return_value": idle}
+                        ),
+                    )
+                )
+            command = stack.enter_context(patch.object(renewal, "run", return_value=0))
+            result = renewal.once(record, sha)
+            state = json.loads(renewal.read_private(base / "status.json"))
+            return result, state, command.call_args_list
+
+    def test_busy_worker_blocks_both_restarting_helpers_with_current_namespaces(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result, state, commands = self.cycle(Path(temp).resolve())
+        self.assertEqual(result, 1)
+        self.assertFalse(commands)
+        self.assertFalse(state["refused"])
+        self.assertEqual(len(state["outcomes"]), 2)
+        self.assertTrue(
+            all(
+                item["deferredForWorkers"] and item["workerInventory"] == "busy"
+                for item in state["outcomes"]
+            )
+        )
+
+    def test_unknown_inventory_defers_instead_of_assuming_no_live_work(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result, state, commands = self.cycle(
+                Path(temp).resolve(), inventory_error=True
+            )
+        self.assertEqual(result, 1)
+        self.assertFalse(commands)
+        self.assertTrue(
+            all(item["workerInventory"] == "unknown" for item in state["outcomes"])
+        )
+
+    def test_worker_start_between_components_defers_due_controller_renewal(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result, state, commands = self.cycle(
+                Path(temp).resolve(), idle=["idle", "busy"]
+            )
+        self.assertEqual(result, 1)
+        self.assertEqual(len(commands), 1)
+        self.assertIn("local-custody-credentials.py", commands[0].args[0][2])
+        self.assertTrue(state["outcomes"][0]["ok"])
+        self.assertEqual(state["outcomes"][1]["component"], "controller")
+        self.assertTrue(state["outcomes"][1]["deferredForWorkers"])
+
+    def test_expiry_while_deferred_requires_fresh_issuance_without_reviving(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result, state, commands = self.cycle(
+                Path(temp).resolve(), authority=[True, False, True, False]
+            )
+        self.assertEqual(result, 1)
+        self.assertFalse(commands)
+        self.assertTrue(
+            all(
+                item["requiresFreshIssue"] and item["deferredForWorkers"]
+                for item in state["outcomes"]
+            )
+        )
+
+    def test_authority_expiry_during_idle_check_is_rechecked_before_helpers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result, state, commands = self.cycle(
+                Path(temp).resolve(), idle="idle", authority=[True, False, True, False]
+            )
+        self.assertEqual(result, 1)
+        self.assertFalse(commands)
+        self.assertTrue(all(item["requiresFreshIssue"] for item in state["outcomes"]))
+
+    def test_namespace_deferral_preserves_per_component_expiry_status(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result, state, commands = self.cycle(
+                Path(temp).resolve(),
+                authority=False,
+                network=[
+                    {"component": "network", "ok": False, "deferredForWorkers": True}
+                ],
+            )
+        self.assertEqual(result, 1)
+        self.assertFalse(commands)
+        self.assertTrue(
+            all(item["requiresFreshIssue"] for item in state["outcomes"][1:])
+        )
+
+    def test_unconfirmed_runtime_defers_live_authority_without_invoking_helpers(self):
+        with tempfile.TemporaryDirectory() as temp:
+            result, state, commands = self.cycle(
+                Path(temp).resolve(), network=[{"component": "network", "ok": False}]
+            )
+        self.assertEqual(result, 1)
+        self.assertFalse(commands)
+        self.assertTrue(
+            all(item["deferredForRuntime"] for item in state["outcomes"][1:])
+        )
 
 
 if __name__ == "__main__":

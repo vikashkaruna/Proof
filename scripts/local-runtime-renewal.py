@@ -362,6 +362,14 @@ def idle_workers(config: dict) -> bool:
     )
 
 
+def worker_idle_state(config: dict) -> str:
+    """Unknown inventory conveys no permission to restart a dependent service."""
+    try:
+        return "idle" if idle_workers(config) else "busy"
+    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
+        return "unknown"
+
+
 def repair_command(config: dict, peer: dict, action: str) -> list[str]:
     root = Path(config["workspace"]) / "scripts"
     prefix = [config["python"], "-I"]
@@ -415,13 +423,15 @@ def reconcile_namespaces(config: dict) -> list[dict]:
             stale.append((peer, value))
     if not stale:
         return []
-    if not idle_workers(config):
+    idle = worker_idle_state(config)
+    if idle != "idle":
         return [
             {
                 "component": "network",
                 "ok": False,
                 "stale": True,
                 "deferredForWorkers": True,
+                "workerInventory": idle,
             }
         ]
     outcomes = []
@@ -434,7 +444,11 @@ def reconcile_namespaces(config: dict) -> list[dict]:
         }
         outcomes.append(outcome)
         try:
-            if stable_bff(config) != (before, net) or not idle_workers(config):
+            idle = worker_idle_state(config)
+            if idle != "idle":
+                outcome.update(deferredForWorkers=True, workerInventory=idle)
+                raise ValueError("Worker inventory prevents repair")
+            if stable_bff(config) != (before, net):
                 raise ValueError("Runtime changed before repair")
             if metadata(config, peer["name"], peer["purpose"]) != value:
                 raise ValueError("Peer changed before graceful stop")
@@ -503,8 +517,7 @@ def once(record: Path, expected: str) -> int:
             validate_sources(config)
             deployments = registry(config)
             outcomes.extend(reconcile_namespaces(config))
-            if any(not item["ok"] for item in outcomes):
-                raise ValueError("Namespace repair deferred or unconfirmed")
+            runtime_ready = all(item["ok"] for item in outcomes)
             for alias in config["tenants"]:
                 commands = (
                     [
@@ -537,6 +550,49 @@ def once(record: Path, expected: str) -> int:
                 for component, command in zip(
                     ("custody", "controller"), commands, strict=True
                 ):
+                    if not unexpired(
+                        config, alias, deployments[alias].tenant_id, component
+                    ):
+                        outcomes.append(
+                            {
+                                "tenant": alias,
+                                "component": component,
+                                "ok": False,
+                                "requiresFreshIssue": True,
+                            }
+                        )
+                        continue
+                    if not runtime_ready:
+                        outcomes.append(
+                            {
+                                "tenant": alias,
+                                "component": component,
+                                "ok": False,
+                                "deferredForRuntime": True,
+                            }
+                        )
+                        continue
+                    # Both helpers can restart a service used by a live worker.
+                    # Recheck before EACH invocation, even with current namespaces
+                    # and even when the helper may decide renewal is not yet due.
+                    idle = worker_idle_state(config)
+                    if idle != "idle":
+                        outcomes.append(
+                            {
+                                "tenant": alias,
+                                "component": component,
+                                "ok": False,
+                                "deferredForWorkers": True,
+                                "workerInventory": idle,
+                                "requiresFreshIssue": not unexpired(
+                                    config,
+                                    alias,
+                                    deployments[alias].tenant_id,
+                                    component,
+                                ),
+                            }
+                        )
+                        continue
                     if not unexpired(
                         config, alias, deployments[alias].tenant_id, component
                     ):
@@ -748,6 +804,17 @@ def inspect_job(record: Path, expected: str, remove: bool = False) -> None:
                         "refused": value.get("refused", False),
                         "requiresFreshIssue": sum(
                             item.get("requiresFreshIssue", False)
+                            for item in value["outcomes"]
+                        ),
+                        "deferredComponents": sum(
+                            bool(
+                                item.get("deferredForWorkers")
+                                or item.get("deferredForRuntime")
+                            )
+                            for item in value["outcomes"]
+                        ),
+                        "workerInventoryUnconfirmed": sum(
+                            item.get("workerInventory") == "unknown"
                             for item in value["outcomes"]
                         ),
                         "stale": time.time() - value["checkedAt"] > 900,
