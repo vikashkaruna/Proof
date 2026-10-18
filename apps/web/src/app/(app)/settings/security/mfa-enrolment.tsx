@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
 import {
@@ -103,6 +103,7 @@ export function MfaEnrolment({
     purpose: 'enrolment' | 'factor_revocation';
     factorId?: string;
   } | null>(null);
+  const enrolmentAttempt = useRef<{ key: string; body: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [stepUpCode, setStepUpCode] = useState('');
 
@@ -150,13 +151,21 @@ export function MfaEnrolment({
     setError(null);
     setBusy(true);
     try {
+      const requestText = JSON.stringify({ label: 'Authenticator', mfaChallengeId });
+      if (enrolmentAttempt.current && enrolmentAttempt.current.body !== requestText) {
+        setError('The original setup result is unknown. Resolve it before starting another setup.');
+        return;
+      }
+      enrolmentAttempt.current ??= { key: `mfa-enrol-${generateUUID()}`, body: requestText };
       const res = await fetch('/api/bff/v1/mfa/enrol', {
         method: 'POST',
-        headers,
-        body: JSON.stringify({ label: 'Authenticator', mfaChallengeId }),
+        headers: { ...headers, 'Idempotency-Key': enrolmentAttempt.current.key },
+        body: enrolmentAttempt.current.body,
       });
       if (!res.ok) {
-        const { message } = await readError(res, 'Could not start enrolment');
+        const { code: errorCode, message } = await readError(res, 'Could not start enrolment');
+        if (res.status < 500 && !errorCode?.startsWith('idempotency_'))
+          enrolmentAttempt.current = null;
         setError(message);
         // The challenge is spent or was never good; a retry needs a new one.
         setStepUp(null);
@@ -179,6 +188,7 @@ export function MfaEnrolment({
         setError('Enrolment response is unverified. Refresh before continuing.');
         return;
       }
+      enrolmentAttempt.current = null;
       setPending({
         factorId: body.factorId,
         secret: body.secret,
