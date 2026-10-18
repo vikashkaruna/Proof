@@ -651,8 +651,11 @@ function RequestPanel({
         <div className="mt-3 space-y-3">
           {hasSavedResults || completedHere ? (
             <p>
-              This assessment already has saved results. Create a separate engagement for another
-              assessment.
+              This assessment already has saved results.{' '}
+              <Link href="/engagements" className="font-semibold text-teal-700 underline">
+                Create a separate engagement for another assessment
+              </Link>
+              .
             </p>
           ) : (
             <>
