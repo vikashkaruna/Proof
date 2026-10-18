@@ -126,6 +126,10 @@ def plan(root: Path = ROOT) -> dict:
         versions[-1] < 157 or "recorded-dry-run-approval.test.sql" in files,
         "recorded_dry_run157_suite_required",
     )
+    need(
+        versions[-1] < 158 or "member-approval-scopes.test.sql" in files,
+        "member_scopes158_suite_required",
+    )
     return {
         "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),
