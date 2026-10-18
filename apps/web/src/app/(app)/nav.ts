@@ -143,10 +143,9 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         en: 'Remediation Plans',
         hi: 'सुधार योजना',
         phase: 'P3',
-        // Everyone in the approval chain: the maker drafts, the reviewer
-        // comments, the approver decides. Approval itself is gated on the
-        // buttons inside and at the BFF.
-        capability: Capability.PLAN_COMMENT,
+        // Read-only members also need a route to recorded actions, dry runs
+        // and rollback details. Mutation controls keep their own capabilities.
+        capability: Capability.PLAN_READ,
       },
       {
         route: '/approval',

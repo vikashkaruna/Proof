@@ -109,8 +109,24 @@ const MENUS: Record<string, string[]> = {
     '/policies',
     '/settings',
   ],
-  [UserRole.VIEWER]: ['/dashboard', '/evidence', '/ledger', '/reports', '/portal', '/settings'],
-  [UserRole.PARTNER]: ['/dashboard', '/evidence', '/reports', '/portal', '/partner', '/settings'],
+  [UserRole.VIEWER]: [
+    '/dashboard',
+    '/plans',
+    '/evidence',
+    '/ledger',
+    '/reports',
+    '/portal',
+    '/settings',
+  ],
+  [UserRole.PARTNER]: [
+    '/dashboard',
+    '/plans',
+    '/evidence',
+    '/reports',
+    '/portal',
+    '/partner',
+    '/settings',
+  ],
   [UserRole.APPROVER]: [
     '/dashboard',
     '/plans',
@@ -173,7 +189,7 @@ describe('the viewer persona', () => {
   });
 
   it('can still read evidence, the ledger, reports and their own settings', () => {
-    for (const route of ['/evidence', '/ledger', '/reports', '/settings']) {
+    for (const route of ['/plans', '/evidence', '/ledger', '/reports', '/settings']) {
       expect(routes, `viewer should see ${route}`).toContain(route);
     }
   });
