@@ -100,7 +100,7 @@ export default async function PlanDetailPage({ params }: PageProps) {
 
   // Reading a plan and approving it are different authorities. A viewer sees
   // the actions, the blast radius and the dry-run diff, and no buttons.
-  const canApprove = can(Capability.PLAN_APPROVE, { role, approvalScopes });
+  const canApprove = can(Capability.PLAN_APPROVE, { role });
   const canReject = can(Capability.PLAN_REJECT, { role, approvalScopes });
   const canExecute = can(Capability.PLAN_EXECUTE, { role, approvalScopes });
   const canRequestDryRun = can(Capability.PLAN_CREATE, { role, approvalScopes });
@@ -168,9 +168,23 @@ export default async function PlanDetailPage({ params }: PageProps) {
   const planBlocker = describePlanStatusBlocker(typedPlan.status);
 
   const eligible = actions.filter((a) => readinessByAction.get(a.id)?.ready === true);
+  const approvableEligible = eligible.filter(
+    (a) =>
+      !canApprove ||
+      can(Capability.PLAN_APPROVE, { role, approvalScopes, actionClass: a.action_type }),
+  );
   const blocked = actions.filter((a) => readinessByAction.get(a.id)?.ready !== true);
   const blockerReasonsByAction = Object.fromEntries(
-    actions.map((a) => [a.id, blockerReasons(readinessByAction.get(a.id))]),
+    actions.map((a) => [
+      a.id,
+      [
+        ...blockerReasons(readinessByAction.get(a.id)),
+        ...(canApprove &&
+        !can(Capability.PLAN_APPROVE, { role, approvalScopes, actionClass: a.action_type })
+          ? ['Outside your approval scope. An approver assigned this action class must review it.']
+          : []),
+      ],
+    ]),
   );
   const approvedUnrecorded = actions.filter((a) =>
     approvedWithoutRecordedRun(a.approval_status, readinessByAction.get(a.id)),
@@ -364,11 +378,12 @@ export default async function PlanDetailPage({ params }: PageProps) {
         </CardHeader>
         <CardContent>
           <ApprovalActions
+            key={`${typedPlan.tenant_id}/${typedPlan.id}`}
             planId={typedPlan.id}
             tenantId={typedPlan.tenant_id}
             planStatus={typedPlan.status}
             actions={actions}
-            eligible={eligible}
+            eligible={approvableEligible}
             blocked={blocked}
             blockerReasons={blockerReasonsByAction}
             planBlocker={planBlocker}

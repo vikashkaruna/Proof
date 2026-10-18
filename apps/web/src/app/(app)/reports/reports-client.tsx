@@ -354,7 +354,31 @@ function TenantReportsClient(access: Access) {
               <>
                 <p className="text-sm text-slate-600">{total} visible reports</p>
                 {reports.length === 0 ? (
-                  <DataPlaceholder title="No reports recorded for this view." />
+                  <div className="space-y-3">
+                    <DataPlaceholder title="No reports recorded for this view." />
+                    {status || offset > 0 ? (
+                      <button
+                        type="button"
+                        className={button}
+                        onClick={() => {
+                          setStatus('');
+                          setOffset(0);
+                          refresh();
+                        }}
+                      >
+                        Show all reports from the beginning
+                      </button>
+                    ) : (
+                      <p className="text-sm text-slate-600">
+                        {access.canRequestBoard
+                          ? 'Use the board or auditor workflow above to request a draft from a finalized assessment. An internal founder then reviews and releases the retained report.'
+                          : canPrepare
+                            ? 'Use Prepare evidence pack above to select recorded evidence and prepare a pack for review.'
+                            : 'Ask an assessment owner to prepare a report and the internal founder to review and release it. Released reports will appear here.'}{' '}
+                        Demo records do not automatically create reviewed reports or sealed proof.
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <ul className="space-y-2">
                     {reports.map((report) => (

@@ -340,3 +340,31 @@ it.each([
     expect(fetcher).toHaveBeenCalledOnce();
   },
 );
+
+it('keeps an enrolment intent key after a lost response, then uses a fresh key for a new setup', async () => {
+  let sequence = 0;
+  vi.stubGlobal('crypto', { randomUUID: () => `intent-${++sequence}` });
+  const result = () =>
+    Response.json({
+      factorId: 'factor-1',
+      secret: 'SETUPKEY',
+      provisioningUri: 'otpauth://totp/Axiom',
+    });
+  const fetcher = vi
+    .fn()
+    .mockRejectedValueOnce(new Error('Response lost'))
+    .mockImplementation(async () => result());
+  vi.stubGlobal('fetch', fetcher);
+  render(<MfaEnrolment {...base} initialStatus={empty} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Enrol an authenticator' }));
+  await waitFor(() => expect(screen.getByText('Response lost')).toBeTruthy());
+  fireEvent.click(screen.getByRole('button', { name: 'Enrol an authenticator' }));
+  await waitFor(() => expect(screen.getByText('SETUPKEY')).toBeTruthy());
+  expect(fetcher.mock.calls[0]![1].headers['Idempotency-Key']).toBe('mfa-enrol-intent-1');
+  expect(fetcher.mock.calls[1]![1].headers['Idempotency-Key']).toBe('mfa-enrol-intent-1');
+  expect(fetcher.mock.calls[1]![1].body).toBe(fetcher.mock.calls[0]![1].body);
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Enrol an authenticator' }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
+  expect(fetcher.mock.calls[2]![1].headers['Idempotency-Key']).toBe('mfa-enrol-intent-2');
+});

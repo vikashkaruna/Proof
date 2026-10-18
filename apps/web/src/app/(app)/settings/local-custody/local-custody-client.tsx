@@ -1,5 +1,5 @@
 'use client';
-import { displayLocalToInstant, displayTimeZone } from '@/lib/display-time';
+import { displayLocalToInstant, displayTimeZone, formatDateTime } from '@/lib/display-time';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Button, Input, Label, StatusBadge, Textarea, generateUUID } from '@axiom/ui';
 import {
@@ -23,6 +23,7 @@ import {
   type LocalCustodyContext,
   type LocalCustodyEventRequest,
   type LocalCustodyContextRow,
+  type LocalCustodyPolicy,
 } from '@axiom/types';
 import {
   loadCustodyContext,
@@ -50,6 +51,45 @@ type Receipt =
 const manifestSchema = z
   .object({ policyText: z.string().max(16384), policySha256: z.string().regex(/^[a-f0-9]{64}$/) })
   .strict();
+function PolicySummary({ policy }: { policy: LocalCustodyPolicy }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <FactList
+        items={[
+          {
+            label: 'Profile',
+            value: policy.mode === 'local_demo' ? 'Local demo' : 'Operator managed',
+          },
+          { label: 'Purpose', value: 'Assessment dispatch-key custody' },
+          { label: 'Nominated operator', value: policy.nominatedOperatorId, mono: true },
+          { label: 'Workload', value: policy.targetWorkloadId, mono: true },
+          { label: 'Validity', value: 'Until revoked' },
+        ]}
+      />
+      <p className="text-sm text-slate-700">Policy reason: {policy.reason}</p>
+      <div className="text-sm text-slate-700">
+        <p className="font-medium">Accepted limitations</p>
+        <ul className="list-disc pl-5">
+          {policy.acceptedLimitations.map((limitation) => (
+            <li key={limitation}>{limitation.replaceAll('_', ' ')}</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+function policyNextStep(row: LocalCustodyContextRow) {
+  switch (row.head.state) {
+    case 'requested':
+      return 'Owner request recorded. Next: an internal founder approves this policy.';
+    case 'approved':
+      return 'Founder approval recorded. Next: the nominated internal operator activates this policy.';
+    case 'active':
+      return 'Custody is active. No further approval or activation is needed. Review only when due or when the policy needs attention.';
+    case 'revoked':
+      return 'Custody is revoked. A new operator-reviewed policy is required to request custody again.';
+  }
+}
 export function LocalCustodyClient({
   tenantId,
   actorId,
@@ -173,8 +213,23 @@ export function LocalCustodyClient({
         });
       }
     };
+    const checkCurrentContext = () => {
+      if (document.visibilityState === 'hidden' || inFlight.current.has(scopeKey)) return;
+      void refresh().catch(() => {
+        if (lease.current === token)
+          setError(
+            'Current custody status could not be refreshed. Refresh current policies before continuing.',
+          );
+      });
+    };
     window.addEventListener('storage', storage);
-    return () => window.removeEventListener('storage', storage);
+    window.addEventListener('focus', checkCurrentContext);
+    document.addEventListener('visibilitychange', checkCurrentContext);
+    return () => {
+      window.removeEventListener('storage', storage);
+      window.removeEventListener('focus', checkCurrentContext);
+      document.removeEventListener('visibilitychange', checkCurrentContext);
+    };
     // Scope is immutable for this effect; requests use explicit tenant and actor.
   }, [refresh, scopeKey, readJournal]);
   const visibleContext =
@@ -250,6 +305,13 @@ export function LocalCustodyClient({
         ? { policyText: row.policyText, policySha256: row.policySha256 }
         : manifestSchema.parse(JSON.parse(manifest));
       const policy = parseLocalCustodyPolicyText(supplied.policyText);
+      if (
+        transition === 'request' &&
+        visibleContext.rows.some((current) => current.policyId === policy.policyId)
+      )
+        throw new Error(
+          'This policy already has a recorded owner request. Follow its next step under Current policies.',
+        );
       if (policy.tenantId !== scope.tenantId)
         throw new Error('The operator manifest belongs to another organisation.');
       if (transition === 'request' && !visibleContext.requestModes.includes(policy.mode))
@@ -300,7 +362,7 @@ export function LocalCustodyClient({
       setFreshKey(request.operationKey);
       setConfirmed(false);
       setMessage(
-        'Exact request retained. Check its recorded state before requesting a fresh authenticator challenge.',
+        'Exact request retained. Enter a fresh authenticator code under Pending requests to record it.',
       );
     } catch (e) {
       if (lease.current !== prepareLease || draftVersion.current !== prepareVersion) return;
@@ -348,6 +410,9 @@ export function LocalCustodyClient({
         : 'Recorded custody receipt confirmed. This policy receipt alone does not provision keys, start services or certify statutory compliance.',
     );
     resetStep();
+    setConfirmed(false);
+    setReason('');
+    setReviewDate('');
     try {
       const linked = readCustodyResolution(localStorage, intent);
       if (linked) clearCustodyResolution(localStorage, intent, linked);
@@ -411,6 +476,8 @@ export function LocalCustodyClient({
     } catch (e) {
       if (lease.current === token) {
         resetStep();
+        if (which === 'record') await refresh().catch(() => {});
+        if (lease.current !== token) return;
         setMessage('The exact intent remains retained. Check its recorded state before any retry.');
       }
       throw e;
@@ -440,8 +507,10 @@ export function LocalCustodyClient({
         setFreshKey(null);
         setCode('');
         resetStep();
+        await refresh().catch(() => {});
+        if (lease.current !== token) return;
         setMessage(
-          'Recording did not complete. The exact request is kept; check its recorded state below before any retry.',
+          'The recording response could not be confirmed. The exact request is kept; check its recorded state below before any retry.',
         );
       }
       throw e;
@@ -477,6 +546,16 @@ export function LocalCustodyClient({
   }
   const rows = visibleContext?.rows ?? [];
   const blocked = visiblePending.length > 0;
+  const manifestReview = useMemo(() => {
+    try {
+      return parseLocalCustodyPolicyText(manifestSchema.parse(JSON.parse(manifest)).policyText);
+    } catch {
+      return null;
+    }
+  }, [manifest]);
+  const existingManifestPolicy = manifestReview
+    ? rows.find((row) => row.policyId === manifestReview.policyId)
+    : undefined;
   const manifestFile = `docs/private-docs/custody-manifests/${tenantSlug || '<organisation>'}.json`;
   return (
     <div className="flex min-w-0 flex-col gap-5">
@@ -493,7 +572,11 @@ export function LocalCustodyClient({
       >
         <ol className="grid min-w-0 gap-3 md:grid-cols-3">
           {[
-            ['1', 'Owner requests', 'The customer owner pastes the operator-reviewed manifest.'],
+            [
+              '1',
+              'Owner requests',
+              'The customer owner reviews the prepared manifest and records a request.',
+            ],
             ['2', 'Founder approves', 'An internal founder approves the recorded request.'],
             ['3', 'Operator activates', 'The nominated internal operator activates the policy.'],
           ].map(([n, title, body]) => (
@@ -517,7 +600,9 @@ export function LocalCustodyClient({
         <Notice tone="info">
           <strong>Approve and activate appear only after an owner request.</strong> A policy shows
           those buttons once the customer owner&apos;s request is recorded and your role is the next
-          step. Until then the policy list is empty or shows no action for you.
+          step. Until then the policy list is empty or shows no action for you. This page shows the
+          organisation selected in the header; switch organisation to review another company's
+          request.
         </Notice>
         <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600">
           <li>
@@ -611,13 +696,20 @@ export function LocalCustodyClient({
                 ''
               )}
             </p>
-            <FactList items={[{ label: 'Policy SHA-256', value: row.policySha256, mono: true }]} />
+            <p className="text-sm font-medium text-indigo-500">{policyNextStep(row)}</p>
+            <PolicySummary policy={parseLocalCustodyPolicyText(row.policyText)} />
+            <FactList
+              items={[
+                { label: 'Next review', value: formatDateTime(row.head.reviewDueAt) },
+                { label: 'Policy SHA-256', value: row.policySha256, mono: true },
+              ]}
+            />
             <details className="rounded-md border border-slate-200 bg-mist-50 px-3 py-2 text-sm">
               <summary className="cursor-pointer font-medium text-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500">
                 Review exact non-secret policy
               </summary>
               <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs text-slate-700">
-                {row.policyText}
+                {JSON.stringify(JSON.parse(row.policyText), null, 2)}
               </pre>
             </details>
             <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
@@ -626,7 +718,14 @@ export function LocalCustodyClient({
                   key={action}
                   variant={action === 'revoke' ? 'danger' : 'accent'}
                   size="sm"
-                  disabled={busy || !ready || blocked}
+                  disabled={
+                    busy ||
+                    !ready ||
+                    blocked ||
+                    !confirmed ||
+                    !reason.trim() ||
+                    (action === 'review' && !reviewDate)
+                  }
                   onClick={() => void run(() => prepare(row, action))}
                 >
                   Prepare {action}
@@ -736,6 +835,17 @@ export function LocalCustodyClient({
               </div>
               {selected && (
                 <>
+                  <FactList
+                    items={[
+                      { label: 'Action to record', value: selected.request.transition },
+                      { label: 'Reason', value: selected.request.reason },
+                      {
+                        label: 'Policy',
+                        value: parseLocalCustodyPolicyText(selected.request.policyText).policyId,
+                        mono: true,
+                      },
+                    ]}
+                  />
                   <details className="rounded-md border border-slate-200 bg-mist-50 px-3 py-2 text-sm">
                     <summary className="cursor-pointer font-medium text-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500">
                       Exact retained request ({selected.request.transition})
@@ -942,7 +1052,7 @@ export function LocalCustodyClient({
       <SectionCard
         aria-label="Prepare custody request"
         title="Prepare a request"
-        description="Preparing saves the exact request on this device only; nothing is recorded yet. You then check, authenticate and record it under Pending requests."
+        description="Preparing saves the exact request on this device only; nothing is recorded yet. Enter a fresh authenticator code under Pending requests to record it. Previously retained requests require a status check before retrying."
       >
         {blocked && (
           <Notice tone="warning">
@@ -996,24 +1106,38 @@ export function LocalCustodyClient({
                         ? 'The prepared manifest could not be loaded. Paste the file your operator gave you, or retry.'
                         : ''}
               </p>
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <Label htmlFor="custody-manifest">Operator-reviewed non-secret manifest JSON</Label>
-                <Textarea
-                  id="custody-manifest"
-                  aria-describedby="custody-manifest-hint"
-                  rows={10}
-                  spellCheck={false}
-                  className="min-h-[14rem] font-mono text-xs"
-                  placeholder={'{"policyText":"…","policySha256":"…"}'}
-                  value={manifest}
-                  onChange={(e) => {
-                    draftVersion.current++;
-                    setManifest(e.target.value);
-                    setConfirmed(false);
-                  }}
-                  maxLength={65536}
-                />
-              </div>
+              {manifestReview && <PolicySummary policy={manifestReview} />}
+              {existingManifestPolicy && (
+                <Notice tone="info">
+                  This manifest already has a recorded owner request.{' '}
+                  {policyNextStep(existingManifestPolicy)}
+                </Notice>
+              )}
+              <details open={staged !== 'loaded'}>
+                <summary className="cursor-pointer text-sm font-medium text-indigo-500">
+                  Exact manifest JSON (advanced)
+                </summary>
+                <div className="flex min-w-0 flex-col gap-1.5">
+                  <Label htmlFor="custody-manifest">
+                    Operator-reviewed non-secret manifest JSON
+                  </Label>
+                  <Textarea
+                    id="custody-manifest"
+                    aria-describedby="custody-manifest-hint"
+                    rows={10}
+                    spellCheck={false}
+                    className="min-h-[14rem] font-mono text-xs"
+                    placeholder={'{"policyText":"…","policySha256":"…"}'}
+                    value={manifest}
+                    onChange={(e) => {
+                      draftVersion.current++;
+                      setManifest(e.target.value);
+                      setConfirmed(false);
+                    }}
+                    maxLength={65536}
+                  />
+                </div>
+              </details>
               <div
                 id="custody-manifest-hint"
                 className="flex min-w-0 flex-col gap-1.5 text-xs leading-relaxed text-slate-600"
@@ -1050,7 +1174,14 @@ export function LocalCustodyClient({
               <div className="flex flex-wrap items-center gap-3">
                 <Button
                   variant="accent"
-                  disabled={busy || !ready || blocked}
+                  disabled={
+                    busy ||
+                    !ready ||
+                    blocked ||
+                    !confirmed ||
+                    !reason.trim() ||
+                    !!existingManifestPolicy
+                  }
                   onClick={() => void run(() => prepare(null, 'request'))}
                 >
                   Prepare owner request

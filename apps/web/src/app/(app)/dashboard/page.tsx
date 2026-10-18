@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { capabilitiesFor, type UserRole } from '@axiom/types';
-import { cn, DataPlaceholder, PageHeader, formatDateTime, postureBand } from '@axiom/ui';
+import { ACTIVE_RUN_STALE_MS, capabilitiesFor, type UserRole } from '@axiom/types';
+import { DataPlaceholder, PageHeader, formatDateTime } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
 import { requireTenantContext } from '@/lib/tenant-context';
 import { visibleRoutes } from '../nav';
@@ -9,6 +9,11 @@ export const dynamic = 'force-dynamic';
 
 function metric(value: number | null): string {
   return value === null ? 'Unavailable' : value.toLocaleString('en-IN');
+}
+
+// Server-side request clock, read once with the dashboard's other source data.
+async function readDashboardClock(): Promise<number> {
+  return Date.now();
 }
 
 export default async function DashboardPage() {
@@ -35,7 +40,7 @@ export default async function DashboardPage() {
       supabase.from('remediation_actions').select('id, approval_status').eq('tenant_id', tenantId),
       supabase
         .from('engagements')
-        .select('posture_score')
+        .select('id, title, status, posture_score, started_at')
         .eq('tenant_id', tenantId)
         .order('started_at', { ascending: false })
         .limit(1)
@@ -47,6 +52,8 @@ export default async function DashboardPage() {
         .order('started_at', { ascending: false })
         .limit(5),
     ]);
+
+  const evaluatedAt = await readDashboardClock();
 
   const openFindings =
     findings.error || !findings.data
@@ -105,11 +112,11 @@ export default async function DashboardPage() {
     {
       label: 'Latest recorded posture',
       value: posture === null ? 'Unavailable' : `${posture}/100`,
-      band: postureBand(posture),
+      postureScore: true,
       note:
         posture === null
           ? 'No verified posture score is available.'
-          : 'Review the engagement for assessment scope and source.',
+          : 'Recorded engagement score; finalized source provenance is unverified here. Not a compliance certification.',
     },
     {
       label: 'Open findings',
@@ -122,6 +129,49 @@ export default async function DashboardPage() {
       note: 'Actions need a recorded human decision',
     },
   ];
+
+  const journey = [
+    {
+      href: '/estate',
+      title: '1. Set up the estate',
+      detail: 'Identify systems and data sources before discovery.',
+    },
+    {
+      href: '/assessment',
+      title: '2. Assess the gaps',
+      detail: 'Review control results and finalize an assessment.',
+    },
+    {
+      href: '/plans',
+      title: '3. Review the plan',
+      detail: 'Inspect each action, recorded dry run and rollback before a decision.',
+    },
+    {
+      href: '/approval',
+      title: '4. Decide on actions',
+      detail: 'Approve or reject only the actions within your assigned scope.',
+    },
+    {
+      href: '/execution',
+      title: '5. Follow execution',
+      detail: 'Inspect execution results and rollback records after approval.',
+    },
+    {
+      href: '/reports',
+      title: '6. Review reports',
+      detail: 'Prepare or read working reports, then follow their review and release status.',
+    },
+    {
+      href: '/evidence',
+      title: 'Inspect supporting evidence',
+      detail: 'Read the retained records and their individual storage assurance.',
+    },
+    {
+      href: '/ledger',
+      title: 'Trace recorded decisions',
+      detail: 'Follow the audit trail for assessment, approval and execution.',
+    },
+  ].filter((step) => reachable.has(step.href));
 
   return (
     <section className="w-full min-w-0 space-y-4" aria-label="Dashboard">
@@ -148,13 +198,12 @@ export default async function DashboardPage() {
               <dd className="mt-0.5 flex items-center gap-2">
                 <span
                   className="font-heading text-2xl font-semibold text-white"
-                  data-testid={'band' in item ? 'posture-score' : undefined}
+                  data-testid={'postureScore' in item ? 'posture-score' : undefined}
                 >
-                  {'band' in item && item.band ? (
+                  {'postureScore' in item && posture !== null ? (
                     <>
-                      {/* Only the score carries the band colour; "/100" stays in the
-                          header's text colour at half the size. */}
-                      <span className={item.band.onDark} data-testid="posture-value">
+                      {/* A recorded score has no strength band without verified source provenance. */}
+                      <span className="text-white" data-testid="posture-value">
                         {posture}
                       </span>
                       <span className="text-[0.5em] font-medium">/100</span>
@@ -163,15 +212,12 @@ export default async function DashboardPage() {
                     item.value
                   )}
                 </span>
-                {'band' in item && item.band && (
+                {'postureScore' in item && posture !== null && (
                   <span
-                    className={cn(
-                      'rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset',
-                      item.band.chipOnDark,
-                    )}
-                    data-testid="posture-band"
+                    className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-white ring-1 ring-inset ring-white/20"
+                    data-testid="posture-provenance"
                   >
-                    {item.band.label}
+                    Unverified
                   </span>
                 )}
               </dd>
@@ -180,6 +226,76 @@ export default async function DashboardPage() {
           ))}
         </dl>
       </PageHeader>
+
+      <section
+        aria-label="Your workflow"
+        className="rounded-xl border border-slate-200 bg-white p-5"
+      >
+        <h2 className="font-heading text-base font-semibold text-[#1E2A4A]">Your next steps</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Follow the work from setup to released reports. These shortcuts reflect your role; each
+          screen shows the recorded state and any prerequisites still needed.
+        </p>
+        <ol className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {journey.map((step) => (
+            <li key={step.href}>
+              <Link
+                href={step.href}
+                className="block h-full rounded-lg border border-slate-200 p-3 transition-colors hover:border-teal-500 focus-visible:outline-2 focus-visible:outline-teal-500"
+              >
+                <span className="text-sm font-semibold text-[#1E2A4A]">{step.title} →</span>
+                <span className="mt-1 block text-xs leading-relaxed text-slate-600">
+                  {step.detail}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      {reachable.has('/engagements') && (
+        <section
+          aria-label="Latest assessment"
+          className="rounded-xl border border-slate-200 bg-white p-5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-heading text-base font-semibold text-[#1E2A4A]">
+              Latest assessment
+            </h2>
+            <Link
+              href="/engagements"
+              className="text-sm font-medium text-teal-800 underline underline-offset-4"
+            >
+              All engagements
+            </Link>
+          </div>
+          {engagement.error ? (
+            <p className="mt-3 text-sm text-slate-600">Assessment records are unavailable.</p>
+          ) : !engagement.data?.id ? (
+            <p className="mt-3 text-sm text-slate-600">
+              No assessment recorded yet. Open engagements to start or review an assessment.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-medium text-slate-900">{engagement.data.title}</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  Recorded status: {engagement.data.status.replace(/_/g, ' ')}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Started {formatDateTime(engagement.data.started_at)}
+                </p>
+              </div>
+              <Link
+                href={`/engagements/${engagement.data.id}`}
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-[#1E2A4A] hover:bg-slate-50"
+              >
+                Open assessment
+              </Link>
+            </div>
+          )}
+        </section>
+      )}
 
       <section
         aria-label="Recorded tenant metrics"
@@ -227,20 +343,34 @@ export default async function DashboardPage() {
           <DataPlaceholder className="mt-3" title="No agent runs recorded for this tenant." />
         ) : (
           <ul className="mt-2 divide-y divide-slate-100">
-            {runs.data.map((run) => (
-              <li
-                key={run.id}
-                className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
-              >
-                <span className="font-medium capitalize text-[#1E2A4A]">{run.agent}</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                  {run.status}
-                </span>
-                <time dateTime={run.started_at} className="text-xs text-slate-500">
-                  {formatDateTime(run.started_at)}
-                </time>
-              </li>
-            ))}
+            {runs.data.map((run) => {
+              const active = ['running', 'queued'].includes(run.status);
+              const started = Date.parse(run.started_at);
+              const unknown = active && (!Number.isFinite(started) || started > evaluatedAt);
+              const stalled = active && !unknown && started < evaluatedAt - ACTIVE_RUN_STALE_MS;
+              return (
+                <li
+                  key={run.id}
+                  className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+                >
+                  <span className="font-medium capitalize text-[#1E2A4A]">{run.agent}</span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                    {stalled ? 'Stalled' : unknown ? 'Activity unverified' : run.status}
+                  </span>
+                  <time dateTime={run.started_at} className="text-xs text-slate-500">
+                    {formatDateTime(run.started_at)}
+                  </time>
+                  {(stalled || unknown) && (
+                    <p className="w-full text-xs text-slate-600">
+                      Recorded {run.status};{' '}
+                      {stalled
+                        ? 'no completion recorded within the one-hour activity window. Check the run before treating it as active.'
+                        : 'the start timestamp cannot establish current activity.'}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>

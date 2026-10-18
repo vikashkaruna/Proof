@@ -637,3 +637,92 @@ it('falls back to the explicit check-and-retry steps when one-step recording fai
   expect(screen.queryByRole('button', { name: 'Record request' })).toBeNull();
   expect(readCustodyIntents(localStorage, tenant, actor)).toHaveLength(1);
 });
+
+it('summarizes an active staged policy and prevents preparing its owner request again', async () => {
+  const c = context();
+  c.rows = [policyRow()];
+  api.load.mockResolvedValue(c);
+  api.staged.mockResolvedValue(manifest());
+  render(<LocalCustodyClient tenantId={tenant} actorId={actor} />);
+  await screen.findByText(/This manifest already has a recorded owner request/);
+  expect(screen.getByRole('button', { name: 'Prepare owner request' })).toHaveProperty(
+    'disabled',
+    true,
+  );
+  expect(screen.getAllByText('Operator managed')).toHaveLength(2);
+  expect(screen.getAllByText('hardware backing unverified').length).toBeGreaterThan(0);
+  expect(screen.getByText(/This page shows the organisation selected in the header/)).toBeTruthy();
+  expect(
+    screen.getAllByText(/Custody is active. No further approval or activation is needed/).length,
+  ).toBeGreaterThan(0);
+  expect(api.step).not.toHaveBeenCalled();
+});
+
+it('refreshes recorded policy state after a lost response while preserving the exact pending request', async () => {
+  await mount();
+  await prepare();
+  const retained = readCustodyIntents(localStorage, tenant, actor)[0]!;
+  const updated = context();
+  updated.rows = [policyRow()];
+  api.load.mockResolvedValue(updated);
+  api.step.mockImplementation(async (_scope: unknown, step: string) => {
+    if (step === 'challenge') return { challengeId: event, expiresAt: new Date().toISOString() };
+    if (step === 'verify') return { verified: true, challengeId: event };
+    throw Error('Recording response lost');
+  });
+  fireEvent.change(screen.getByLabelText('Authenticator code'), { target: { value: '123456' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Record request' }));
+  await screen.findAllByText(/Custody is active. No further approval or activation is needed/);
+  expect(readCustodyIntents(localStorage, tenant, actor)).toEqual([retained]);
+  expect(screen.getByRole('button', { name: 'Check retained request' })).toBeTruthy();
+  expect(screen.queryByRole('region', { name: 'Confirmed custody receipt' })).toBeNull();
+});
+
+it('reloads current policies when returning from another account or organisation window', async () => {
+  await mount();
+  const updated = context();
+  updated.rows = [policyRow()];
+  api.load.mockResolvedValue(updated);
+  fireEvent.focus(window);
+  await screen.findAllByText(/Custody is active. No further approval or activation is needed/);
+  expect(api.step).not.toHaveBeenCalled();
+});
+
+it('replaces founder approval with the next server-authorized activation step after recording', async () => {
+  const requested = context();
+  requested.canRequest = false;
+  requested.requestModes = [];
+  requested.rows = [
+    { ...policyRow(['approve', 'revoke']), head: { ...policyRow().head, state: 'requested' } },
+  ];
+  api.load.mockResolvedValue(requested);
+  render(<LocalCustodyClient tenantId={tenant} actorId={actor} />);
+  const approve = await screen.findByRole('button', { name: 'Prepare approve' });
+  expect(approve).toHaveProperty('disabled', true);
+  fireEvent.change(screen.getByLabelText('Reason'), {
+    target: { value: 'Founder reviewed custody' },
+  });
+  fireEvent.click(
+    screen.getByLabelText('I reviewed the exact non-secret policy, selected action and reason.'),
+  );
+  fireEvent.click(approve);
+  await screen.findByRole('button', { name: 'Record request' });
+  const approved = {
+    ...requested,
+    rows: [
+      {
+        ...policyRow(['activate', 'revoke']),
+        head: { ...policyRow().head, state: 'approved' as const },
+      },
+    ],
+  };
+  api.load.mockResolvedValue(approved);
+  fireEvent.change(screen.getByLabelText('Authenticator code'), { target: { value: '123456' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Record request' }));
+  await screen.findByRole('button', { name: 'Prepare activate' });
+  expect(screen.queryByRole('button', { name: 'Prepare approve' })).toBeNull();
+  expect(screen.getByRole('button', { name: 'Prepare activate' })).toHaveProperty('disabled', true);
+  expect(screen.getByLabelText('Reason')).toHaveProperty('value', '');
+  expect(screen.getByText(/Founder approval recorded. Next:/)).toBeTruthy();
+  expect(readCustodyIntents(localStorage, tenant, actor)).toEqual([]);
+});
