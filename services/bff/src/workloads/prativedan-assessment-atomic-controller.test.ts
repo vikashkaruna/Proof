@@ -533,3 +533,16 @@ describe('unmounted atomic controller verified identity boundary', () => {
     expect(f.rpc).toHaveBeenCalledTimes(1);
   });
 });
+
+it('accepts renewed observation freshness only for the same currently verified principal and bundle', async () => {
+  const f = fixture();
+  let reads = 0;
+  f.ports.trust.load.mockImplementation(async () => ({
+    ...f.bundle,
+    validUntil: Date.now() + 10000 + reads++,
+  }));
+  await expect(f.controller.perform(token(), f.selection, { kind: 'load' })).resolves.toMatchObject(
+    { run_id: f.journal.run_id },
+  );
+  expect(reads).toBeGreaterThan(2);
+});

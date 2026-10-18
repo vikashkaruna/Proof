@@ -1,3 +1,4 @@
+import { loadPrativedanSocket } from './workloads/prativedan-socket.js';
 import { loadDiscoverySocket } from './workloads/discovery-socket.js';
 import { serve } from '@hono/node-server';
 import { loadEnv } from '@axiom/config';
@@ -31,7 +32,8 @@ const discovery = await loadSandboxPostgresql(
 const discoveryController = await loadDiscoverySocket(
   env.AXIOM_POSTGRESQL_DISCOVERY_SOCKET_CONFIG_FILE,
 );
-const app = createApp({ assessmentRequests, discovery, discoveryController });
+const prativedan = await loadPrativedanSocket(env.AXIOM_PRATIVEDAN_SOCKET_CONFIG_FILE);
+const app = createApp({ assessmentRequests, discovery, discoveryController, prativedan });
 const port = Number(process.env.PORT || env.BFF_PORT);
 
 log.info({ port }, 'starting BFF');

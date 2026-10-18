@@ -1,4 +1,4 @@
-/** Unmounted scoped assessment store. No table/ledger SELECT or service-role fallback. */
+/** Scoped assessment store. No table/ledger SELECT or service-role fallback. */
 import { z } from 'zod';
 import { createHumanActionWriter } from '@axiom/supabase';
 import {

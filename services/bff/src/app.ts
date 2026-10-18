@@ -1,6 +1,7 @@
 import { ownedExecutionRoutes } from './routes/owned-execution.js';
 import { createConfiguredOwnedExecution } from './services/owned-execution-composition.js';
 import type { OwnedExecutionBroker } from './services/owned-execution-broker.js';
+import type { PrativedanPrivateClient } from './routes/prativedan-accounted-drafts.js';
 import type { DiscoveryRequestController } from './routes/postgresql-discovery.js';
 import type { publicWebsiteCheckRoutes } from './routes/public-website-checks.js';
 import { createConfiguredOwnedSynthetic } from './services/owned-synthetic-composition.js';
@@ -55,6 +56,7 @@ import { offlineLicenseGate } from './middleware/offline-license.js';
  */
 export function createApp(
   options: {
+    prativedan?: PrativedanPrivateClient;
     discoveryController?: DiscoveryRequestController;
     ownedSynthetic?: OwnedSyntheticRouteDeps | null;
     ownedExecution?: Pick<OwnedExecutionBroker, 'run'> | null;
@@ -211,6 +213,7 @@ export function createApp(
   app.route(
     '/v1',
     v1Routes({
+      prativedan: options.prativedan,
       licensePublicKeyPem: options.licensePublicKeyPem,
       approvalEngine,
       killSwitch,

@@ -87,7 +87,7 @@ export async function controllerBackendCredentials(
   filename: string,
   env: NodeJS.ProcessEnv,
   tenantId: string,
-  options: { localHttp?: boolean } = {},
+  options: { localHttp?: boolean; role?: 'axiom_prativedan_controller' } = {},
 ) {
   let bytes: Buffer | undefined;
   try {
@@ -128,7 +128,7 @@ export async function controllerBackendCredentials(
     if (decodeJwt(credential.apiKey).role !== 'anon') throw new Error();
     const claims = z
       .object({
-        role: z.literal('axiom_assessment_controller'),
+        role: z.literal(options.role ?? 'axiom_assessment_controller'),
         sub: z.uuid(),
         tenant_id: z.literal(z.uuid().parse(tenantId).toLowerCase()),
         iat: z.number().int().nonnegative(),
