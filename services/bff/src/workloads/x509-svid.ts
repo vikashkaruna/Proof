@@ -117,16 +117,17 @@ export function prepareX509Material(
     requireValid(
       leaf.keyUsage?.includes(purpose === 'client' ? '1.3.6.1.5.5.7.3.2' : '1.3.6.1.5.5.7.3.1'),
     );
-    const all = [...chain, ...roots];
-    requireValid(
-      all.every(
-        (cert) =>
-          Number.isFinite(Date.parse(cert.validFrom)) &&
-          Date.parse(cert.validFrom) <= now &&
-          Date.parse(cert.validTo) > now,
-      ),
-    );
+    const validNow = (cert: X509Certificate) =>
+      Number.isFinite(Date.parse(cert.validFrom)) &&
+      Number.isFinite(Date.parse(cert.validTo)) &&
+      Date.parse(cert.validFrom) <= now &&
+      Date.parse(cert.validTo) > now;
+    requireValid(chain.every(validNow));
+    // SPIRE retains old authorities during rotation. Parse and bound the complete
+    // bundle above, but never use an expired/future authority as a TLS anchor.
     requireValid(roots.every((cert) => cert.ca));
+    const currentRoots = roots.filter(validNow);
+    requireValid(currentRoots.length > 0);
     for (let i = 1; i < chain.length; i++) {
       const issuer = chain[i]!,
         child = chain[i - 1]!;
@@ -134,7 +135,7 @@ export function prepareX509Material(
     }
     const last = chain.at(-1)!;
     requireValid(
-      roots.some(
+      currentRoots.some(
         (root) =>
           root.raw.equals(last.raw) || (last.checkIssued(root) && last.verify(root.publicKey)),
       ),
@@ -157,10 +158,12 @@ export function prepareX509Material(
     return Object.freeze({
       spiffeId: expectedIdentity,
       revision,
-      certificateExpiresAt: Math.min(...all.map((c) => Date.parse(c.validTo))),
+      certificateExpiresAt: Math.min(
+        ...[...chain, ...currentRoots].map((c) => Date.parse(c.validTo)),
+      ),
       privateKeyDer: keyBytes,
       chainPem: chain.map((c) => c.toString()).join(''),
-      bundlePem: roots.map((c) => c.toString()).join(''),
+      bundlePem: currentRoots.map((c) => c.toString()).join(''),
     });
   } catch {
     keyBytes?.fill(0);

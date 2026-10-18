@@ -102,7 +102,8 @@ beforeAll(() => {
   directory = mkdtempSync(join(tmpdir(), 'axiom-x509-'));
   key('root');
   key('foreign');
-  for (const name of ['root', 'foreign'])
+  key('expired-root');
+  for (const name of ['root', 'foreign', 'expired-root'])
     openssl([
       'req',
       '-new',
@@ -120,11 +121,66 @@ beforeAll(() => {
       '-out',
       name + '.pem',
     ]);
+  openssl([
+    'x509',
+    '-in',
+    'expired-root.pem',
+    '-signkey',
+    'expired-root.key',
+    '-days',
+    '0',
+    '-out',
+    'expired-root.pem',
+  ]);
   sign(
     'intermediate',
     'root',
     'basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n',
   );
+  openssl([
+    'x509',
+    '-req',
+    '-in',
+    'intermediate.csr',
+    '-CA',
+    'root.pem',
+    '-CAkey',
+    'root.key',
+    '-set_serial',
+    String(serial++),
+    '-days',
+    '0',
+    '-extfile',
+    'intermediate.ext',
+    '-out',
+    'expired-intermediate.pem',
+  ]);
+  writeFileSync(join(directory, 'future-index.txt'), '', { mode: 0o600 });
+  writeFileSync(join(directory, 'future-serial.txt'), '1000\n', { mode: 0o600 });
+  writeFileSync(
+    join(directory, 'future-ca.cnf'),
+    '[ca]\ndefault_ca=owned\n[owned]\ndatabase=future-index.txt\nserial=future-serial.txt\nnew_certs_dir=.\ncertificate=root.pem\nprivate_key=root.key\ndefault_md=sha256\npolicy=policy\n[policy]\ncommonName=supplied\n[authority]\nbasicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign\n',
+    { mode: 0o600 },
+  );
+  const futureDate = (delta: number) =>
+    new Date(Date.now() + delta).toISOString().replace(/\D/g, '').slice(0, 14) + 'Z';
+  openssl([
+    'ca',
+    '-config',
+    'future-ca.cnf',
+    '-batch',
+    '-notext',
+    '-in',
+    'intermediate.csr',
+    '-startdate',
+    futureDate(86400000),
+    '-enddate',
+    futureDate(172800000),
+    '-extensions',
+    'authority',
+    '-out',
+    'future-root.pem',
+  ]);
   sign('leaf', 'intermediate', extensions());
   sign('rotated', 'intermediate', extensions());
   sign('wrong-san', 'intermediate', extensions('URI:spiffe://foreign.test/controller/assessment'));
@@ -182,6 +238,45 @@ describe('bounded material, explicitly not peer PKIX authority', () => {
       expect(() => prepareX509Material(value, identity, 'client', Date.now())).toThrow(
         'X509 workload material refused',
       );
+  });
+  it('uses current anchors while binding the complete rotated bundle revision', () => {
+    const baseline = prepareX509Material(reply(), identity, 'client', Date.now());
+    const input = reply();
+    input.svids[0]!.bundle = Buffer.concat([der('expired-root'), der('root'), der('future-root')]);
+    const material = prepareX509Material(input, identity, 'client', Date.now());
+    try {
+      expect(material.bundlePem).toBe(baseline.bundlePem);
+      expect(material.bundlePem.match(/BEGIN CERTIFICATE/g)).toHaveLength(1);
+      expect(material.certificateExpiresAt).toBe(baseline.certificateExpiresAt);
+      expect(material.revision).not.toBe(baseline.revision);
+      expect(material.certificateExpiresAt).toBeGreaterThan(Date.now());
+    } finally {
+      baseline.privateKeyDer.fill(0);
+      material.privateKeyDer.fill(0);
+    }
+  });
+  it.each(['expired-root', 'future-root', 'foreign'])(
+    'refuses a bundle with only %s and no matching current anchor',
+    (name) => {
+      const input = reply();
+      input.svids[0]!.bundle = der(name);
+      expect(() => prepareX509Material(input, identity, 'client', Date.now())).toThrow(X509Refused);
+    },
+  );
+  it('still parses, bounds and deduplicates inactive bundle entries and requires every entry to be a CA', () => {
+    for (const suffix of [der('expired-root'), der('leaf'), Buffer.from([0x30, 0x80, 0, 0])]) {
+      const input = reply();
+      input.svids[0]!.bundle = Buffer.concat([der('root'), der('expired-root'), suffix]);
+      expect(() => prepareX509Material(input, identity, 'client', Date.now())).toThrow(X509Refused);
+    }
+  });
+  it('refuses an expired intermediate even with a matching current root', () => {
+    const input = reply();
+    input.svids[0]!.x509Svid = Buffer.concat([der('leaf'), der('expired-intermediate')]);
+    expect(
+      new X509Certificate(der('expired-intermediate')).validToDate.getTime(),
+    ).toBeLessThanOrEqual(Date.now());
+    expect(() => prepareX509Material(input, identity, 'client', Date.now())).toThrow(X509Refused);
   });
   it('rejects trailing and concatenated PKCS8 DER even when Node accepts its first key', () => {
     for (const suffix of [Buffer.from([0]), keys.get('leaf')!]) {
@@ -286,6 +381,18 @@ describe('fixed source lease without a server or network', () => {
       expect(f.close).toHaveBeenCalledOnce();
     },
   );
+  it('invalidates the pinned epoch when only an unused expired bundle anchor changes', async () => {
+    const f = sourceFixture();
+    await expect(
+      f.source.withSnapshot(Date.now() + 1000, async () => {
+        const rotated = reply();
+        rotated.svids[0]!.bundle = Buffer.concat([der('root'), der('expired-root')]);
+        f.emit(rotated);
+        return 'withheld after bundle rotation';
+      }),
+    ).rejects.toThrow(X509Refused);
+    expect(f.close).toHaveBeenCalledOnce();
+  });
   it('rejects 65 identities before inspecting entries and wipes every received key', async () => {
     const f = sourceFixture();
     const entries = Array.from({ length: 65 }, () => reply().svids[0]!);
