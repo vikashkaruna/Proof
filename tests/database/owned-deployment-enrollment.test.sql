@@ -6,6 +6,9 @@
 select public.designate_platform_founder(pg_temp.id(2),'owned169 SQL fixture','Explicit disposable founder authority only');
 select set_config('axiom.platform_founder_sync','on',true);
 delete from public.tenant_users where tenant_id=pg_temp.pg_id(1) and user_id=pg_temp.id(2);
+-- Explicit removal re-derives the cache; fault-inject that derived row too.
+select set_config('axiom.platform_founder_sync','on',true);
+delete from public.tenant_users where tenant_id=pg_temp.pg_id(1) and user_id=pg_temp.id(2) and membership_source='platform_founder';
 select set_config('axiom.platform_founder_sync','off',true);
 select pg_temp.ok(not exists(select 1 from public.tenant_users where tenant_id=pg_temp.pg_id(1) and user_id=pg_temp.id(2)),'founder fixture actually has no tenant membership');
 create temporary table enrollment169_saved(name text primary key,v jsonb);
