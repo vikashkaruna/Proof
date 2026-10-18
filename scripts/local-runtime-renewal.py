@@ -249,13 +249,26 @@ def metadata(config: dict, name: str, purpose: str | None = None) -> dict:
     return value
 
 
-def namespace(config: dict, value: dict) -> str:
+def namespace(config: dict, value: dict, kind: str = "node") -> str:
     if not value["running"]:
         raise ValueError("Runtime peer is not running")
-    result = docker_read(
-        config,
-        ["exec", "--user", "0", value["id"], "/bin/readlink", "/proc/self/ns/net"],
-    )
+    # Minimal BFF images intentionally do not include readlink or a shell.
+    # Select only the reviewed runtime's existing interpreter, never a fallback.
+    readers = {
+        "node": [
+            "node",
+            "-e",
+            "console.log(require('node:fs').readlinkSync('/proc/self/ns/net'))",
+        ],
+        "scheduler": [
+            "python",
+            "-c",
+            "import os;print(os.readlink('/proc/self/ns/net'))",
+        ],
+    }
+    if kind not in readers:
+        raise ValueError("Unreviewed namespace reader")
+    result = docker_read(config, ["exec", "--user", "0", value["id"], *readers[kind]])
     if not re.fullmatch(r"net:\[[0-9]+\]", result):
         raise ValueError("Network namespace unavailable")
     return result
@@ -310,7 +323,7 @@ def capture_runtime_bindings(config: dict, bff_id: str) -> dict:
 
 
 # Uses the BFF's existing credentials internally; argv and output contain none.
-HEALTH = """const u=new URL(process.env.SUPABASE_URL);if(!['host.docker.internal','127.0.0.1','localhost'].includes(u.hostname))process.exit(2);const a=await fetch(new URL('/rest/v1/tenants?select=id&limit=0',u),{headers:{apikey:process.env.SUPABASE_SERVICE_ROLE_KEY,Authorization:'Bearer '+process.env.SUPABASE_SERVICE_ROLE_KEY},signal:AbortSignal.timeout(5000)});await a.arrayBuffer();if(a.status!==200)process.exit(3);const h=await fetch('http://127.0.0.1:'+String(process.env.PORT||4000)+'/health',{signal:AbortSignal.timeout(5000)});await h.arrayBuffer();if(h.status!==200)process.exit(4);"""
+HEALTH = """const u=new URL(process.env.SUPABASE_URL);if(!['host.docker.internal','127.0.0.1','localhost'].includes(u.hostname))process.exit(2);const a=await fetch(new URL('/rest/v1/tenants?select=id&limit=0',u),{headers:{apikey:process.env.SUPABASE_SERVICE_KEY,Authorization:'Bearer '+process.env.SUPABASE_SERVICE_KEY},signal:AbortSignal.timeout(5000)});await a.arrayBuffer();if(a.status!==200)process.exit(3);const h=await fetch('http://127.0.0.1:'+String(process.env.PORT||4000)+'/health',{signal:AbortSignal.timeout(5000)});await h.arrayBuffer();if(h.status!==200)process.exit(4);"""
 
 
 def stable_bff(config: dict) -> tuple[dict, str]:
@@ -393,7 +406,12 @@ def reconcile_namespaces(config: dict) -> list[dict]:
             or value["network"] != "container:" + before["id"]
         ):
             raise ValueError("Reviewed peer image/network changed")
-        if namespace(config, value) != net:
+        if (
+            namespace(
+                config, value, "scheduler" if peer["kind"] == "scheduler" else "node"
+            )
+            != net
+        ):
             stale.append((peer, value))
     if not stale:
         return []
@@ -455,7 +473,12 @@ def reconcile_namespaces(config: dict) -> list[dict]:
             current = metadata(config, peer["name"], peer["purpose"])
             if (
                 current["image"] != peer["image"]
-                or namespace(config, current) != net
+                or namespace(
+                    config,
+                    current,
+                    "scheduler" if peer["kind"] == "scheduler" else "node",
+                )
+                != net
                 or stable_bff(config) != (before, net)
             ):
                 raise ValueError("Repaired namespace unconfirmed")

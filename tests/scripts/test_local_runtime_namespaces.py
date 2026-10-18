@@ -70,7 +70,7 @@ class NamespaceTests(unittest.TestCase):
         ):
             m.metadata(self.config, self.peer["name"], self.peer["purpose"])
 
-    def test_fixed_readlink_only_after_running_metadata(self):
+    def test_minimal_bff_uses_node_without_external_readlink(self):
         with patch.object(m, "docker_read", return_value="net:[123]") as read:
             self.assertEqual(m.namespace(self.config, self.value), "net:[123]")
             self.assertEqual(
@@ -80,13 +80,27 @@ class NamespaceTests(unittest.TestCase):
                     "--user",
                     "0",
                     self.value["id"],
-                    "/bin/readlink",
-                    "/proc/self/ns/net",
+                    "node",
+                    "-e",
+                    "console.log(require('node:fs').readlinkSync('/proc/self/ns/net'))",
                 ],
             )
             self.value["running"] = False
             with self.assertRaises(ValueError):
                 m.namespace(self.config, self.value)
+            self.assertEqual(read.call_count, 1)
+
+    def test_scheduler_uses_reviewed_python_reader_and_no_unknown_fallback(self):
+        with patch.object(m, "docker_read", return_value="net:[88]") as read:
+            self.assertEqual(
+                m.namespace(self.config, self.value, "scheduler"), "net:[88]"
+            )
+            self.assertEqual(
+                read.call_args.args[1][4:],
+                ["python", "-c", "import os;print(os.readlink('/proc/self/ns/net'))"],
+            )
+            with self.assertRaises(ValueError):
+                m.namespace(self.config, self.value, "shell")
             self.assertEqual(read.call_count, 1)
 
     def test_recreated_bff_requires_reinstall_without_health_exec(self):
@@ -109,6 +123,19 @@ class NamespaceTests(unittest.TestCase):
                 self.assertRaises(ValueError),
             ):
                 m.stable_bff(self.config)
+
+    def test_backend_health_uses_project_service_key_without_exposing_value(self):
+        with (
+            patch.object(m, "metadata", return_value=self.bff),
+            patch.object(m, "namespace", return_value="net:[9]"),
+            patch.object(m, "run", return_value=0) as run,
+        ):
+            m.stable_bff(self.config)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:4], ["/docker", "exec", self.bff["id"], "node"])
+        self.assertIn("process.env.SUPABASE_SERVICE_KEY", command[-1])
+        self.assertNotIn("SUPABASE_SERVICE_ROLE_KEY", command[-1])
+        self.assertNotIn("Config.Env", command[-1])
 
     def test_same_id_restart_with_stable_current_namespace_passes(self):
         with (
@@ -148,7 +175,7 @@ class NamespaceTests(unittest.TestCase):
                 value["image"] = "sha256:" + "0" * 64
             return value
 
-        def net(config, value):
+        def net(config, value, kind="node"):
             return "net:[9]" if state["restarted"] or fresh else "net:[1]"
 
         def run(command, **kwargs):
