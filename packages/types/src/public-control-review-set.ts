@@ -1,3 +1,4 @@
+import { ApprovedLibraryVersionSchema } from './catalogue-versions';
 import { z } from 'zod';
 import { AssessmentQuestionnaireSchema } from './assessment-questionnaire';
 import { publicControlSourceV2Schema } from './public-control-assessment-v2';
@@ -38,7 +39,7 @@ export const publicControlReviewSetRequestSchema = z
         payloadSha256: digest,
         catalogueManifestSha256: digest,
         mappingVersion: z.literal('public-evidence-1'),
-        libraryVersion: z.literal('0.1.1'),
+        libraryVersion: ApprovedLibraryVersionSchema,
         questionnaireDigest: digest,
       })
       .strict(),
