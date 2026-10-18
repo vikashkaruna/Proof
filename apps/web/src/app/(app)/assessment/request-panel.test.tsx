@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
+import { canonicalJson } from '@axiom/ledger';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import { AssessmentRequestSchema } from '@axiom/types';
@@ -1026,3 +1027,50 @@ it.each(['operation', 'reviewRef'] as const)(
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body).request).toEqual(second.request);
   },
 );
+
+it('requires saved public source review before a new local request is journaled or submitted', () => {
+  render(
+    panel({ configuration: 'configured', sourceRequirement: 'public_control_review_required' }),
+  );
+  expect(
+    screen.getByRole('link', { name: 'Open Discovery and review the source' }).getAttribute('href'),
+  ).toBe('/discovery');
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Request unknown-answer assessment' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Enter questionnaire declarations' })).toBeNull();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull();
+  expect(crypto.randomUUID).not.toHaveBeenCalled();
+});
+it('keeps unsupported retained intent until exact server refusal and explicit checked archive', async () => {
+  const saved = journal();
+  retainAssessmentJournal(localStorage, saved);
+  const refusal = {
+    code: 'assessment_public_control_review_required',
+    tenantId: tenant,
+    actorId: actor,
+    engagementId: engagement,
+    operationKey: operation,
+    requestText: canonicalJson(saved.request),
+    sourceRequirement: 'public_control_review_required',
+    dispatchState: 'not_recorded',
+  };
+  fetchMock.mockResolvedValueOnce(Response.json({ error: refusal }, { status: 409 }));
+  render(
+    panel({ configuration: 'configured', sourceRequirement: 'public_control_review_required' }),
+  );
+  expect(screen.queryByRole('button', { name: 'Archive rejected browser reference' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'Verify original request admission' }));
+  const archive = await screen.findByRole('button', { name: 'Archive rejected browser reference' });
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(saved);
+  fetchMock.mockResolvedValueOnce(
+    Response.json({ error: { code: 'assessment_job_not_found' } }, { status: 404 }),
+  );
+  fireEvent.click(archive);
+  await waitFor(() => expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull());
+  expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual(saved.request);
+  expect(crypto.randomUUID).not.toHaveBeenCalled();
+  expect(
+    localStorage.getItem(assessmentJournalKey(tenant, actor) + ':rejected:' + operation),
+  ).toContain('not_recorded');
+});

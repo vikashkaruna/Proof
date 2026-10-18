@@ -65,11 +65,32 @@ export const AssessmentRequestReceiptSchema = z
   });
 export type AssessmentRequest = z.infer<typeof AssessmentRequestSchema>;
 
+export const AssessmentSourceRequirementSchema = z.enum([
+  'public_control_review_required',
+  'questionnaire_or_public_review',
+  'unknown',
+]);
+export type AssessmentSourceRequirement = z.infer<typeof AssessmentSourceRequirementSchema>;
+export const AssessmentSourceRefusalSchema = z
+  .object({
+    code: z.literal('assessment_public_control_review_required'),
+    tenantId: z.uuid(),
+    actorId: z.uuid(),
+    engagementId: z.uuid(),
+    operationKey: z.uuid(),
+    requestText: z.string().max(ASSESSMENT_REQUEST_MAX_BYTES),
+    dispatchState: z.literal('not_recorded'),
+    sourceRequirement: z.literal('public_control_review_required'),
+  })
+  .strict();
+export type AssessmentSourceRefusal = z.infer<typeof AssessmentSourceRefusalSchema>;
+
 export const AssessmentConfigurationSchema = z
   .object({
     tenantId: z.uuid(),
     configuration: z.enum(['configured', 'unconfigured', 'unknown']),
     executionReadiness: z.literal('not_verified'),
+    sourceRequirement: AssessmentSourceRequirementSchema.default('unknown'),
   })
   .strict();
 export type AssessmentConfiguration = z.infer<typeof AssessmentConfigurationSchema>;

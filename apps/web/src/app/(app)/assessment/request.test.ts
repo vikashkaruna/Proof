@@ -4,6 +4,8 @@ import { canonicalJson } from '@axiom/ledger';
 import { AssessmentRequestSchema, ASSESSMENT_REQUEST_MAX_BYTES } from '@axiom/types';
 import {
   readAssessmentJournal,
+  AssessmentSourceRequiredError,
+  archiveRejectedAssessmentJournal,
   resolveAssessmentSourceIntent,
   clearCancelledAssessmentSourceJournal,
   retainAssessmentJournal,
@@ -482,4 +484,76 @@ it('never archives another actor or a concurrently changed journal on source can
     clearCancelledAssessmentSourceJournal(localStorage, value, { state: 'cancelled', data: row }),
   ).toThrow();
   expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(changed);
+});
+
+const sourceRefusal = (value = retainedFixture()) => ({
+  code: 'assessment_public_control_review_required' as const,
+  tenantId: value.tenantId,
+  actorId: value.actorId,
+  engagementId: value.request.engagementId,
+  operationKey: value.request.operationKey,
+  requestText: canonicalJson(value.request),
+  dispatchState: 'not_recorded' as const,
+  sourceRequirement: 'public_control_review_required' as const,
+});
+it('recognizes only exact bound definite refusal and preserves the retained request', async () => {
+  const value = retainedFixture();
+  retainAssessmentJournal(localStorage, value);
+  const fetchMock = vi.mocked(fetch);
+  fetchMock.mockResolvedValueOnce(Response.json({ error: sourceRefusal(value) }, { status: 409 }));
+  await expect(submitUnknownAssessment(value)).rejects.toBeInstanceOf(
+    AssessmentSourceRequiredError,
+  );
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+  fetchMock.mockResolvedValueOnce(
+    Response.json({ error: { ...sourceRefusal(value), requestText: '{}' } }, { status: 409 }),
+  );
+  await expect(submitUnknownAssessment(value)).rejects.toThrow('does not match');
+});
+it('archives explicit definite refusal only after fresh exact404 and preserves its receipt', async () => {
+  const value = retainedFixture();
+  retainAssessmentJournal(localStorage, value);
+  vi.mocked(fetch).mockResolvedValueOnce(
+    Response.json({ error: { code: 'assessment_job_not_found' } }, { status: 404 }),
+  );
+  await archiveRejectedAssessmentJournal(localStorage, value, sourceRefusal(value));
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toBeNull();
+  const archived = JSON.parse(
+    localStorage.getItem(assessmentJournalKey(tenant, actor) + ':rejected:' + operation)!,
+  );
+  expect(archived.retained).toEqual(value);
+  expect(archived.refusal).toEqual(sourceRefusal(value));
+  expect(fetch).toHaveBeenCalledWith(
+    `/api/bff/v1/assessment/jobs/${operation}`,
+    expect.objectContaining({
+      method: 'GET',
+      headers: expect.objectContaining({ 'X-Expected-Actor-Id': actor }),
+    }),
+  );
+});
+it.each([200, 403, 503, 404])(
+  'does not archive an unsupported request from unverified status%d',
+  async (status) => {
+    const value = retainedFixture();
+    retainAssessmentJournal(localStorage, value);
+    vi.mocked(fetch).mockResolvedValueOnce(
+      Response.json({ error: { code: 'unconfirmed' } }, { status }),
+    );
+    await expect(
+      archiveRejectedAssessmentJournal(localStorage, value, sourceRefusal(value)),
+    ).rejects.toThrow('absence could not be confirmed');
+    expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
+  },
+);
+it('refuses forged refusal scope before any status request or local archival', async () => {
+  const value = retainedFixture();
+  retainAssessmentJournal(localStorage, value);
+  await expect(
+    archiveRejectedAssessmentJournal(localStorage, value, {
+      ...sourceRefusal(value),
+      actorId: tenant,
+    }),
+  ).rejects.toThrow('does not match');
+  expect(fetch).not.toHaveBeenCalled();
+  expect(readAssessmentJournal(localStorage, tenant, actor)).toEqual(value);
 });

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   ASSESSMENT_REQUEST_MAX_BYTES,
   AssessmentRequestSchema,
+  AssessmentSourceRequirementSchema,
   type AssessmentRequest,
 } from '@axiom/types';
 import {
@@ -31,9 +32,17 @@ const errorCode = z.enum([
   'assessment_engagement_not_found',
   'assessment_already_recorded',
   'assessment_request_unconfirmed',
+  'assessment_public_control_review_required',
 ]);
 const reply = z.union([
   z.object({ data: receipt }).strict(),
+  z
+    .object({
+      configuration: z
+        .object({ tenantId: uuid, sourceRequirement: AssessmentSourceRequirementSchema })
+        .strict(),
+    })
+    .strict(),
   z.object({ error: errorCode }).strict(),
 ]);
 const MAX_BYTES = ASSESSMENT_REQUEST_MAX_BYTES + 1024;
@@ -112,7 +121,7 @@ export async function startAssessmentProducerSocket(options: {
     try {
       if (
         req.method !== 'POST' ||
-        req.url !== '/assessment/request' ||
+        !['/assessment/request', '/assessment/configuration'].includes(req.url ?? '') ||
         req.headers['content-type'] !== 'application/json' ||
         req.headers['content-encoding']
       )
@@ -121,6 +130,21 @@ export async function startAssessmentProducerSocket(options: {
       for await (const chunk of req) {
         bytes = Buffer.concat([bytes, Buffer.from(chunk as Uint8Array)]);
         if (bytes.length > MAX_BYTES || ended) throw new Error();
+      }
+      if (req.url === '/assessment/configuration') {
+        const query = z
+          .object({ tenantId: uuid })
+          .strict()
+          .parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
+        bytes.fill(0);
+        const requirement = AssessmentSourceRequirementSchema.parse(
+          (await options.producer.sourceRequirementForTenant?.(query.tenantId)) ?? 'unknown',
+        );
+        if (!ended)
+          send(200, {
+            configuration: { tenantId: query.tenantId, sourceRequirement: requirement },
+          });
+        return;
       }
       const value = input.parse(
         JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
@@ -197,6 +221,83 @@ export const assessmentProducerSocketConfiguration = z
   })
   .strict();
 
+async function producerSocketExchange(
+  config: z.infer<typeof assessmentProducerSocketConfiguration>,
+  path: string,
+  data: unknown,
+) {
+  if ((await realpath(config.socketPath)) !== config.socketPath) throw new Error();
+  const stat = await lstat(config.socketPath);
+  const parent = await lstat(dirname(config.socketPath));
+  if (
+    !stat.isSocket() ||
+    stat.uid !== config.producerUid ||
+    stat.gid !== config.socketGroup ||
+    (stat.mode & 0o7777) !== 0o660 ||
+    !parent.isDirectory() ||
+    parent.uid !== config.producerUid ||
+    parent.gid !== config.socketGroup ||
+    (parent.mode & 0o7777) !== 0o710
+  )
+    throw new Error();
+  for (let ancestor = dirname(dirname(config.socketPath)); ; ancestor = dirname(ancestor)) {
+    const info = await lstat(ancestor);
+    if (
+      !info.isDirectory() ||
+      ![0, config.producerUid].includes(info.uid) ||
+      ((info.mode & 0o022) !== 0 && !(info.uid === 0 && info.mode & 0o1000))
+    )
+      throw new Error();
+    if (ancestor === dirname(ancestor)) break;
+  }
+  const bytes = Buffer.from(JSON.stringify(data));
+  if (bytes.length > MAX_BYTES) throw new Error();
+  const result = await new Promise<z.infer<typeof reply>>((done, fail) => {
+    const req = request(
+      {
+        socketPath: config.socketPath,
+        method: 'POST',
+        path,
+        headers: { 'content-type': 'application/json', 'content-length': bytes.length },
+        agent: false,
+      },
+      (res) => {
+        let response = Buffer.alloc(0);
+        res.on('data', (chunk: Buffer) => {
+          response = Buffer.concat([response, chunk]);
+          if (response.length > 2048) req.destroy(new Error('Producer response refused'));
+        });
+        res.on('error', fail);
+        res.on('aborted', () => fail(new Error('Producer response refused')));
+        res.on('end', () => {
+          try {
+            if (
+              res.headers['content-type'] !== 'application/json' ||
+              res.headers['content-encoding']
+            )
+              throw new Error();
+            const parsed = reply.parse(
+              JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(response)),
+            );
+            if (res.statusCode !== 200 && !('error' in parsed)) throw new Error();
+            done(parsed);
+          } catch {
+            fail(new Error('Producer response refused'));
+          }
+        });
+      },
+    );
+    const timer = setTimeout(
+      () => req.destroy(new Error('Producer response refused')),
+      DEADLINE_MS + 1000,
+    );
+    req.once('close', () => clearTimeout(timer));
+    req.on('error', fail);
+    req.end(bytes, () => bytes.fill(0));
+  });
+  return result;
+}
+
 /** Local same-host socket only. The deployment mount and all ancestors are
  * operator-controlled; file metadata pins the producer and trusted BFF group.
  * The facade grants no controller/unwrap/launch authority. */
@@ -204,83 +305,26 @@ export function assessmentProducerSocketClient(configuration: unknown): Assessme
   const config = assessmentProducerSocketConfiguration.parse(configuration);
   return Object.freeze({
     configurationForTenant: (tenantId: string) => config.tenantIds.includes(uuid.parse(tenantId)),
+    async sourceRequirementForTenant(tenantId: string) {
+      const id = uuid.parse(tenantId);
+      if (!config.tenantIds.includes(id)) return 'unknown';
+      const result = await producerSocketExchange(config, '/assessment/configuration', {
+        tenantId: id,
+      });
+      if (!('configuration' in result) || result.configuration.tenantId !== id)
+        throw new DispatchRefused();
+      return result.configuration.sourceRequirement;
+    },
     async request(tenantId: string, actorId: string, value: AssessmentRequest) {
       try {
         const data = input.parse({ tenantId, actorId, request: value });
         if (!config.tenantIds.includes(data.tenantId)) throw new Error();
-        if ((await realpath(config.socketPath)) !== config.socketPath) throw new Error();
-        const stat = await lstat(config.socketPath);
-        const parent = await lstat(dirname(config.socketPath));
-        if (
-          !stat.isSocket() ||
-          stat.uid !== config.producerUid ||
-          stat.gid !== config.socketGroup ||
-          (stat.mode & 0o7777) !== 0o660 ||
-          !parent.isDirectory() ||
-          parent.uid !== config.producerUid ||
-          parent.gid !== config.socketGroup ||
-          (parent.mode & 0o7777) !== 0o710
-        )
-          throw new Error();
-        for (let ancestor = dirname(dirname(config.socketPath)); ; ancestor = dirname(ancestor)) {
-          const info = await lstat(ancestor);
-          if (
-            !info.isDirectory() ||
-            ![0, config.producerUid].includes(info.uid) ||
-            ((info.mode & 0o022) !== 0 && !(info.uid === 0 && info.mode & 0o1000))
-          )
-            throw new Error();
-          if (ancestor === dirname(ancestor)) break;
-        }
-        const bytes = Buffer.from(JSON.stringify(data));
-        if (bytes.length > MAX_BYTES) throw new Error();
-        const result = await new Promise<z.infer<typeof reply>>((done, fail) => {
-          const req = request(
-            {
-              socketPath: config.socketPath,
-              method: 'POST',
-              path: '/assessment/request',
-              headers: { 'content-type': 'application/json', 'content-length': bytes.length },
-              agent: false,
-            },
-            (res) => {
-              let response = Buffer.alloc(0);
-              res.on('data', (chunk: Buffer) => {
-                response = Buffer.concat([response, chunk]);
-                if (response.length > 2048) req.destroy(new Error('Producer response refused'));
-              });
-              res.on('error', fail);
-              res.on('aborted', () => fail(new Error('Producer response refused')));
-              res.on('end', () => {
-                try {
-                  if (
-                    res.headers['content-type'] !== 'application/json' ||
-                    res.headers['content-encoding']
-                  )
-                    throw new Error();
-                  const parsed = reply.parse(
-                    JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(response)),
-                  );
-                  if (res.statusCode !== 200 && 'data' in parsed) throw new Error();
-                  done(parsed);
-                } catch {
-                  fail(new Error('Producer response refused'));
-                }
-              });
-            },
-          );
-          const timer = setTimeout(
-            () => req.destroy(new Error('Producer response refused')),
-            DEADLINE_MS + 1000,
-          );
-          req.once('close', () => clearTimeout(timer));
-          req.on('error', fail);
-          req.end(bytes, () => bytes.fill(0));
-        });
+        const result = await producerSocketExchange(config, '/assessment/request', data);
         if ('data' in result) {
           if (result.data.job_id !== data.request.operationKey.toLowerCase()) throw new Error();
           return result.data;
         }
+        if (!('error' in result)) throw new Error();
         if (result.error === 'assessment_questionnaire_mismatch')
           throw new AssessmentQuestionnaireRefused();
         if (result.error !== 'assessment_request_unconfirmed')

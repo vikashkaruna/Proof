@@ -20,7 +20,10 @@ async function fixture(deadlineMs = 5000) {
   const directory = await realpath(await mkdtemp('/tmp/ax-producer-'));
   await chmod(directory, 0o700);
   cleanup.push(() => rm(directory, { recursive: true, force: true }));
-  const producer = { request: vi.fn(async (_t: string, _a: string, _r: unknown) => receipt) };
+  const producer = {
+    sourceRequirementForTenant: vi.fn(async () => 'public_control_review_required' as const),
+    request: vi.fn(async (_t: string, _a: string, _r: unknown) => receipt),
+  };
   const socket = await startAssessmentProducerSocket({
     directory,
     socketGroup: process.getgid!(),
@@ -139,5 +142,18 @@ describe('local assessment producer sidecar', () => {
     await expect(loadAssessmentProducerSocket('/nonexistent/producer.json')).rejects.toThrow(
       'startup refused',
     );
+  });
+});
+
+it('reads source admission over the same protected socket without forwarding an assessment', async () => {
+  const f = await fixture();
+  expect(await f.client.sourceRequirementForTenant?.(id(1))).toBe('public_control_review_required');
+  expect(f.producer.request).not.toHaveBeenCalled();
+  expect(await f.client.sourceRequirementForTenant?.(id(8))).toBe('unknown');
+  f.producer.request.mockRejectedValueOnce(
+    new AssessmentContextRefused('assessment_public_control_review_required'),
+  );
+  await expect(f.client.request(id(1), id(2), value)).rejects.toMatchObject({
+    code: 'assessment_public_control_review_required',
   });
 });

@@ -10,6 +10,7 @@ import {
   ASSESSMENT_REQUEST_MAX_BYTES,
   type AssessmentRequest,
   type TenantId,
+  type AssessmentSourceRequirement,
 } from '@axiom/types';
 import { z } from 'zod';
 import { readControllerFile, controllerFilePath } from './controller-files.js';
@@ -33,7 +34,12 @@ export class AssessmentQuestionnaireRefused extends Error {
   }
 }
 export class AssessmentContextRefused extends Error {
-  constructor(readonly code: 'assessment_engagement_not_found' | 'assessment_already_recorded') {
+  constructor(
+    readonly code:
+      | 'assessment_engagement_not_found'
+      | 'assessment_already_recorded'
+      | 'assessment_public_control_review_required',
+  ) {
     super('Assessment context refused');
   }
 }
@@ -83,6 +89,9 @@ const controlSchema = z.object({
 });
 export interface AssessmentRequestProducer {
   configurationForTenant?(tenantId: string): boolean;
+  sourceRequirementForTenant?(
+    tenantId: string,
+  ): AssessmentSourceRequirement | Promise<AssessmentSourceRequirement>;
   request(
     tenantId: string,
     actorId: string,
@@ -132,11 +141,13 @@ export async function composeAssessmentProducer(
       { workloadId: string; dispatch: Pick<AssessmentDispatch, 'enqueue' | 'recover'> }
     >();
     const ownedKeys = new Set<string>();
+    const localTenants = new Set<string>();
     for (const tenant of config.tenants) {
       if (registry.has(tenant.tenantId)) throw new DispatchRefused();
       const id = tenant.tenantId as TenantId;
       const keys = tenant.keys;
       if (keys.provider === 'local') {
+        localTenants.add(id);
         await requireParikshanRegistration(db, id, tenant.workloadId, tenant.trustDomain);
         // Wrap only: this facade never unwraps, claims or launches. Local mode
         // admits only reviewed public-control work (enqueueLocal).
@@ -204,6 +215,14 @@ export async function composeAssessmentProducer(
     }
     return Object.freeze({
       configurationForTenant: (tenantId: string) => registry.has(uuid.parse(tenantId)),
+      sourceRequirementForTenant: (tenantId: string) => {
+        const id = uuid.parse(tenantId);
+        return !registry.has(id)
+          ? 'unknown'
+          : localTenants.has(id)
+            ? 'public_control_review_required'
+            : 'questionnaire_or_public_review';
+      },
       async request(tenantValue: string, actorValue: string, value: AssessmentRequest) {
         const tenantId = uuid.parse(tenantValue),
           actorId = uuid.parse(actorValue),
@@ -324,6 +343,10 @@ export async function composeAssessmentProducer(
         };
         const recovered = await configured.dispatch.recover(context, input.expectedQuestionnaire);
         if (recovered) return recovered;
+        // A positive recovery always wins. Only a missing exact operation and
+        // the configured local-only admission rule establish definite refusal.
+        if (localTenants.has(tenantId))
+          throw new AssessmentContextRefused('assessment_public_control_review_required');
         const hasDeclarations =
           Object.values(input.answers).some((row) =>
             Object.values(row).some((answer) => answer !== null),

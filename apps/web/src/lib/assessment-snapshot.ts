@@ -44,15 +44,15 @@ export async function loadAssessmentSnapshot(
 }
 
 /** Configuration presence is not controller health or execution acceptance. */
-export async function loadAssessmentConfiguration(
+export async function loadAssessmentConfigurationDetails(
   supabase: SupabaseClient,
   tenantId: string,
-): Promise<AssessmentConfiguration['configuration']> {
+): Promise<AssessmentConfiguration | null> {
   try {
     const {
       data: { session },
     } = await supabase.auth.getSession();
-    if (!session?.access_token) return 'unknown';
+    if (!session?.access_token) return null;
     const response = await fetch(
       new URL(
         '/v1/assessment/configuration',
@@ -65,12 +65,17 @@ export async function loadAssessmentConfiguration(
         signal: AbortSignal.timeout(15000),
       },
     );
-    if (!response.ok) return 'unknown';
+    if (!response.ok) return null;
     const result = AssessmentConfigurationSchema.safeParse(await response.json());
-    return result.success && result.data.tenantId === tenantId
-      ? result.data.configuration
-      : 'unknown';
+    return result.success && result.data.tenantId === tenantId ? result.data : null;
   } catch {
-    return 'unknown';
+    return null;
   }
+}
+
+export async function loadAssessmentConfiguration(
+  supabase: SupabaseClient,
+  tenantId: string,
+): Promise<AssessmentConfiguration['configuration']> {
+  return (await loadAssessmentConfigurationDetails(supabase, tenantId))?.configuration ?? 'unknown';
 }
