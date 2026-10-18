@@ -29,6 +29,7 @@ import { ReviewOnlyDetail } from './review-only-detail';
 import { ApprovalActions } from './approval-actions';
 import { KillSwitchButton } from './kill-switch-button';
 import { DryRunHistory, type DryRunRow } from './dry-run-history';
+import { RunDryRunButton } from './run-dry-run-button';
 import { ApprovalProofArchive } from './approval-proof-archive';
 import { DryRunDiffView } from '../../execution/dry-run-diff';
 import { moduleBarProps } from '@/lib/module-bar';
@@ -102,6 +103,7 @@ export default async function PlanDetailPage({ params }: PageProps) {
   const canApprove = can(Capability.PLAN_APPROVE, { role, approvalScopes });
   const canReject = can(Capability.PLAN_REJECT, { role, approvalScopes });
   const canExecute = can(Capability.PLAN_EXECUTE, { role, approvalScopes });
+  const canRequestDryRun = can(Capability.PLAN_CREATE, { role, approvalScopes });
   const canKillSwitch = can(Capability.KILL_SWITCH_ENGAGE_TENANT, { role });
   const canExportEvidence = can(Capability.EVIDENCE_EXPORT, { role });
 
@@ -379,6 +381,13 @@ export default async function PlanDetailPage({ params }: PageProps) {
           />
         </CardContent>
       </Card>
+
+      {canRequestDryRun &&
+        blocked.some((a) => ['draft', 'awaiting_approval'].includes(a.approval_status)) && (
+          <div data-testid="run-dry-run">
+            <RunDryRunButton planId={typedPlan.id} tenantId={typedPlan.tenant_id} />
+          </div>
+        )}
 
       <div className="flex flex-col gap-3">
         {actions.map((a) => (
