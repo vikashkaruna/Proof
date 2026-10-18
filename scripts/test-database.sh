@@ -68,6 +68,7 @@ for version in 2 3; do
 done
 python3 scripts/migrate-database.py --container "$container" --user postgres --database axiom_policy_test
 bash tests/database/migration-runner.sh "$container"
+python3 tests/database/lib/owned-postgres-role-fixture.py "$container" "$image"
 current_version=$(python3 tests/database/lib/report-policy-phases.py current-version --directory "$phase_dir")
 while IFS= read -r suite; do
   echo "Testing $suite (current$current_version)"

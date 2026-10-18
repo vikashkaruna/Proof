@@ -4,7 +4,24 @@
 -- Deployment/enrollment remains an explicit privileged operator procedure.
 -- The existing executor must validate the signed approval before this target
 -- port is invoked; this port additionally checks its persisted execution fences.
-create role owned_target_controller nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+-- Reuse a cluster-wide role only after validating all of its authority flags.
+-- No ALTER ROLE or membership grant repairs an unsafe pre-existing identity.
+do $owned_role$
+begin
+ if not exists(select 1 from pg_catalog.pg_roles where rolname='owned_target_controller') then
+  begin
+   create role owned_target_controller nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+  exception when duplicate_object or unique_violation then
+   null;
+  end;
+ end if;
+ if not exists(select 1 from pg_catalog.pg_roles where rolname='owned_target_controller'
+  and not rolcanlogin and not rolinherit and not rolsuper and not rolcreatedb
+  and not rolcreaterole and not rolreplication and not rolbypassrls) then
+  raise exception using errcode='42501',message='owned target controller role identity refused';
+ end if;
+end
+$owned_role$;
 create schema owned_synthetic;
 revoke all on schema owned_synthetic from public,anon,authenticated,service_role,human_action_writer,agent_ledger_writer,owned_target_controller;
 
