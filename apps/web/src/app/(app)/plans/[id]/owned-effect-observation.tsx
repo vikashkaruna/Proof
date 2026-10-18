@@ -221,7 +221,8 @@ function ObservationResult({ receipt }: { receipt: OwnedEffectObservationReceipt
       <p className="font-medium text-indigo-700">{label}</p>
       {o.outcome === 'unknown' && (
         <p className="mt-1 text-slate-600">
-          Absence is not proof that nothing happened. Keep the original execution paused for review.
+          Absence is not proof that nothing happened. Do not retry this execution. Review its
+          current approval and worker state before deciding what to do next.
         </p>
       )}
       {o.currentMatchesLastCommit === false && (
