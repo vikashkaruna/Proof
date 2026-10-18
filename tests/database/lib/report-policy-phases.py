@@ -134,6 +134,10 @@ def plan(root: Path = ROOT) -> dict:
         versions[-1] < 159 or "catalogue-version-registry.test.sql" in files,
         "catalogue_registry159_suite_required",
     )
+    need(
+        versions[-1] < 160 or "catalogue-dispatch-downstream.test.sql" in files,
+        "catalogue_dispatch160_suite_required",
+    )
     return {
         "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),
