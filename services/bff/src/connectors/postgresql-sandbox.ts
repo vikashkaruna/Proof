@@ -86,7 +86,14 @@ export function composeSandboxPostgresql(
     client?: typeof createSupabaseAdmin;
     readCredential?: typeof readControllerFile;
   } = {},
-): Pick<DiscoveryService, 'run'> {
+): Pick<DiscoveryService, 'run'> & {
+  runRetained(
+    tenantId: string,
+    requestId: string,
+    proof: string,
+    signal?: AbortSignal,
+  ): Promise<{ requestId: string; discoveryRunId: string }>;
+} {
   try {
     const config = SandboxPostgresqlConfiguration.parse(raw);
     if (!['local', 'test'].includes(environment) || environment !== config.environment)
@@ -138,7 +145,7 @@ export function composeSandboxPostgresql(
         registry,
         postgresqlOnly: true,
         sandboxConfigurations: new Map([...entries.keys()].map((key) => [key, digest])),
-        sqlSessions: async (context, signal) => {
+        sqlSessions: async (context, signal, operation) => {
           const entry = entries.get(
             context.tenantId.toLowerCase() + '/' + context.connectorId.toLowerCase(),
           );
@@ -166,13 +173,17 @@ export function composeSandboxPostgresql(
                     throw new Error();
                   // Repeat live enrollment/grant/stop checks AFTER the secret-file read
                   // and immediately before the native session allocates any socket.
-                  const query = client().rpc('resolve_sandbox_postgresql_read_grant', {
-                    p_tenant_id: context.tenantId,
-                    p_estate_id: context.estateId,
-                    p_connector_id: context.connectorId,
-                    p_spiffe_id: context.workloadIdentity,
-                    p_configuration_sha256: digest,
-                  });
+                  const query = client().rpc(
+                    'resolve_sandbox_postgresql_read_grant_for_operation',
+                    {
+                      p_tenant_id: context.tenantId,
+                      p_estate_id: context.estateId,
+                      p_connector_id: context.connectorId,
+                      p_spiffe_id: context.workloadIdentity,
+                      p_configuration_sha256: digest,
+                      p_operation: operation,
+                    },
+                  );
                   const { data, error } = await (signal ? query.abortSignal(signal) : query);
                   const current = z
                     .object({
@@ -217,11 +228,18 @@ export function composeSandboxPostgresql(
         },
       },
     );
-    return Object.freeze({
-      async run(input: unknown, proof: string, signal?: AbortSignal) {
+    const broker = {
+      async run(
+        input: unknown,
+        proof: string,
+        signal?: AbortSignal,
+        retainedCorrelationId?: string,
+      ) {
         const scope = new PostgresDeadline(Date.now() + 30_000, Date.now, signal);
         try {
           const workload = await scope.run(() => identity.verify(proof));
+          if (workload.spiffeId !== 'spiffe://local.axiomproof.test/agent/drishti')
+            throw new Error('Discovery identity refused');
           scope.tighten(workload.expiresAt);
           const selected = DiscoveryRequestSchema.parse(input);
           const configured = entries.get(
@@ -229,7 +247,9 @@ export function composeSandboxPostgresql(
           );
           if (!configured) throw new Error('Sandbox connector refused');
           scope.tighten(configured.credential.expiresAt);
-          const result = await scope.run(() => service.run(input, proof, scope.signal));
+          const result = await scope.run(() =>
+            service.run(input, proof, scope.signal, retainedCorrelationId),
+          );
           const request = DiscoveryRequestSchema.parse(input);
           const entry = entries.get(
             request.tenantId.toLowerCase() + '/' + request.connectorId.toLowerCase(),
@@ -271,7 +291,63 @@ export function composeSandboxPostgresql(
           scope.dispose();
         }
       },
-    });
+      async runRetained(tenantId: string, requestId: string, proof: string, signal?: AbortSignal) {
+        const scope = new PostgresDeadline(Date.now() + 30000, Date.now, signal);
+        try {
+          const workload = await scope.run(() => identity.verify(proof));
+          if (workload.spiffeId !== 'spiffe://local.axiomproof.test/agent/drishti')
+            throw new Error('Discovery identity refused');
+          scope.tighten(workload.expiresAt);
+          const t = z.uuid().parse(tenantId),
+            j = z.uuid().parse(requestId);
+          const claimed = await scope.run(() =>
+            client().rpc('claim_postgresql_discovery', { t, j }).abortSignal(scope.signal),
+          );
+          const claim = z
+            .object({
+              tenantId: z.literal(t),
+              requestId: z.literal(j),
+              connectorId: z.uuid(),
+              estateId: z.uuid(),
+              configurationSha256: z.literal(digest),
+              operation: z.enum(['enumerate', 'sample']),
+              resource: z.string().nullable(),
+              limit: z.number().int().nullable(),
+              cursor: z.string().nullable(),
+              expiresAt: z.string(),
+            })
+            .strict()
+            .parse(claimed.error ? null : claimed.data);
+          scope.tighten(Date.parse(claim.expiresAt));
+          const request = {
+            tenantId: t,
+            estateId: claim.estateId,
+            connectorId: claim.connectorId,
+            operation: claim.operation,
+            ...(claim.resource === null ? {} : { resource: claim.resource }),
+            ...(claim.limit === null ? {} : { limit: claim.limit }),
+            ...(claim.cursor === null ? {} : { cursor: claim.cursor }),
+          };
+          const read = await scope.run(() => broker.run(request, proof, scope.signal, j));
+          const run = z.object({ id: z.uuid() }).passthrough().parse(read.run);
+          const retained = await scope.run(() =>
+            client()
+              .rpc('retain_postgresql_discovery', { t, j, discovery: run.id })
+              .abortSignal(scope.signal),
+          );
+          return z
+            .object({ requestId: z.literal(j), discoveryRunId: z.literal(run.id) })
+            .strict()
+            .parse(retained.error ? null : retained.data);
+        } catch {
+          throw new Error('Retained discovery refused');
+        } finally {
+          scope.abort();
+          scope.dispose();
+        }
+      },
+    };
+    return Object.freeze(broker);
   } catch {
     throw new Error('Sandbox PostgreSQL configuration refused');
   }

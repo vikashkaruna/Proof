@@ -219,7 +219,9 @@ it('labels production descriptors and enabled registrations as setup records rat
     ).toBeTruthy(),
   );
   expect(
-    screen.getByText(/Private system connections are not available in this deployment/),
+    screen.getByText(
+      /Reviewed local PostgreSQL sandbox discovery appears on eligible registrations when configured/,
+    ),
   ).toBeTruthy();
   expect(
     screen.getByText('A setup record only; live connectivity is not available in this deployment.'),

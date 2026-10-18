@@ -72,7 +72,7 @@ it('binds both inventories to the active tenant and keeps a viewer read-only', a
   expect(view).toContain('Client tenant-1 manage false');
   expect(state.calls).toContainEqual(['connectors', 'tenant_id', 'tenant-1']);
   expect(state.calls).toContainEqual(['estate_systems', 'tenant_id', 'tenant-1']);
-  expect(view).toContain('Private system connector execution is not yet available');
+  expect(view).toContain('Private production connector execution remains unavailable');
   expect(view).not.toContain('Open public website agent workflow');
 });
 

@@ -1,4 +1,5 @@
 'use client';
+import { PostgresqlDiscoveryPanel } from './postgresql-discovery-panel';
 import { formatDateTime } from '@/lib/display-time';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -22,6 +23,7 @@ export interface ConnectorRow {
 }
 export interface ConnectorSystem {
   id: string;
+  estate_id?: string;
   name: string;
   status: string;
   estates: { name: string; status: string };
@@ -198,9 +200,9 @@ export function ConnectorsClient({
       >
         <h2 className="text-lg font-semibold text-indigo-900">Continue your assessment setup</h2>
         <p className="text-sm text-slate-700">
-          Public website audits are available below. Private system connections are not available in
-          this deployment. Connector registrations save setup records only; they do not connect a
-          system or grant agent access.
+          Public website audits are available below. Reviewed local PostgreSQL sandbox discovery
+          appears on eligible registrations when configured. Connector registrations save setup
+          records only; they do not connect a system or grant agent access.
         </p>
         <ol className="list-inside list-decimal space-y-2 text-sm text-slate-700">
           <li>
@@ -379,6 +381,15 @@ export function ConnectorsClient({
               {descriptor ? `${descriptor.target} ${descriptor.version}` : row.descriptor_id}
             </p>
             <SetupStatus tenantId={tenantId} connectorId={row.id} />
+            {row.descriptor_id === '41410000-0000-4000-8000-000000000003' &&
+              row.target_binding === 'sandbox' && (
+                <PostgresqlDiscoveryPanel
+                  tenantId={tenantId}
+                  connectorId={row.id}
+                  estateId={system?.estate_id}
+                  canManage={canManage && row.status === 'active'}
+                />
+              )}
             {canManage && row.status !== 'archived' && (
               <>
                 {row.status !== 'active' && parentActive && (

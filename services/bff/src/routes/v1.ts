@@ -1,3 +1,7 @@
+import {
+  postgresqlDiscoveryRoutes,
+  type DiscoveryRequestController,
+} from './postgresql-discovery.js';
 import { mfaRecoveryRoutes } from './mfa-recovery.js';
 import { localCustodyPolicyRoutes } from './local-custody-policy.js';
 import { engagementIntakeRoutes } from './engagement-intake.js';
@@ -227,6 +231,7 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 }
 
 interface Deps {
+  discoveryController?: DiscoveryRequestController;
   licensePublicKeyPem?: string;
   ownedSynthetic?: OwnedSyntheticRouteDeps | null;
   stagedEvidence?: StagedEvidenceRoutesDeps;
@@ -268,6 +273,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', sudhaarReviewAdoptionRoutes({ killSwitch: deps.killSwitch }));
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
+  app.route('/', postgresqlDiscoveryRoutes(deps.discoveryController));
   app.route('/', catalogueReferenceRoutes());
   app.route('/', catalogueVersionRoutes({ mfa: deps.mfa }));
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));

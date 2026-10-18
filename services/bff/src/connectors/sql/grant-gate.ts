@@ -77,6 +77,7 @@ export class SqlDiscoveryGate {
       binding?: SqlDiscoveryBinding;
       originalDeadline?: number;
       sandboxConfigurationSha256?: string;
+      operation?: 'enumerate' | 'sample';
       signal?: AbortSignal;
     } = {},
   ) {
@@ -93,11 +94,14 @@ export class SqlDiscoveryGate {
   ): Promise<SqlGrant | null> {
     const pending = (this.deps.client ?? createSupabaseAdmin)().rpc(
       this.deps.sandboxConfigurationSha256
-        ? 'resolve_sandbox_postgresql_read_grant'
+        ? 'resolve_sandbox_postgresql_read_grant_for_operation'
         : 'resolve_sql_read_grant',
       {
         ...(this.deps.sandboxConfigurationSha256
-          ? { p_configuration_sha256: this.deps.sandboxConfigurationSha256 }
+          ? {
+              p_configuration_sha256: this.deps.sandboxConfigurationSha256,
+              p_operation: this.deps.operation,
+            }
           : {}),
         p_tenant_id: request.tenantId,
         p_estate_id: request.estateId,
@@ -147,29 +151,31 @@ export class SqlDiscoveryGate {
     const sessions: SqlSessionFactory = !scope
       ? this.sessions
       : async (context) => {
-          const pending = this.sessions(context, scope.signal).then(async (raw) => {
-            let aborting: Promise<void> | undefined;
-            const session: SqlSession = {
-              query: (text, values) => scope.run(() => raw.query(text, values)),
-              abort: () => {
-                aborting ??= Promise.resolve()
-                  .then(() => (raw.abort ? raw.abort() : raw.end()))
-                  .finally(() => active.delete(session));
-                return aborting;
-              },
-              end: async () => {
-                if (scope.signal.aborted || aborting) return session.abort!();
-                await raw.end();
-                active.delete(session);
-              },
-            };
-            active.add(session);
-            if (scope.signal.aborted) {
-              await session.abort!();
-              throw new PostgresDeadlineExceeded();
-            }
-            return session;
-          });
+          const pending = this.sessions(context, scope.signal, this.deps.operation).then(
+            async (raw) => {
+              let aborting: Promise<void> | undefined;
+              const session: SqlSession = {
+                query: (text, values) => scope.run(() => raw.query(text, values)),
+                abort: () => {
+                  aborting ??= Promise.resolve()
+                    .then(() => (raw.abort ? raw.abort() : raw.end()))
+                    .finally(() => active.delete(session));
+                  return aborting;
+                },
+                end: async () => {
+                  if (scope.signal.aborted || aborting) return session.abort!();
+                  await raw.end();
+                  active.delete(session);
+                },
+              };
+              active.add(session);
+              if (scope.signal.aborted) {
+                await session.abort!();
+                throw new PostgresDeadlineExceeded();
+              }
+              return session;
+            },
+          );
           return scope.run(() => pending);
         };
     try {

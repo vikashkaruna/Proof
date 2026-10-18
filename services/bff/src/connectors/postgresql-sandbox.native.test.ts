@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { discoveryRoutes } from '../routes/discovery.js';
 import { readControllerFile } from '../workloads/controller-files.js';
 import { createFakeDb } from '../test/fake-postgrest.js';
-import { composeSandboxPostgresql } from './postgresql-sandbox.js';
+import { composeSandboxPostgresql, sandboxConfigurationSha256 } from './postgresql-sandbox.js';
 import { postgresSessions } from './sql/session.js';
 const fixturePath = process.env.AXIOM_OWNED_POSTGRESQL_FIXTURE;
 const native = it.skipIf(!fixturePath);
@@ -88,7 +88,7 @@ function composition(user = 'axiom_reader', caPem = ca) {
   const db = createFakeDb({
     connectors: [{ id: id(3), tenant_id: id(1), descriptor_id: descriptor, status: 'active' }],
   });
-  db.onRpc('resolve_sandbox_postgresql_read_grant', () => ({
+  db.onRpc('resolve_sandbox_postgresql_read_grant_for_operation', () => ({
     grantId: id(6),
     workloadId: id(7),
     agentName: 'drishti',
@@ -101,6 +101,23 @@ function composition(user = 'axiom_reader', caPem = ca) {
     targetBinding: 'sandbox',
   }));
   db.onRpc('record_connector_discovery', () => ({ run: { id: id(8) } }));
+  db.onRpc('claim_postgresql_discovery', () => ({
+    tenantId: id(1),
+    requestId: id(9),
+    connectorId: id(3),
+    estateId: id(2),
+    configurationSha256: sandboxConfigurationSha256(configuration),
+    operation: 'enumerate',
+    resource: null,
+    limit: null,
+    cursor: null,
+    expiresAt: new Date(Date.now() + 60000).toISOString(),
+  }));
+  db.onRpc('retain_postgresql_discovery', (args) => {
+    expect(args).toEqual({ t: id(1), j: id(9), discovery: id(8) });
+    return { requestId: id(9), discoveryRunId: id(8) };
+  });
+
   return composeSandboxPostgresql(configuration, 'test', {
     client: () => db.client as never,
     trust: {
@@ -290,5 +307,19 @@ native(
     }
     await noSessions();
     expect(Date.now() - started).toBeLessThan(2000);
+  },
+);
+
+native(
+  'serves a retained pointer through the real broker, private HTTP contract and TLS target',
+  async () => {
+    const response = await discoveryRoutes(composition()).request('/retained', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-workload-svid': proof },
+      body: JSON.stringify({ tenantId: id(1), requestId: id(9) }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: { requestId: id(9), discoveryRunId: id(8) } });
+    await noSessions();
   },
 );

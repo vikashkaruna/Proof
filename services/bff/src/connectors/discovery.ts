@@ -168,7 +168,12 @@ export class DiscoveryService {
     };
   }
 
-  async run(input: unknown, workloadProof: string, signal?: AbortSignal) {
+  async run(
+    input: unknown,
+    workloadProof: string,
+    signal?: AbortSignal,
+    retainedCorrelationId?: string,
+  ) {
     const request = DiscoveryRequestSchema.parse(input);
     const scope = this.deps.postgresqlOnly
       ? new PostgresDeadline(Date.now() + 30_000, Date.now, signal)
@@ -178,7 +183,7 @@ export class DiscoveryService {
         const workload = await scope.run(() => this.deps.identity.verify(workloadProof));
         scope.tighten(workload.expiresAt);
       }
-      return await this.execute(request, workloadProof, scope);
+      return await this.execute(request, workloadProof, scope, retainedCorrelationId);
     } catch (error) {
       if (error instanceof PostgresDeadlineExceeded) throw new DiscoveryRefused('expired');
       throw error;
@@ -192,10 +197,12 @@ export class DiscoveryService {
     request: DiscoveryRequest,
     workloadProof: string,
     scope?: PostgresDeadline,
+    retainedCorrelationId?: string,
   ) {
     const wait = <T>(operation: () => PromiseLike<T>) =>
       scope ? scope.run(operation) : Promise.resolve(operation());
-    const correlationId = randomUUID();
+    const correlationId =
+      retainedCorrelationId === undefined ? randomUUID() : z.uuid().parse(retainedCorrelationId);
     const manifest = await wait(() => this.manifest(request, scope?.signal));
     if (scope && (manifest.transport !== 'sql' || manifest.target !== 'postgresql'))
       throw new DiscoveryRefused('engine_unsupported');
@@ -237,6 +244,7 @@ export class DiscoveryService {
         binding,
         originalDeadline: scope?.expiresAt,
         signal: scope?.signal,
+        operation: request.operation,
         sandboxConfigurationSha256: this.deps.sandboxConfigurations?.get(
           key(request.tenantId, request.connectorId),
         ),

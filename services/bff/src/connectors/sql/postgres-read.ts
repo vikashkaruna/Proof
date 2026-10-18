@@ -15,6 +15,7 @@ export interface SqlSession {
 export type SqlSessionFactory = (
   context: ConnectorInvocation,
   signal?: AbortSignal,
+  operation?: 'enumerate' | 'sample',
 ) => Promise<SqlSession>;
 
 export class SqlConnectorRefused extends Error {

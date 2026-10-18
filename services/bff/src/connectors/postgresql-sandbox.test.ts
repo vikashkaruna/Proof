@@ -96,10 +96,13 @@ let expiry: number,
 const read = vi.fn<(path: string) => Promise<Buffer>>();
 const request = { tenantId: id(1), estateId: id(2), connectorId: id(3), operation: 'enumerate' };
 const ports = () => ({ trust, client: () => db.client as never, readCredential: read });
-async function proof(audience = 'axiom-postgresql-discovery') {
+async function proof(
+  audience = 'axiom-postgresql-discovery',
+  subject = 'spiffe://local.axiomproof.test/agent/drishti',
+) {
   return new SignJWT({})
     .setProtectedHeader({ alg: 'ES256' })
-    .setSubject('spiffe://local.axiomproof.test/agent/drishti')
+    .setSubject(subject)
     .setAudience(audience)
     .setIssuedAt()
     .setExpirationTime(Math.floor(Date.now() / 1000) + 120)
@@ -135,7 +138,7 @@ beforeEach(() => {
   db = createFakeDb({
     connectors: [{ id: id(3), tenant_id: id(1), descriptor_id: descriptor, status: 'active' }],
   });
-  db.onRpc('resolve_sandbox_postgresql_read_grant', () => grant);
+  db.onRpc('resolve_sandbox_postgresql_read_grant_for_operation', () => grant);
   db.onRpc('record_connector_discovery', () => ({ run: { id: id(8) } }));
   read.mockReset().mockImplementation(async () => {
     const bytes = Buffer.from(JSON.stringify(secret));
@@ -252,7 +255,7 @@ it.each(['database.example.com', 'localhost.evil.test', 'prod.ap-south-1.rds.ama
 );
 it('refuses malformed refreshed authority before allocating a socket', async () => {
   let calls = 0;
-  db.onRpc('resolve_sandbox_postgresql_read_grant', () => {
+  db.onRpc('resolve_sandbox_postgresql_read_grant_for_operation', () => {
     calls++;
     return calls === 1 ? grant : { ...grant, grantExpiresAt: 'not-an-expiry' };
   });
@@ -284,4 +287,61 @@ it('erases a final private read that completes after cancellation and withholds 
   release(late);
   await new Promise((resolve) => setTimeout(resolve, 1));
   expect(late.every((byte) => byte === 0)).toBe(true);
+});
+it('retained worker invocation verifies identity before claiming any human request', async () => {
+  const claim = vi.fn();
+  db.onRpc('claim_postgresql_discovery', claim);
+  await expect(
+    composeSandboxPostgresql(configuration(), 'local', ports()).runRetained(
+      id(1),
+      id(9),
+      await proof('wrong'),
+    ),
+  ).rejects.toThrow();
+  expect(claim).not.toHaveBeenCalled();
+  expect(state.clients).toHaveLength(0);
+});
+it('loads only a retained scoped request and binds the real discovery record to its operation key', async () => {
+  const config = configuration();
+  db.onRpc('claim_postgresql_discovery', () => ({
+    tenantId: id(1),
+    requestId: id(9),
+    connectorId: id(3),
+    estateId: id(2),
+    configurationSha256: sandboxConfigurationSha256(config),
+    operation: 'enumerate',
+    resource: null,
+    limit: null,
+    cursor: null,
+    expiresAt: new Date(Date.now() + 60000).toISOString(),
+  }));
+  db.onRpc('record_connector_discovery', (args) => {
+    expect(args.p_correlation_id).toBe(id(9));
+    return { run: { id: id(8) } };
+  });
+  db.onRpc('retain_postgresql_discovery', (args) => {
+    expect(args).toEqual({ t: id(1), j: id(9), discovery: id(8) });
+    return { requestId: id(9), discoveryRunId: id(8) };
+  });
+  expect(
+    await composeSandboxPostgresql(config, 'local', ports()).runRetained(
+      id(1),
+      id(9),
+      await proof(),
+    ),
+  ).toEqual({ requestId: id(9), discoveryRunId: id(8) });
+});
+
+it('does not burn a queued request for a valid SVID belonging to another local workload', async () => {
+  const claim = vi.fn();
+  db.onRpc('claim_postgresql_discovery', claim);
+  await expect(
+    composeSandboxPostgresql(configuration(), 'local', ports()).runRetained(
+      id(1),
+      id(9),
+      await proof('axiom-postgresql-discovery', 'spiffe://local.axiomproof.test/agent/parikshan'),
+    ),
+  ).rejects.toThrow();
+  expect(claim).not.toHaveBeenCalled();
+  expect(state.clients).toHaveLength(0);
 });
