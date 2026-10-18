@@ -205,3 +205,20 @@ it('fails closed when readiness cannot be read', async () => {
     [...doc.querySelectorAll('button')].some((b) => /^Approve/.test(b.textContent ?? '')),
   ).toBe(false);
 });
+
+it('offers a dry-run request to a plan author when an unapproved action is blocked', async () => {
+  state.approvalStatus = 'awaiting_approval';
+  state.readiness = readinessFor();
+  state.role = 'owner';
+  expect((await render()).querySelector('[data-testid="run-dry-run"]')?.textContent).toContain(
+    'Run dry run',
+  );
+  // An approver approves; requesting the simulation is the author's step.
+  state.role = 'approver';
+  expect((await render()).querySelector('[data-testid="run-dry-run"]')).toBeNull();
+  // Approved content is frozen: nothing left to dry-run.
+  state.role = 'owner';
+  state.approvalStatus = 'approved';
+  state.readiness = readinessFor();
+  expect((await render()).querySelector('[data-testid="run-dry-run"]')).toBeNull();
+});
