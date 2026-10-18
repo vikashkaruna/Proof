@@ -99,7 +99,12 @@ export function ownedEnrollmentDecisionHash(
     decision: ownedDeploymentDecision.parse(raw),
   });
 }
-function assertSource(current: OwnedDeploymentApprovalSource, tenantId: string, requestId: string) {
+function assertSource(
+  current: OwnedDeploymentApprovalSource,
+  tenantId: string,
+  requestId: string,
+  requireFreshPreflight = true,
+) {
   const { summary: s, manifest: m } = current;
   if (
     s.tenantId !== tenantId ||
@@ -115,13 +120,13 @@ function assertSource(current: OwnedDeploymentApprovalSource, tenantId: string, 
     ownedDeploymentManifestSha256(m) !== s.manifestSha256 ||
     Date.parse(m.reviewedAt) > Date.now() ||
     Date.parse(m.expiresAt) <= Date.now() ||
-    Date.parse(s.expiresAt) > Date.parse(m.expiresAt) ||
+    Date.parse(s.expiresAt) !== Date.parse(m.expiresAt) ||
     Date.parse(s.expiresAt) <= Date.now() ||
     !s.preflight?.dryRunCompleted ||
     !s.preflight.rollbackValidated ||
     s.preflight.checks.some((check) => check.outcome !== 'passed') ||
     Date.parse(s.preflight.completedAt) > Date.now() ||
-    Date.parse(s.preflight.expiresAt) <= Date.now() ||
+    (requireFreshPreflight && Date.parse(s.preflight.expiresAt) <= Date.now()) ||
     Date.parse(s.preflight.expiresAt) - Date.parse(s.preflight.completedAt) > 300000
   )
     throw Error('Owned deployment approval refused');
@@ -139,6 +144,7 @@ function signedScope(current: OwnedDeploymentApprovalSource, decision: OwnedDepl
     rollbackSha256: s.preflight.rollbackSha256,
     custodyPolicyId: s.custodyPolicyId,
     custodyEpoch: s.custodyEpoch,
+    scopeExpiresAt: current.manifest.expiresAt,
     decisionSha256: ownedHash(decision),
   };
 }
@@ -282,10 +288,49 @@ export class OwnedDeploymentApprovals {
     const approved = installerSource.parse(
       await this.ports.loadApprovedInstallerSource(tenantId, requestId),
     );
+    return this.verifyRetainedApproval(approved, token, step, true, tenantId, requestId);
+  }
+  /** Read-only authorization for renewal of an already active exact enrollment.
+   * Does not authorize role/SPIRE/controller installation or a target write.
+   * The existing issuer still enforces max15m and this signed scope expiry. */
+  async verifyCredentialRenewal(tenantId: string, requestId: string) {
+    uuid.parse(tenantId);
+    uuid.parse(requestId);
+    const approved = installerSource.parse(
+      await this.ports.loadApprovedInstallerSource(tenantId, requestId),
+    );
+    if (approved.source.summary.state !== 'active')
+      throw Error('Owned deployment approval refused');
+    await this.verifyRetainedApproval(
+      approved,
+      approved.token,
+      'publish_scoped_credential',
+      false,
+      tenantId,
+      requestId,
+    );
+    const s = approved.source.summary;
+    return {
+      tenantId: s.tenantId,
+      bindingId: s.bindingId,
+      enrollmentId: s.requestId,
+      custodyEpoch: s.custodyEpoch,
+      scopeExpiresAt: approved.source.manifest.expiresAt,
+      maxCredentialLifetimeSeconds: approved.source.manifest.deployment.credentialLifetimeSeconds,
+    };
+  }
+  private async verifyRetainedApproval(
+    approved: z.infer<typeof installerSource>,
+    token: z.infer<typeof signedEnrollment>,
+    step: OwnedDeploymentStep,
+    requireFreshInstaller: boolean,
+    tenantId: string,
+    requestId: string,
+  ): Promise<void> {
     const current = approved.source,
       decision = approved.decision,
       expectedToken = approved.token;
-    assertSource(current, tenantId, requestId);
+    assertSource(current, tenantId, requestId, requireFreshInstaller);
     const { summary: s } = current;
     if (
       !['approved', 'installing', 'active'].includes(s.state) ||
@@ -295,7 +340,8 @@ export class OwnedDeploymentApprovals {
       token.spec.mode !== 'batch' ||
       token.spec.concurrency !== 1 ||
       token.spec.stopOnFailure !== true ||
-      Date.parse(token.spec.expiresAt) <= Date.now() ||
+      (requireFreshInstaller && Date.parse(token.spec.expiresAt) <= Date.now()) ||
+      Date.parse(s.approval.expiresAt) !== Date.parse(current.manifest.expiresAt) ||
       Date.parse(token.spec.expiresAt) > Date.parse(s.approval.expiresAt) ||
       ownedHash(token) !== ownedHash(expectedToken) ||
       ownedHash(token.spec.conditions) !== ownedHash(signedScope(current, decision)) ||

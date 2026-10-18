@@ -1,4 +1,5 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
+afterEach(() => vi.useRealTimers());
 import { createHash } from 'node:crypto';
 import { ownedDeploymentOperationCanonicalJSON } from '@axiom/types';
 import { ApprovalEngine, type SignedApprovalToken } from '@axiom/approval-engine';
@@ -97,7 +98,7 @@ async function fixture() {
           approvalId: id(15),
           approvedBy: context.actorId,
           approvedAt: new Date().toISOString(),
-          expiresAt: input.token.spec.expiresAt,
+          expiresAt: current.manifest.expiresAt,
           receiptId: '2',
         };
         return structuredClone(current.summary);
@@ -252,4 +253,50 @@ it('never recovers a foreign or merely similar receipt as confirmed approval', a
   });
   await expect(f.approve()).rejects.toThrow('Owned deployment approval refused');
   expect(f.issue).toHaveBeenCalledOnce();
+});
+
+it('renews only current installed scope after installer expiry without reauthorizing installation', async () => {
+  const f = await fixture();
+  await f.approve();
+  const token = f.ports.recordApproved.mock.calls[0]![1].token;
+  f.current.summary.state = 'active';
+  f.current.summary.installation = {
+    operationKey: id(17),
+    steps: [
+      'enroll_synthetic_resource',
+      'authorize_role_switch',
+      'publish_scoped_credential',
+      'register_karya_identity',
+      'stage_owned_controller',
+      'verify_installed_scope',
+    ].map((step) => ({
+      step: step as import('@axiom/types').OwnedDeploymentStep,
+      state: 'confirmed',
+      receiptId: '3',
+      detail: 'Unit fixture readback',
+    })),
+    receiptId: '4',
+  };
+  vi.useFakeTimers();
+  vi.setSystemTime(Date.now() + 600000);
+  expect(
+    await f.service.verifyCredentialRenewal(f.context.tenantId, f.current.summary.requestId),
+  ).toMatchObject({
+    tenantId: f.context.tenantId,
+    bindingId: f.current.summary.bindingId,
+    scopeExpiresAt: f.current.manifest.expiresAt,
+    maxCredentialLifetimeSeconds: 600,
+  });
+  await expect(
+    f.service.verifyInstallerToken(
+      f.context.tenantId,
+      f.current.summary.requestId,
+      token,
+      'stage_owned_controller',
+    ),
+  ).rejects.toThrow();
+  f.current.summary.state = 'revoked';
+  await expect(
+    f.service.verifyCredentialRenewal(f.context.tenantId, f.current.summary.requestId),
+  ).rejects.toThrow();
 });
