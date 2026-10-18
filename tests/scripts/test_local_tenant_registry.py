@@ -283,6 +283,22 @@ class RegistryTests(unittest.TestCase):
             self.assertEqual(credentials.renew_due(TENANT, 1200), 0)
         issue.assert_called_once_with(TENANT, "producer", renew=True)
         self.assertEqual(run.call_args.args[0][-2:], ["--tenant", "playground-a"])
+        image = "sha256:" + "a" * 64
+        with (
+            patch.object(credentials, "ISSUER_ROOT", self.directory),
+            patch.object(credentials, "due_kinds", return_value=["producer"]),
+            patch.object(credentials, "issue"),
+            patch.object(credentials.subprocess, "run") as pinned,
+        ):
+            self.assertEqual(credentials.renew_due(TENANT, 1200, image), 0)
+        self.assertEqual(
+            pinned.call_args.args[0][-4:],
+            ["--tenant", "playground-a", "--image", image],
+        )
+        with patch.object(credentials, "issue") as issue, self.assertRaises(ValueError):
+            credentials.renew_due(None, 1200, image)
+        issue.assert_not_called()
+
         with (
             patch.object(credentials, "active_policy") as active,
             self.assertRaises(ValueError),

@@ -95,3 +95,116 @@ class OwnershipTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ImagePinTests(unittest.TestCase):
+    def setUp(self):
+        self.image = "sha256:" + "b" * 64
+        self.name = "axiom-key-service-kosha"
+        self.value = {
+            "id": "a" * 64,
+            "name": "/" + self.name,
+            "image": self.image,
+            "labels": {"axiom.purpose": "local-key-service"},
+        }
+
+    def response(self, value):
+        return subprocess.CompletedProcess([], 0, value, "")
+
+    def test_existing_image_survives_old_bff_and_is_checked_before_remove(self):
+        with (
+            patch.object(
+                m,
+                "run",
+                side_effect=[
+                    self.response(self.name),
+                    self.response(json.dumps(self.value)),
+                    self.response(self.image),
+                    self.response("started"),
+                ],
+            ) as run,
+            patch.object(m, "remove_owned") as remove,
+        ):
+            m.container("kosha", "--serve", True)
+            remove.assert_called_once_with(self.name, "local-key-service")
+            args = run.call_args_list[-1].args[0]
+            self.assertIn(self.image, args)
+            self.assertFalse(
+                any("{{.Config.Image}}" in call.args[0] for call in run.call_args_list)
+            )
+
+    def test_initial_deployment_requires_explicit_immutable_pin(self):
+        for candidate in (None, "some:tag", "sha256:" + "G" * 64):
+            with patch.object(m, "run", return_value=self.response("")) as run:
+                with self.assertRaises(ValueError):
+                    m.service_image("kosha", candidate)
+                self.assertEqual(run.call_count, 1)
+        with patch.object(
+            m, "run", side_effect=[self.response(""), self.response(self.image)]
+        ):
+            self.assertEqual(m.service_image("kosha", self.image), self.image)
+
+    def test_foreign_collision_refused_even_with_explicit_upgrade(self):
+        for changed in (
+            {"labels": {}},
+            {"labels": {"axiom.purpose": "foreign"}},
+            {"name": "/foreign"},
+            {"id": "short"},
+        ):
+            with patch.object(
+                m,
+                "run",
+                side_effect=[
+                    self.response(self.name),
+                    self.response(json.dumps(dict(self.value, **changed))),
+                ],
+            ) as run:
+                with self.assertRaises(ValueError):
+                    m.service_image("kosha", self.image)
+                self.assertEqual(run.call_count, 2)
+
+    def test_unknown_image_or_unresolved_current_preserves_service(self):
+        for image_response in (
+            self.response("sha256:" + "c" * 64),
+            subprocess.CalledProcessError(1, "docker"),
+        ):
+            with (
+                patch.object(
+                    m,
+                    "run",
+                    side_effect=[
+                        self.response(self.name),
+                        self.response(json.dumps(self.value)),
+                        image_response,
+                    ],
+                ),
+                patch.object(m, "remove_owned") as remove,
+            ):
+                with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                    m.container("kosha", "--serve", True)
+                remove.assert_not_called()
+        with (
+            patch.object(
+                m,
+                "run",
+                side_effect=[
+                    self.response(self.name),
+                    self.response(json.dumps(dict(self.value, image="some:tag"))),
+                ],
+            ),
+            self.assertRaises(ValueError),
+        ):
+            m.service_image("kosha", self.image)
+
+    def test_reviewed_upgrade_uses_explicit_new_image(self):
+        new = "sha256:" + "c" * 64
+        with patch.object(
+            m,
+            "run",
+            side_effect=[
+                self.response(self.name),
+                self.response(json.dumps(self.value)),
+                self.response(new),
+            ],
+        ):
+            self.assertEqual(m.service_image("kosha", new), new)

@@ -90,10 +90,36 @@ def remove_owned(name: str, purpose: str) -> None:
     run(["docker", "rm", identifier])
 
 
-def bff_image() -> str:
-    return run(
-        ["docker", "inspect", "axiom-bff", "--format", "{{.Config.Image}}"]
+def service_image(tenant: str, reviewed_image: str | None = None) -> str:
+    """Keep the owned immutable image; first deployment/upgrade needs an explicit pin."""
+    name = f"axiom-key-service-{tenant}"
+    names = run(["docker", "ps", "-a", "--format", "{{.Names}}"])
+    current = None
+    if name in names.stdout.splitlines():
+        template = '{"id":{{json .Id}},"name":{{json .Name}},"image":{{json .Image}},"labels":{{json .Config.Labels}}}'
+        value = json.loads(
+            run(["docker", "inspect", name, "--format", template]).stdout
+        )
+        if (
+            value.get("name") != "/" + name
+            or not re.fullmatch(r"[a-f0-9]{64}", value.get("id", ""))
+            or (value.get("labels") or {}).get("axiom.purpose") != "local-key-service"
+        ):
+            raise ValueError("Foreign key service container refused")
+        current = value.get("image")
+        if not isinstance(current, str) or not re.fullmatch(
+            r"sha256:[a-f0-9]{64}", current
+        ):
+            raise ValueError("Owned key service image is not immutable")
+    image = reviewed_image if reviewed_image is not None else current
+    if not isinstance(image, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
+        raise ValueError("An explicit reviewed immutable --image is required")
+    actual = run(
+        ["docker", "image", "inspect", image, "--format", "{{.Id}}"]
     ).stdout.strip()
+    if actual != image:
+        raise ValueError("Reviewed key service image unavailable")
+    return image
 
 
 def bff_env(name: str) -> str:
@@ -246,7 +272,8 @@ def stage(tenant: str, require_active: bool) -> None:
     )
 
 
-def container(tenant: str, mode: str, detach: bool) -> None:
+def container(tenant: str, mode: str, detach: bool, image: str | None = None) -> None:
+    image = service_image(tenant, image)
     name = f"axiom-key-service-{tenant}"
     if mode == "--serve":
         remove_owned(name, "local-key-service")
@@ -279,7 +306,7 @@ def container(tenant: str, mode: str, detach: bool) -> None:
         "type=volume,src=axiom-spire-health,dst=/run/spire-health,readonly",
         "--entrypoint",
         "node",
-        bff_image(),
+        image,
         "/app/services/bff/node_modules/tsx/dist/cli.mjs",
         "src/local-key-service.ts",
         mode,
@@ -297,15 +324,19 @@ if __name__ == "__main__":
     )
     parser.add_argument("action", choices=("check", "provision", "serve", "sync"))
     parser.add_argument("--tenant", required=True, choices=sorted(TENANTS))
+    parser.add_argument(
+        "--image", help="Reviewed local immutable image ID for deployment/upgrade"
+    )
     args = parser.parse_args()
+    image = service_image(args.tenant, args.image)
     if args.action == "check":
         stage(args.tenant, require_active=False)
-        container(args.tenant, "--check", detach=False)
+        container(args.tenant, "--check", detach=False, image=image)
     elif args.action == "sync":
         stage(args.tenant, require_active=True)
     elif args.action == "provision":
         stage(args.tenant, require_active=True)
-        container(args.tenant, "--provision", detach=False)
+        container(args.tenant, "--provision", detach=False, image=image)
     else:
         stage(args.tenant, require_active=True)
-        container(args.tenant, "--serve", detach=True)
+        container(args.tenant, "--serve", detach=True, image=image)

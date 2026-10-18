@@ -61,6 +61,11 @@ class RenewalTests(unittest.TestCase):
             "workspace": str(ROOT),
             "python": str(Path(sys.executable).resolve()),
             "tenants": ["kosha"],
+            "runtimeBindings": {
+                "peers": [
+                    {"kind": "key", "tenant": "kosha", "image": "sha256:" + "c" * 64}
+                ]
+            },
             "sources": {source: renewal.digest((ROOT / source).read_bytes())},
             "tools": {str(binary): renewal.digest(binary.read_bytes())},
             "dockerExecutable": str(binary),
@@ -93,6 +98,8 @@ class RenewalTests(unittest.TestCase):
             custody, controller = [call.args[0] for call in command.call_args_list]
             self.assertIn("--tenant-id", custody)
             self.assertIn(TENANT, custody)
+            self.assertIn("--key-service-image", custody)
+            self.assertIn("sha256:" + "c" * 64, custody)
             self.assertIn("--tenant", controller)
             self.assertIn("kosha", controller)
             self.assertEqual(custody[-2:], ["--margin", "1200"])

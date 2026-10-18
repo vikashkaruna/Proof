@@ -229,6 +229,12 @@ class NamespaceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.reconciliation(wrong_image=True)
 
+    def test_key_repair_keeps_pin_distinct_from_old_bff(self):
+        peer = dict(self.peer, kind="key", tenant="kosha")
+        args = m.repair_command(self.config, peer, "serve")
+        self.assertEqual(args[-2:], ["--image", peer["image"]])
+        self.assertNotEqual(peer["image"], self.bff["image"])
+
     def test_registry_peer_injection_refused(self):
         with (
             patch.object(m, "stable_bff", return_value=(self.bff, "net:[9]")),

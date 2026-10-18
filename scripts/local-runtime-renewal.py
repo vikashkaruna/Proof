@@ -388,6 +388,8 @@ def repair_command(config: dict, peer: dict, action: str) -> list[str]:
             "serve",
             "--tenant",
             peer["tenant"],
+            "--image",
+            peer["image"],
         ]
     return [
         *prefix,
@@ -530,6 +532,12 @@ def once(record: Path, expected: str) -> int:
                         "renew-due",
                         "--tenant-id",
                         deployments[alias].tenant_id,
+                        "--key-service-image",
+                        next(
+                            peer["image"]
+                            for peer in config["runtimeBindings"]["peers"]
+                            if peer["kind"] == "key" and peer["tenant"] == alias
+                        ),
                         "--margin",
                         "1200",
                     ],
