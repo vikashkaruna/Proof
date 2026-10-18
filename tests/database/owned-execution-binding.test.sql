@@ -54,10 +54,23 @@ do $$begin
  set local role owned_target_controller;perform pg_temp.owned168_resolve();raise exception 'revoked workload accepted';exception when insufficient_privilege then null;end;
  begin update owned168_saved set v=jsonb_set(v,'{signature}',to_jsonb(repeat('0',64))) where name='signed';
  set local role owned_target_controller;perform pg_temp.owned168_execute('forward');raise exception 'altered signed token accepted';exception when insufficient_privilege then null;end;
+ begin
+ perform pg_temp.owned168_resolve(); -- metadata was valid before revocation
+ update public.approval_tokens set revoked_at=clock_timestamp() where id=pg_temp.pg_id(241);
+ set local role owned_target_controller;perform pg_temp.owned168_execute('forward');raise exception 'token revoked after resolve accepted';exception when insufficient_privilege then null;end;
+ begin update owned_synthetic.resources set version=99 where resource_id=pg_temp.pg_id(181);
+ set local role owned_target_controller;perform pg_temp.owned168_execute('forward');raise exception 'changed actual source accepted';exception when serialization_failure then null;end;
  begin update public.approval_tokens set action_ids=array_append(action_ids,pg_temp.pg_id(249)) where id=pg_temp.pg_id(241);
  set local role owned_target_controller;perform pg_temp.owned168_execute('forward');raise exception 'mixed token accepted';exception when insufficient_privilege then null;end;
 end $$;
 reset role;
+savepoint before_owned168_custody_revoke;
+select pg_temp.write(pg_temp.request(80,'revoke',(select(v->>'eventId')::uuid from custody_saved where kind='activate')),1);
+select pg_temp.ok((select state='revoked' from public.local_custody_policy_heads where policy_id=pg_temp.id(21)),'normal retained custody transition actually revokes source');
+set local role owned_target_controller;
+select pg_temp.human167_refused('select pg_temp.owned168_execute(''forward'')');
+reset role;
+rollback to before_owned168_custody_revoke;
 select pg_temp.ok((select count(*)=0 from owned_synthetic.operations),'all refused bindings leave target journal empty');
 set local role owned_target_controller;
 insert into owned168_saved values('after',pg_temp.owned168_execute('forward'));
