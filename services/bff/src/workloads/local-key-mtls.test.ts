@@ -612,16 +612,19 @@ describe('unmounted real TLS, owned loopback ephemeral generation only', () => {
         const address = await f.listening;
         if (!('port' in address)) throw new Error('Owned loopback required');
         if (kind === 'unfinished-handshake') {
-          socket = netConnect(address);
+          socket = netConnect({ host: address.address, port: address.port });
           socket.on('error', () => {});
-          await new Promise<void>((resolve) => socket!.once('connect', resolve));
+          await new Promise<void>((resolve, reject) => {
+            socket!.once('connect', resolve);
+            socket!.once('error', reject);
+          });
         }
         await expect(f.done).rejects.toThrow();
         expect(f.service.wrap).not.toHaveBeenCalled();
         socket?.destroy();
         await expect(
           new Promise<void>((resolve, reject) => {
-            const probe = netConnect(address);
+            const probe = netConnect({ host: address.address, port: address.port });
             probe.once('connect', () => {
               probe.destroy();
               reject(new Error('Owned listener survived'));
