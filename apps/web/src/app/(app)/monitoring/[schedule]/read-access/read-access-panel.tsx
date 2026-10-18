@@ -1,6 +1,7 @@
 'use client';
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { formatDateTime } from '@axiom/ui';
 import { z } from 'zod';
 import {
   monitoringReadScopeContext,
@@ -205,7 +206,7 @@ export function ReadAccessPanel({
       saveReadJournal(localStorage, next, current);
       setPending(next);
       setMessage(
-        `Approval challenge prepared until ${c.expiresAt}. Enter your current authenticator code.`,
+        `Approval challenge prepared until ${formatDateTime(c.expiresAt)}. Enter your current authenticator code.`,
       );
       return;
     }
@@ -279,7 +280,7 @@ export function ReadAccessPanel({
                 : s.active
                   ? 'Current binding; expiry still checked at every read'
                   : 'Historical binding'}{' '}
-              · expires {s.expiresAt} · receipt {s.receiptId}
+              · expires {formatDateTime(s.expiresAt)} · receipt {s.receiptId}
             </p>
           ))}
           <table>
@@ -295,11 +296,11 @@ export function ReadAccessPanel({
             <tbody>
               {context.fires.map((f) => (
                 <tr key={f.fireId}>
-                  <td>{f.dueAt}</td>
+                  <td>{formatDateTime(f.dueAt)}</td>
                   <td>
                     {f.state}
                     {['queued', 'handed_off'].includes(f.state)
-                      ? ` (bounded until ${f.expiresAt}; completion unconfirmed)`
+                      ? ` (bounded until ${formatDateTime(f.expiresAt)}; completion unconfirmed)`
                       : ''}
                   </td>
                   <td>{f.cleanupConfirmed === true ? 'Confirmed' : 'Unconfirmed'}</td>
@@ -397,7 +398,7 @@ export function ReadAccessPanel({
             <>
               <p>
                 {current.intent.phase === 'authorize'
-                  ? `Enumerate metadata for connector ${current.intent.request.connectorId}, engagement ${current.intent.request.engagementId}, cadence ${current.intent.request.cadence}, until ${current.intent.request.expiresAt}. No target writes or sampled values.`
+                  ? `Enumerate metadata for connector ${current.intent.request.connectorId}, engagement ${current.intent.request.engagementId}, cadence ${current.intent.request.cadence}, until ${formatDateTime(current.intent.request.expiresAt)}. No target writes or sampled values.`
                   : `Revoke read scope ${current.intent.request.scopeId}.`}
               </p>
               {current.intent.phase === 'authorize' && (
