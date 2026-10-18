@@ -1,6 +1,24 @@
 -- Explicit protected deployment enrollment, never an application feature flag.
 -- Does not widen the cloud-IAM resolver or enable connector writes.
-create role axiom_sandbox_connector_operator nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+-- Roles are cluster-wide: another application database may already have
+-- created this same narrow role. Reuse only its exact nonprivileged identity.
+do $sandbox_role$
+begin
+ if not exists(select 1 from pg_catalog.pg_roles where rolname='axiom_sandbox_connector_operator') then
+  begin
+   create role axiom_sandbox_connector_operator nologin noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+  exception when duplicate_object or unique_violation then
+   null; -- Concurrent database bootstrap; verify committed identity below.
+  end;
+ end if;
+ if not exists(select 1 from pg_catalog.pg_roles
+  where rolname='axiom_sandbox_connector_operator'
+   and not rolcanlogin and not rolinherit and not rolsuper and not rolcreatedb
+   and not rolcreaterole and not rolreplication and not rolbypassrls) then
+  raise exception using errcode='42501',message='sandbox operator role identity refused';
+ end if;
+end
+$sandbox_role$;
 create table public.postgresql_sandbox_deployments (
  configuration_sha256 text not null check(configuration_sha256 ~ '^[a-f0-9]{64}$'),
  tenant_id uuid not null references public.tenants(id),
