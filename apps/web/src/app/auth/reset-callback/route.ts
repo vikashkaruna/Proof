@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createSupabaseServerClient } from '@axiom/supabase';
+import { appOrigin } from '@/lib/app-origin';
 
 /** The emailed recovery link lands here with a one-time code. Exchanging it
  * sets a short recovery session (route handlers may set cookies; pages may
@@ -7,8 +8,9 @@ import { createSupabaseServerClient } from '@axiom/supabase';
  * to the request page; nothing about the account is revealed. */
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get('code');
-  const target = request.nextUrl.clone();
-  target.search = '';
+  // Never request.nextUrl: in the container it is http://0.0.0.0:3001, a
+  // different origin from the browser's, which drops the session cookies.
+  const target = new URL('/', appOrigin(request.nextUrl.origin));
   if (code && /^[A-Za-z0-9-]{8,128}$/.test(code)) {
     try {
       const supabase = await createSupabaseServerClient();

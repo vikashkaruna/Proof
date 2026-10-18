@@ -31,3 +31,18 @@ it('sends a missing, malformed, used or expired code back to request a new link'
     expect(to.searchParams.get('error')).toContain('expired or was already used');
   }
 });
+
+it('redirects to the configured browser origin, never the container bind host', async () => {
+  vi.stubEnv('NEXT_PUBLIC_APP_URL', 'http://localhost:3001');
+  exchange.mockResolvedValue({ error: null });
+  const ok = await GET(
+    new NextRequest('http://0.0.0.0:3001/auth/reset-callback?code=abc12345-def'),
+  );
+  expect(ok.headers.get('location')).toBe('http://localhost:3001/reset-password');
+  exchange.mockResolvedValue({ error: { message: 'expired' } });
+  const bad = await GET(
+    new NextRequest('http://0.0.0.0:3001/auth/reset-callback?code=abc12345-def'),
+  );
+  expect(new URL(bad.headers.get('location')!).origin).toBe('http://localhost:3001');
+  vi.unstubAllEnvs();
+});
