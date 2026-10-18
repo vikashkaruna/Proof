@@ -218,6 +218,253 @@ def unexpired(config: dict, alias: str, tenant: str, component: str) -> bool:
         return False
 
 
+# Docker inspection deliberately excludes Config.Env (backend credentials).
+METADATA = '{"id":{{json .Id}},"image":{{json .Image}},"name":{{json .Name}},"running":{{json .State.Running}},"started":{{json .State.StartedAt}},"restarts":{{json .RestartCount}},"labels":{{json .Config.Labels}},"network":{{json .HostConfig.NetworkMode}}}'
+
+
+def docker_read(config: dict, args: list[str]) -> str:
+    result = subprocess.run(
+        [config["dockerExecutable"], *args],
+        env=config["environment"],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=30,
+        check=True,
+    )  # nosec B603 - fixed Docker commands, no shell
+    if len(result.stdout) > MAX:
+        raise ValueError("Oversized Docker metadata")
+    return result.stdout.decode().strip()
+
+
+def metadata(config: dict, name: str, purpose: str | None = None) -> dict:
+    value = json.loads(docker_read(config, ["inspect", name, "--format", METADATA]))
+    if (
+        value["name"] != "/" + name
+        or not re.fullmatch(r"[a-f0-9]{64}", value["id"])
+        or not re.fullmatch(r"sha256:[a-f0-9]{64}", value["image"])
+        or type(value["running"]) is not bool
+        or (purpose and (value.get("labels") or {}).get("axiom.purpose") != purpose)
+    ):
+        raise ValueError("Foreign runtime container refused")
+    return value
+
+
+def namespace(config: dict, value: dict) -> str:
+    if not value["running"]:
+        raise ValueError("Runtime peer is not running")
+    result = docker_read(
+        config,
+        ["exec", "--user", "0", value["id"], "/bin/readlink", "/proc/self/ns/net"],
+    )
+    if not re.fullmatch(r"net:\[[0-9]+\]", result):
+        raise ValueError("Network namespace unavailable")
+    return result
+
+
+def peer_specs(config: dict) -> list[dict]:
+    peers = [
+        {
+            "name": "axiom-assessment-producer",
+            "purpose": "local-assessment-producer",
+            "kind": "producer",
+        }
+    ]
+    for alias in config["tenants"]:
+        peers.extend(
+            [
+                {
+                    "name": "axiom-key-service-" + alias,
+                    "purpose": "local-key-service",
+                    "kind": "key",
+                    "tenant": alias,
+                },
+                {
+                    "name": "axiom-assessment-controller-" + alias,
+                    "purpose": "local-assessment-controller",
+                    "kind": "controller",
+                    "tenant": alias,
+                },
+                {
+                    "name": "axiom-assessment-controller-" + alias + "-scheduler",
+                    "purpose": "local-assessment-controller",
+                    "kind": "scheduler",
+                    "tenant": alias,
+                },
+            ]
+        )
+    return peers
+
+
+def capture_runtime_bindings(config: dict, bff_id: str) -> dict:
+    bff = metadata(config, "axiom-bff")
+    if bff["id"] != bff_id or not re.fullmatch(
+        r"[a-f0-9]{40}", (bff.get("labels") or {}).get("ai.axiom.local.source", "")
+    ):
+        raise ValueError("Explicit reviewed BFF identity required")
+    namespace(config, bff)
+    peers = []
+    for spec in peer_specs(config):
+        value = metadata(config, spec["name"], spec["purpose"])
+        peers.append(dict(spec, image=value["image"]))
+    return {"bffId": bff_id, "bffImage": bff["image"], "peers": peers}
+
+
+# Uses the BFF's existing credentials internally; argv and output contain none.
+HEALTH = """const u=new URL(process.env.SUPABASE_URL);if(!['host.docker.internal','127.0.0.1','localhost'].includes(u.hostname))process.exit(2);const a=await fetch(new URL('/rest/v1/tenants?select=id&limit=0',u),{headers:{apikey:process.env.SUPABASE_SERVICE_ROLE_KEY,Authorization:'Bearer '+process.env.SUPABASE_SERVICE_ROLE_KEY},signal:AbortSignal.timeout(5000)});await a.arrayBuffer();if(a.status!==200)process.exit(3);const h=await fetch('http://127.0.0.1:'+String(process.env.PORT||4000)+'/health',{signal:AbortSignal.timeout(5000)});await h.arrayBuffer();if(h.status!==200)process.exit(4);"""
+
+
+def stable_bff(config: dict) -> tuple[dict, str]:
+    binding = config["runtimeBindings"]
+    before = metadata(config, "axiom-bff")
+    if before["id"] != binding["bffId"] or before["image"] != binding["bffImage"]:
+        raise ValueError("BFF replaced; reviewed reinstall required")
+    net = namespace(config, before)
+    if run(
+        [
+            config["dockerExecutable"],
+            "exec",
+            before["id"],
+            "node",
+            "--input-type=module",
+            "-e",
+            HEALTH,
+        ],
+        env=config["environment"],
+        timeout=20,
+    ):
+        raise ValueError("BFF/backend health unconfirmed")
+    if before != metadata(config, "axiom-bff") or net != namespace(config, before):
+        raise ValueError("BFF changed during health check")
+    return before, net
+
+
+def idle_workers(config: dict) -> bool:
+    # Conservatively defer for any unrecognised assessment worker name, including
+    # older workers without labels. Never stop a worker or rewrite its receipts.
+    known = {peer["name"] for peer in config["runtimeBindings"]["peers"]}
+    names = docker_read(config, ["ps", "--format", "{{.Names}}"])
+    return not any(
+        name.startswith("axiom-assessment-") and name not in known
+        for name in names.splitlines()
+    )
+
+
+def repair_command(config: dict, peer: dict, action: str) -> list[str]:
+    root = Path(config["workspace"]) / "scripts"
+    prefix = [config["python"], "-I"]
+    if peer["kind"] == "producer":
+        return [
+            *prefix,
+            str(root / "local-assessment-producer.py"),
+            action,
+            "--image",
+            peer["image"],
+        ]
+    if peer["kind"] == "key":
+        return [
+            *prefix,
+            str(root / "local-key-service.py"),
+            "serve",
+            "--tenant",
+            peer["tenant"],
+        ]
+    return [
+        *prefix,
+        str(root / "local-assessment-controller.py"),
+        "scheduler" if peer["kind"] == "scheduler" else "serve",
+        "--tenant",
+        peer["tenant"],
+    ]
+
+
+def reconcile_namespaces(config: dict) -> list[dict]:
+    before, net = stable_bff(config)
+    peers = config["runtimeBindings"]["peers"]
+    if [
+        {key: peer[key] for key in spec}
+        for peer, spec in zip(peers, peer_specs(config), strict=True)
+    ] != peer_specs(config):
+        raise ValueError("Reviewed peer inventory changed")
+    stale = []
+    for peer in peers:
+        value = metadata(config, peer["name"], peer["purpose"])
+        if (
+            value["image"] != peer["image"]
+            or value["network"] != "container:" + before["id"]
+        ):
+            raise ValueError("Reviewed peer image/network changed")
+        if namespace(config, value) != net:
+            stale.append((peer, value))
+    if not stale:
+        return []
+    if not idle_workers(config):
+        return [
+            {
+                "component": "network",
+                "ok": False,
+                "stale": True,
+                "deferredForWorkers": True,
+            }
+        ]
+    outcomes = []
+    for peer, value in stale:
+        outcome = {
+            "component": "network",
+            "peer": peer["name"],
+            "stale": True,
+            "ok": False,
+        }
+        outcomes.append(outcome)
+        try:
+            if stable_bff(config) != (before, net) or not idle_workers(config):
+                raise ValueError("Runtime changed before repair")
+            if metadata(config, peer["name"], peer["purpose"]) != value:
+                raise ValueError("Peer changed before graceful stop")
+            if run(
+                [config["dockerExecutable"], "stop", "--time", "95", value["id"]],
+                env=config["environment"],
+                timeout=110,
+            ):
+                raise ValueError("Graceful stop unconfirmed")
+            stopped = metadata(config, peer["name"], peer["purpose"])
+            if (
+                stopped["id"] != value["id"]
+                or stopped["running"]
+                or stopped["image"] != peer["image"]
+            ):
+                raise ValueError("Stopped peer changed")
+            if run(
+                [config["dockerExecutable"], "rm", value["id"]],
+                env=config["environment"],
+            ):
+                raise ValueError("Peer removal unconfirmed")
+            # Checked helpers refuse foreign names. Producer staging restores its
+            # protected volumes only after its former server has stopped.
+            if peer["kind"] == "producer" and run(
+                repair_command(config, peer, "stage"),
+                env=config["environment"],
+                timeout=180,
+            ):
+                raise ValueError("Producer staging refused")
+            if run(
+                repair_command(config, peer, "serve"),
+                env=config["environment"],
+                timeout=420,
+            ):
+                raise ValueError("Peer restart refused")
+            current = metadata(config, peer["name"], peer["purpose"])
+            if (
+                current["image"] != peer["image"]
+                or namespace(config, current) != net
+                or stable_bff(config) != (before, net)
+            ):
+                raise ValueError("Repaired namespace unconfirmed")
+            outcome.update(ok=True, repaired=True)
+        except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
+            break  # Preserve remaining peers and any uncertain runtime state.
+    return outcomes
+
+
 def once(record: Path, expected: str) -> int:
     config = load(record, expected)
     owned(record.parent / "renewal.lock")
@@ -232,6 +479,9 @@ def once(record: Path, expected: str) -> int:
         try:
             validate_sources(config)
             deployments = registry(config)
+            outcomes.extend(reconcile_namespaces(config))
+            if any(not item["ok"] for item in outcomes):
+                raise ValueError("Namespace repair deferred or unconfirmed")
             for alias in config["tenants"]:
                 commands = (
                     [
@@ -417,6 +667,7 @@ def install(args) -> None:
     }
     validate_sources(config)
     registry(config)
+    config["runtimeBindings"] = capture_runtime_bindings(config, args.bff_container_id)
     state.mkdir(mode=0o700)
     write_private(state / "runner.py", script.read_bytes())
     raw = json.dumps(config, sort_keys=True).encode()
@@ -498,6 +749,7 @@ def main() -> int:
         "controller-dir",
     ):
         p.add_argument("--" + option, required=True, type=Path)
+    p.add_argument("--bff-container-id", required=True)
     p.add_argument("--tenant", action="append", required=True)
     p.add_argument(
         "--path",

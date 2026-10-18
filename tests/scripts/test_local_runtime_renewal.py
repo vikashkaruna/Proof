@@ -24,6 +24,11 @@ TENANT = "fd5e0001-0000-4000-8000-000000000001"
 
 
 class RenewalTests(unittest.TestCase):
+    def setUp(self):
+        mocked = patch.object(renewal, "reconcile_namespaces", return_value=[])
+        mocked.start()
+        self.addCleanup(mocked.stop)
+
     def fixture(self, base):
         raw_registry = json.dumps(
             {
@@ -225,12 +230,18 @@ class RenewalTests(unittest.TestCase):
                     "AXIOM_LOCAL_TENANT_REGISTRY_SHA256"
                 ],
                 tenant=["kosha"],
+                bff_container_id="a" * 64,
             )
             with (
                 patch.object(renewal.sys, "platform", "darwin"),
                 patch.object(renewal.Path, "home", return_value=home),
                 patch.object(renewal.shutil, "which", return_value=sys.executable),
                 patch.object(renewal, "job_loaded", return_value=False),
+                patch.object(
+                    renewal,
+                    "capture_runtime_bindings",
+                    return_value={"bffId": "a" * 64},
+                ),
                 patch.object(renewal, "source_hashes", return_value=config["sources"]),
                 patch.object(renewal, "run", return_value=0) as command,
             ):
