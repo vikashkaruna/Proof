@@ -113,7 +113,9 @@ def prepare_issuer(source: Path, expected: str):
     renamed = configparser.ConfigParser(interpolation=None)
     renamed[issuer.SERVICE] = fields
     stream = io.StringIO()
-    renamed.write(stream)
+    # libpq service files reject spaces in option names before '='. Python's
+    # ConfigParser default renders those spaces and cannot be used verbatim.
+    renamed.write(stream, space_around_delimiters=False)
     service_path = BASE / "controller-db.service"
     if service_path.exists() or (BASE / "settings.json").exists():
         raise ValueError("Issuer settings already exist; review them in place")

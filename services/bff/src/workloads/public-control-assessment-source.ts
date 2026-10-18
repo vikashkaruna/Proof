@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import type { AssessmentRequest } from '@axiom/types';
 import { canonicalAssessmentInput } from './assessment-input.js';
-import { verifyPublicControlReviewRow } from '../routes/public-control-review-sets.js';
+import { verifyPublicControlReviewRow } from '../services/public-control-review-record.js';
 import { DispatchRefused } from './dispatch-payload.js';
 
 /** Server-owned immutable review lookup. A browser reference never supplies answers. */

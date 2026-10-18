@@ -3,12 +3,14 @@
 import hashlib
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -72,6 +74,54 @@ def completed(stdout="", code=0):
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_derived_service_file_is_accepted_by_libpq_parser(self):
+        executable = shutil.which("psql")
+        if not executable and Path("/opt/homebrew/opt/libpq/bin/psql").is_file():
+            executable = "/opt/homebrew/opt/libpq/bin/psql"
+        if not executable:
+            self.skipTest("native libpq client unavailable")
+        with tempfile.TemporaryDirectory(
+            prefix="axiom-controller-service-"
+        ) as temporary:
+            base = Path(temporary) / "issuer"
+            custody = SimpleNamespace(
+                SERVICE="original-issuer",
+                configuration=lambda *_args: {"version": 1, "service": {}},
+                source=lambda _value: (
+                    b"[original-issuer]\nhost=/nonexistent-axiom-controller-test\nconnect_timeout=1\n"
+                ),
+            )
+            with (
+                patch.object(launcher, "BASE", base),
+                patch.object(launcher, "load_module", return_value=custody),
+                patch.object(
+                    launcher,
+                    "private_directory",
+                    side_effect=lambda path: path.mkdir(mode=0o700),
+                ),
+                patch.object(
+                    launcher.issuer,
+                    "create",
+                    side_effect=lambda path, data: path.write_bytes(data),
+                ),
+                patch.object(launcher.issuer, "configuration", return_value={}),
+            ):
+                launcher.prepare_issuer(Path("/reviewed/source.json"), "a" * 64)
+            result = subprocess.run(
+                [executable, "-X", "-w", "--dbname=service=axiom-controller-issuer"],
+                env={
+                    "PGSERVICEFILE": str(base / "controller-db.service"),
+                    "PGPASSFILE": "/nonexistent",
+                },
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("syntax error in service file", result.stderr)
+            self.assertIn("nonexistent-axiom-controller-test", result.stderr)
+
     def test_requests_pass_unchanged_protected_issuer_validator(self):
         for tenant, _ in TENANTS.values():
             raw, digest = issue_request(
