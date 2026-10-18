@@ -398,7 +398,22 @@ export function ClosureDossiersTab({
             {error}
           </p>
         ) : dossiers.length === 0 && builds.length === 0 && sealed.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-600">No dossier records are visible.</p>
+          <div className="mt-4 space-y-2 text-sm text-slate-600">
+            <p>No dossier records are visible.</p>
+            <p>
+              {canGenerate
+                ? 'First request a working report from a finalized assessment, then have the internal founder review and release its retained PDF. Select that released report above to prepare a dossier archive.'
+                : canRelease
+                  ? 'A reporting manager must first prepare a dossier from a released working report. Review the archive and its retention verification before sealing.'
+                  : 'Only sealed dossiers are available to your role. Ask the assessment owner and internal founder to complete report release, archive verification and sealing.'}
+            </p>
+            <a
+              href="/reports"
+              className="inline-block font-medium text-teal-800 underline underline-offset-4"
+            >
+              Open working reports and registers
+            </a>
+          </div>
         ) : (
           <ul className="mt-4 divide-y divide-slate-100">
             {sealed.map((dossier) => (

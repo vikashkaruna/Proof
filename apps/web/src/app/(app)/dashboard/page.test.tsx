@@ -154,3 +154,47 @@ it('shows no band when the posture is unavailable', async () => {
   const view = await html();
   expect(view).not.toContain('data-testid="posture-band"');
 });
+
+it('guides operators through the workflow and links the latest recorded assessment', async () => {
+  state.results.engagements = {
+    data: {
+      id: 'engagement-1',
+      title: 'Current compliance review',
+      status: 'awaiting_approval',
+      posture_score: 0.74,
+      started_at: '2026-10-01T00:00:00Z',
+    },
+    error: null,
+  };
+  const view = await html();
+  expect(view).toContain('Your next steps');
+  expect(view).toContain('1. Set up the estate');
+  expect(view).toContain('6. Review reports');
+  expect(view).toContain('Current compliance review');
+  expect(view).toContain('Recorded status: awaiting approval');
+  expect(view).toContain('href="/engagements/engagement-1"');
+});
+
+it('limits the viewer workflow to read-only evidence, reports and ledger destinations', async () => {
+  state.role = 'viewer';
+  const view = await html();
+  for (const route of ['/reports', '/evidence', '/ledger'])
+    expect(view).toContain(`href="${route}"`);
+  for (const route of [
+    '/estate',
+    '/assessment',
+    '/plans',
+    '/approval',
+    '/execution',
+    '/engagements',
+  ])
+    expect(view).not.toContain(`href="${route}"`);
+  expect(view).not.toContain('aria-label="Latest assessment"');
+});
+
+it('distinguishes a missing assessment from an unavailable assessment', async () => {
+  expect(await html()).toContain('No assessment recorded yet.');
+  state.results.engagements = { data: null, error: new Error('unavailable') };
+  expect(await html()).toContain('Assessment records are unavailable.');
+  expect(await html()).not.toContain('No assessment recorded yet.');
+});

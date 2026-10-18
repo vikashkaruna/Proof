@@ -35,7 +35,7 @@ export default async function DashboardPage() {
       supabase.from('remediation_actions').select('id, approval_status').eq('tenant_id', tenantId),
       supabase
         .from('engagements')
-        .select('posture_score')
+        .select('id, title, status, posture_score, started_at')
         .eq('tenant_id', tenantId)
         .order('started_at', { ascending: false })
         .limit(1)
@@ -123,6 +123,49 @@ export default async function DashboardPage() {
     },
   ];
 
+  const journey = [
+    {
+      href: '/estate',
+      title: '1. Set up the estate',
+      detail: 'Identify systems and data sources before discovery.',
+    },
+    {
+      href: '/assessment',
+      title: '2. Assess the gaps',
+      detail: 'Review control results and finalize an assessment.',
+    },
+    {
+      href: '/plans',
+      title: '3. Review the plan',
+      detail: 'Inspect each action, recorded dry run and rollback before a decision.',
+    },
+    {
+      href: '/approval',
+      title: '4. Decide on actions',
+      detail: 'Approve or reject only the actions within your assigned scope.',
+    },
+    {
+      href: '/execution',
+      title: '5. Follow execution',
+      detail: 'Inspect execution results and rollback records after approval.',
+    },
+    {
+      href: '/reports',
+      title: '6. Review reports',
+      detail: 'Prepare or read working reports, then follow their review and release status.',
+    },
+    {
+      href: '/evidence',
+      title: 'Inspect supporting evidence',
+      detail: 'Read the retained records and their individual storage assurance.',
+    },
+    {
+      href: '/ledger',
+      title: 'Trace recorded decisions',
+      detail: 'Follow the audit trail for assessment, approval and execution.',
+    },
+  ].filter((step) => reachable.has(step.href));
+
   return (
     <section className="w-full min-w-0 space-y-4" aria-label="Dashboard">
       <PageHeader
@@ -180,6 +223,76 @@ export default async function DashboardPage() {
           ))}
         </dl>
       </PageHeader>
+
+      <section
+        aria-label="Your workflow"
+        className="rounded-xl border border-slate-200 bg-white p-5"
+      >
+        <h2 className="font-heading text-base font-semibold text-[#1E2A4A]">Your next steps</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Follow the work from setup to released reports. These shortcuts reflect your role; each
+          screen shows the recorded state and any prerequisites still needed.
+        </p>
+        <ol className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {journey.map((step) => (
+            <li key={step.href}>
+              <Link
+                href={step.href}
+                className="block h-full rounded-lg border border-slate-200 p-3 transition-colors hover:border-teal-500 focus-visible:outline-2 focus-visible:outline-teal-500"
+              >
+                <span className="text-sm font-semibold text-[#1E2A4A]">{step.title} →</span>
+                <span className="mt-1 block text-xs leading-relaxed text-slate-600">
+                  {step.detail}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </section>
+
+      {reachable.has('/engagements') && (
+        <section
+          aria-label="Latest assessment"
+          className="rounded-xl border border-slate-200 bg-white p-5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-heading text-base font-semibold text-[#1E2A4A]">
+              Latest assessment
+            </h2>
+            <Link
+              href="/engagements"
+              className="text-sm font-medium text-teal-800 underline underline-offset-4"
+            >
+              All engagements
+            </Link>
+          </div>
+          {engagement.error ? (
+            <p className="mt-3 text-sm text-slate-600">Assessment records are unavailable.</p>
+          ) : !engagement.data?.id ? (
+            <p className="mt-3 text-sm text-slate-600">
+              No assessment recorded yet. Open engagements to start or review an assessment.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-medium text-slate-900">{engagement.data.title}</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  Recorded status: {engagement.data.status.replace(/_/g, ' ')}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Started {formatDateTime(engagement.data.started_at)}
+                </p>
+              </div>
+              <Link
+                href={`/engagements/${engagement.data.id}`}
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-[#1E2A4A] hover:bg-slate-50"
+              >
+                Open assessment
+              </Link>
+            </div>
+          )}
+        </section>
+      )}
 
       <section
         aria-label="Recorded tenant metrics"

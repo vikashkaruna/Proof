@@ -376,3 +376,15 @@ it('refuses an archive GET before download when secure hashing is unavailable', 
   );
   expect(readArchive).not.toHaveBeenCalled();
 });
+
+it('explains the release and sealing prerequisites to a reader with no sealed dossiers', async () => {
+  routes({ '/dossiers/sealed?': () => Response.json({ dossiers: [] }) });
+  render(
+    <ClosureDossiersTab tenantId={tenant} canGenerate={false} canRelease={false} canReadSealed />,
+  );
+  await screen.findByText('No dossier records are visible.');
+  expect(screen.getByText(/Only sealed dossiers are available to your role/)).toBeTruthy();
+  expect(
+    screen.getByRole('link', { name: 'Open working reports and registers' }).getAttribute('href'),
+  ).toBe('/reports');
+});
