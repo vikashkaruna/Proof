@@ -1,55 +1,28 @@
-/** Owned synthetic testing is confined to strict local/test topology. No customer or cloud adapter. */
+/** Explicit local synthetic target composition with per-binding retained scope. */
+import path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
-import { createHumanActionWriter } from '@axiom/supabase';
+import { createHumanActionWriter, createSupabaseAdmin } from '@axiom/supabase';
 import { loadEnv } from '@axiom/config';
-import { z } from 'zod';
 import { createOwnedSyntheticController } from './owned-synthetic-controller.js';
-const claims = z
-  .object({
-    role: z.literal('owned_target_controller'),
-    exp: z.number().int().safe().positive(),
-    nbf: z.number().int().safe().nonnegative().optional(),
-  })
-  .passthrough();
+import { createOwnedTargetTransport } from './owned-target-transport.js';
 export function readOwnedSyntheticConfiguration(source: NodeJS.ProcessEnv = process.env) {
   if (
     source.AXIOM_OWNED_SYNTHETIC_ENABLED !== 'true' ||
     !['local', 'test'].includes(source.ENVIRONMENT ?? '') ||
-    (source.AXIOM_AUTH_MODE ?? 'strict') !== 'strict'
+    (source.AXIOM_AUTH_MODE ?? 'strict') !== 'strict' ||
+    source.SUPABASE_OWNED_TARGET_CONTROLLER_KEY
   )
     return null;
-  const key = source.SUPABASE_OWNED_TARGET_CONTROLLER_KEY;
+  const credentialDirectory = source.AXIOM_OWNED_TARGET_CREDENTIAL_DIRECTORY;
   if (
-    !key ||
-    [
-      source.SUPABASE_SERVICE_KEY,
-      source.SUPABASE_HUMAN_ACTION_WRITER_KEY,
-      source.SUPABASE_AGENT_LEDGER_WRITER_KEY,
-      source.SUPABASE_EVIDENCE_INGESTION_WRITER_KEY,
-    ].some((value) => value === key)
+    !credentialDirectory ||
+    !path.isAbsolute(credentialDirectory) ||
+    path.normalize(credentialDirectory) !== credentialDirectory
   )
     return null;
-  const parts = key.split('.');
-  if (parts.length !== 3 || parts.some((p) => !p)) return null;
-  try {
-    const parsed = claims.safeParse(
-        JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8')),
-      ),
-      now = Math.floor(Date.now() / 1000);
-    if (
-      !parsed.success ||
-      parsed.data.exp <= now ||
-      (parsed.data.nbf !== undefined && parsed.data.nbf > now)
-    )
-      return null;
-  } catch {
-    return null;
-  }
-  // The target PostgREST authenticates the signature; local claim checks catch misconfiguration.
-  return { targetKey: key };
+  return { credentialDirectory };
 }
-/** Scoped PostgREST transport. Installation must separately authorize the
- * exact incoming authenticator membership; this factory never grants it. */
+/** PostgREST itself authenticates JWT cryptography and role-switch transport. */
 export function ownedTargetControllerFactory(url: string, anonKey: string, targetKey: string) {
   return () =>
     createClient(url, anonKey, {
@@ -57,17 +30,30 @@ export function ownedTargetControllerFactory(url: string, anonKey: string, targe
       global: { headers: { Authorization: `Bearer ${targetKey}` } },
     });
 }
+export function configuredOwnedTargetTransport(
+  credentialDirectory: string,
+  source: NodeJS.ProcessEnv = process.env,
+) {
+  const env = loadEnv(source);
+  return createOwnedTargetTransport({
+    credentialDirectory,
+    serviceRpc: async (name, args) => {
+      const result = await createSupabaseAdmin()
+        .rpc(name, args)
+        .abortSignal(AbortSignal.timeout(15000));
+      if (result.error) throw Error('Owned enrollment scope unavailable');
+      return result.data as unknown;
+    },
+    client: (token) =>
+      ownedTargetControllerFactory(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, token)(),
+  });
+}
 export function createConfiguredOwnedSynthetic(isKilled: (tenantId: string) => Promise<boolean>) {
   const config = readOwnedSyntheticConfiguration();
   if (!config) return null;
-  const env = loadEnv();
   return createOwnedSyntheticController({
     isKilled,
     humanWriterFactory: createHumanActionWriter,
-    targetControllerFactory: ownedTargetControllerFactory(
-      env.SUPABASE_URL,
-      env.SUPABASE_ANON_KEY,
-      config.targetKey,
-    ),
+    targetRpc: configuredOwnedTargetTransport(config.credentialDirectory),
   });
 }

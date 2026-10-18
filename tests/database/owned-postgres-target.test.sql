@@ -6,6 +6,17 @@ insert into public.remediation_plans(id,tenant_id,engagement_id,library_version,
 insert into owned_synthetic.resources(fixture_id,resource_id) values(pg_temp.pg_id(50),pg_temp.pg_id(51));
 insert into owned_synthetic.bindings(id,tenant_id,connector_id,engagement_id,fixture_id,resource_id,environment,label,scope,custody_policy_id,custody_activation_epoch,engine_sha256,capability_sha256,approval_reference,expires_at)
 values(pg_temp.pg_id(52),pg_temp.pg_id(1),pg_temp.pg_id(6),pg_temp.pg_id(20),pg_temp.pg_id(50),pg_temp.pg_id(51),'test','Owned synthetic audit configuration','owned_synthetic_config.audit_log_enable','99143000-0000-4000-8000-000000000021',1,owned_synthetic.engine_sha256(),'a5b3db560e0707307c69aa70dc6bd62ad4a4ae0612c39f9420db6d99c4a20fb9',pg_temp.pg_id(56),clock_timestamp()+interval '20 minutes');
+-- Explicit administrative enrollment/JTI stand-ins for the strengthened169
+-- fences, when present. No environment bypass, signing key or HTTP proof.
+create temporary table fixture_owned169_claims(binding_id uuid primary key,claims jsonb);
+do $setup169$declare binding uuid;begin
+ if to_regprocedure('pg_temp.fixture_owned169_enrollment(uuid)') is not null then
+  for binding in select id from owned_synthetic.bindings loop
+   insert into fixture_owned169_claims values(binding,pg_temp.fixture_owned169_enrollment(binding));
+  end loop;
+ end if;
+end $setup169$;
+select set_config('request.jwt.claims',coalesce((select claims::text from fixture_owned169_claims where binding_id=pg_temp.pg_id(52)), '{}'),true);
 create temporary table target166_saved(name text primary key,value jsonb);
 grant select,insert on target166_saved to owned_target_controller;
 create function pg_temp.target166_refused(statement text,code text default '42501') returns void language plpgsql as $$

@@ -332,6 +332,13 @@ def _readonly_host_preflight(
         "bffContainerId": container,
         "workloadApiVolume": workload,
         "nodeId": node,
-        "karyaEntries": matching,
+        "karyaIdentity": None
+        if not matching
+        else {
+            "entryId": matching[0]["id"],
+            "spiffeId": "spiffe://local.axiomproof.test/agent/karya",
+            "parentId": node,
+            "workerUid": 20005,
+        },
         "persistentMutations": 0,
     }

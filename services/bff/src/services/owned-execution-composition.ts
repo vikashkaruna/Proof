@@ -1,11 +1,12 @@
 /** Explicit local synthetic deployment only. No enrollment or credential minting. */
-import { loadEnv } from '@axiom/config';
+import { createSupabaseAdmin } from '@axiom/supabase';
+import { z } from 'zod';
 import type { ApprovalEngine } from '@axiom/approval-engine';
 import { JwtSvidVerifier } from '../workloads/jwt-svid.js';
 import { WorkloadApiJwtTrust } from '../workloads/workload-api-trust.js';
 import {
   readOwnedSyntheticConfiguration,
-  ownedTargetControllerFactory,
+  configuredOwnedTargetTransport,
 } from './owned-synthetic-composition.js';
 import { OwnedExecutionBroker } from './owned-execution-broker.js';
 export function createConfiguredOwnedExecution(
@@ -20,7 +21,7 @@ export function createConfiguredOwnedExecution(
       socketPath: source.AXIOM_OWNED_EXECUTION_TRUST_SOCKET,
       trustDomains: ['local.axiomproof.test'],
     });
-    const env = loadEnv(source);
+    const targetRpc = configuredOwnedTargetTransport(config.credentialDirectory, source);
     return new OwnedExecutionBroker({
       approval,
       identity: new JwtSvidVerifier(
@@ -31,11 +32,21 @@ export function createConfiguredOwnedExecution(
         },
         trust,
       ),
-      target: ownedTargetControllerFactory(
-        env.SUPABASE_URL,
-        env.SUPABASE_ANON_KEY,
-        config.targetKey,
-      ),
+      scopedRpc: async (input, name, args, signal) => {
+        const result = await createSupabaseAdmin()
+          .rpc('read_owned_deployment_action_binding', {
+            p_tenant_id: input.tenantId,
+            p_plan_id: input.planId,
+            p_action_id: input.actionId,
+          })
+          .abortSignal(signal);
+        if (result.error || signal.aborted) throw Error('Owned execution scope unavailable');
+        const binding = z
+          .object({ tenantId: z.literal(input.tenantId), bindingId: z.uuid() })
+          .strict()
+          .parse(result.data);
+        return targetRpc(input.tenantId, binding.bindingId, name, args, signal);
+      },
     });
   } catch {
     return null;

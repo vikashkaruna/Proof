@@ -1,3 +1,8 @@
+import {
+  ownedDeploymentRoutes,
+  type OwnedDeploymentRouteController,
+} from './routes/owned-deployments.js';
+import { createConfiguredOwnedDeployment } from './services/owned-deployment-composition.js';
 import { ownedExecutionRoutes } from './routes/owned-execution.js';
 import { createConfiguredOwnedExecution } from './services/owned-execution-composition.js';
 import type { OwnedExecutionBroker } from './services/owned-execution-broker.js';
@@ -59,6 +64,7 @@ export function createApp(
     prativedan?: PrativedanPrivateClient;
     discoveryController?: DiscoveryRequestController;
     ownedSynthetic?: OwnedSyntheticRouteDeps | null;
+    ownedDeployment?: OwnedDeploymentRouteController | null;
     ownedExecution?: Pick<OwnedExecutionBroker, 'run'> | null;
     assessmentTools?: AssessmentTools;
     assessmentRequests?: AssessmentRequestProducer;
@@ -181,6 +187,8 @@ export function createApp(
     '/v1/plans/owned-synthetic/observe-effect',
   ])
     app.use(path, boundedJsonBody(16384));
+  app.use('/v1/owned-deployments', boundedJsonBody(16384));
+  app.use('/v1/owned-deployments/*', boundedJsonBody(16384));
   app.use('/v1/engagements', boundedJsonBody(4096));
   app.use('/v1/public-control-review-sets', boundedJsonBody(PUBLIC_CONTROL_REVIEW_MAX_BYTES));
   app.use('/v1/public-control-review-sets/*', async (c, next) => {
@@ -210,6 +218,14 @@ export function createApp(
   app.use('/v1/*', reportAuthority());
   app.use('/v1/*', idempotency);
 
+  app.route(
+    '/v1/owned-deployments',
+    ownedDeploymentRoutes(
+      options.ownedDeployment === undefined
+        ? createConfiguredOwnedDeployment(approvalEngine, mfa)
+        : options.ownedDeployment,
+    ),
+  );
   app.route(
     '/v1',
     v1Routes({

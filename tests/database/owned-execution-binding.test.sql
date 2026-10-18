@@ -1,5 +1,7 @@
 -- Prefix: genuine custody foundation + real measured human-plan fixture.
 -- Explicit disposable SQL accepted-state stand-in, not browser MFA or HMAC proof.
+-- Explicit169 SQL claims fixture; real HTTP signature verification is separate.
+select set_config('request.jwt.claims',coalesce((select claims::text from fixture_owned169_claims where binding_id=pg_temp.pg_id(191)), '{}'),true);
 select pg_temp.ok(owned_synthetic.execution_operation_id('89110000-0000-4000-8000-000000000001','89110000-0000-4000-8000-000000000002','forward')='9f5d97bf-30fc-8a17-bc46-ebfaf6ca5b68'::uuid,'BFF and SQL deterministic operation UUID parity');
 create temporary table owned168_saved(name text primary key,v jsonb);
 grant select,insert on owned168_saved to owned_target_controller;

@@ -20,6 +20,16 @@ insert into owned_synthetic.bindings(id,tenant_id,connector_id,engagement_id,fix
  select pg_temp.pg_id(190+n),pg_temp.pg_id(1),pg_temp.pg_id(6),pg_temp.pg_id(170),pg_temp.pg_id(171),pg_temp.pg_id(180+n),'test',
  'Owned synthetic audit configuration','owned_synthetic_config.audit_log_enable','99143000-0000-4000-8000-000000000021',1,
  owned_synthetic.engine_sha256(),'a5b3db560e0707307c69aa70dc6bd62ad4a4ae0612c39f9420db6d99c4a20fb9',pg_temp.pg_id(200+n),clock_timestamp()+interval '15 minutes' from generate_series(1,4)n;
+-- Explicit administrative enrollment/JTI stand-ins for the strengthened169
+-- fences, when present. No environment bypass, signing key or HTTP proof.
+create temporary table fixture_owned169_claims(binding_id uuid primary key,claims jsonb);
+do $setup169$declare binding uuid;begin
+ if to_regprocedure('pg_temp.fixture_owned169_enrollment(uuid)') is not null then
+  for binding in select id from owned_synthetic.bindings loop
+   insert into fixture_owned169_claims values(binding,pg_temp.fixture_owned169_enrollment(binding));
+  end loop;
+ end if;
+end $setup169$;
 create temporary table human167_saved(n int primary key,request jsonb,digest text,proof jsonb,validation text,receipt jsonb);
 insert into human167_saved(n,request,proof)
  select n,jsonb_build_object('operationKey',pg_temp.pg_id(210+n),'bindingId',pg_temp.pg_id(190+n),'engagementId',pg_temp.pg_id(170),

@@ -68,7 +68,13 @@ export class OwnedExecutionBroker {
     private readonly deps: {
       identity: Pick<JwtSvidVerifier, 'verify'>;
       approval: Pick<ApprovalEngine, 'sign'>;
-      target: () => OwnedRpcClient;
+      target?: () => OwnedRpcClient;
+      scopedRpc?: (
+        input: OwnedExecutionRequest,
+        name: string,
+        args: Record<string, unknown>,
+        signal: AbortSignal,
+      ) => Promise<{ data: unknown; error: unknown }>;
     },
   ) {}
   async run(raw: unknown, proof: string, signal: AbortSignal): Promise<unknown> {
@@ -92,7 +98,10 @@ export class OwnedExecutionBroker {
     const rpc = async (name: string, args: Record<string, unknown>) => {
       if (signal.aborted || identity.expiresAt <= Date.now())
         throw Error('Owned execution refused');
-      const result = await this.deps.target().rpc(name, args).abortSignal(signal);
+      const result = this.deps.scopedRpc
+        ? await this.deps.scopedRpc(input, name, args, signal)
+        : await this.deps.target?.().rpc(name, args).abortSignal(signal);
+      if (!result) throw Error('Owned target transport unavailable');
       if (result.error || signal.aborted) throw Error('Owned execution refused');
       return result.data;
     };

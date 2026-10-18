@@ -37,26 +37,12 @@ const claims = z
     nbf: epoch.optional(),
   })
   .passthrough();
-/** Call only after independently resolving exact tenant/binding from retained
- * server source. Neither a browser nor an agent supplies the file or digest. */
-export async function withOwnedTargetCredential<T>(
-  filename: string,
-  expectedSha256: string,
-  expected: OwnedTargetScope,
-  use: (accessToken: string) => Promise<T>,
-): Promise<T> {
-  let bytes: Buffer | undefined;
-  let accessToken: string;
+/** Same strict scope/claims validation for an unpublished issuer candidate.
+ * Signature verification still requires the actual signed PostgREST call. */
+export function ownedTargetCredentialValue(raw: unknown, expected: OwnedTargetScope): string {
   try {
     ownedTargetScope.parse(expected);
-    sha.parse(expectedSha256);
-    await assertOwnedDeploymentAncestors(filename);
-    bytes = await readControllerFile(filename);
-    if (createHash('sha256').update(bytes).digest('hex') !== expectedSha256) throw Error();
-    if (bytes.length > 16384) throw Error();
-    const value = credential.parse(
-      parsePrativedanAssessmentJson(new TextDecoder('utf8', { fatal: true }).decode(bytes)),
-    );
+    const value = credential.parse(raw);
     if (
       value.tenantId !== expected.tenantId ||
       value.bindingId !== expected.bindingId ||
@@ -96,7 +82,32 @@ export async function withOwnedTargetCredential<T>(
       token.exp * 1000 !== Date.parse(expected.expiresAt)
     )
       throw Error();
-    accessToken = value.accessToken;
+    return value.accessToken;
+  } catch {
+    throw Error('Owned target credential refused');
+  }
+}
+/** Call only after independently resolving exact tenant/binding from retained
+ * server source. Neither a browser nor an agent supplies the file or digest. */
+export async function withOwnedTargetCredential<T>(
+  filename: string,
+  expectedSha256: string,
+  expected: OwnedTargetScope,
+  use: (accessToken: string) => Promise<T>,
+): Promise<T> {
+  let bytes: Buffer | undefined;
+  let accessToken: string;
+  try {
+    ownedTargetScope.parse(expected);
+    sha.parse(expectedSha256);
+    await assertOwnedDeploymentAncestors(filename);
+    bytes = await readControllerFile(filename);
+    if (createHash('sha256').update(bytes).digest('hex') !== expectedSha256) throw Error();
+    if (bytes.length > 16384) throw Error();
+    accessToken = ownedTargetCredentialValue(
+      parsePrativedanAssessmentJson(new TextDecoder('utf8', { fatal: true }).decode(bytes)),
+      expected,
+    );
   } catch {
     throw Error('Owned target credential refused');
   } finally {
