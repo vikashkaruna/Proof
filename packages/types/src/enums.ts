@@ -363,6 +363,8 @@ export const LedgerActionType = {
   CATALOGUE_MAPPING_CONTEXTS_ADOPTED: 'catalogue.mapping_contexts_adopted',
   CATALOGUE_VERSION_APPROVED: 'catalogue.version_approved',
   CATALOGUE_CURRENT_VERSION_CHANGED: 'catalogue.current_version_changed',
+  OWNED_PLAN_REQUEST_PREPARED: 'plan.owned_request.prepared',
+  OWNED_PLAN_REQUEST_CANCELLED: 'plan.owned_request.cancelled',
 } as const;
 export type LedgerActionType = (typeof LedgerActionType)[keyof typeof LedgerActionType];
 
