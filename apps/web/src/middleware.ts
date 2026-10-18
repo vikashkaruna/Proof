@@ -12,6 +12,11 @@ const PUBLIC_PATHS = new Set<string>([
   '/',
   '/api/health',
   '/login',
+  // Self-service password reset: the person is not signed in yet. The pages
+  // and the code-exchange route do their own checks with the auth provider.
+  '/forgot-password',
+  '/reset-password',
+  '/auth/reset-callback',
   // C-W1-3: client-only; moves the fragment token to session storage before
   // any sign-in redirect could drop it. The BFF authenticates the acceptance.
   '/invite',

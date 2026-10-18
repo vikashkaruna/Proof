@@ -135,6 +135,14 @@ export default async function LoginPage({
             <Button type="submit" variant="primary" fullWidth size="lg">
               {isSignup ? 'Create account' : 'Sign in'}
             </Button>
+            {!isSignup && (
+              <Link
+                href="/forgot-password"
+                className="self-center text-sm font-medium text-teal-600 hover:underline"
+              >
+                Forgot password?
+              </Link>
+            )}
           </form>
 
           <p className="mt-6 text-center text-sm text-slate-500">
