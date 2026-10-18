@@ -159,6 +159,8 @@ def plan(root: Path = ROOT) -> dict:
             "discovery165_suite_required",
         ),
         (166, {"owned-postgres-target.test.sql"}, "owned_target166_suite_required"),
+        (167, {"owned-human-plans.test.sql"}, "owned_human167_suite_required"),
+        (168, {"owned-execution-binding.test.sql"}, "owned_execution168_suite_required"),
     ):
         need(versions[-1] < minimum or suites <= set(files), code)
     return {

@@ -31,7 +31,7 @@ class PolicyPhases(unittest.TestCase):
         self.assertEqual(len(plan["all"]), len(set(plan["all"])))
         self.assertEqual(sorted(plan["historical143"] + plan["current"]), plan["all"])
         self.assertIn(PHASES.CURRENT, plan["current"])
-        self.assertEqual(plan["currentVersion"], 166)
+        self.assertEqual(plan["currentVersion"], 168)
         self.assertIn(
             "local-public-control-assessment-dispatch.test.sql", plan["current"]
         )
@@ -55,7 +55,7 @@ class PolicyPhases(unittest.TestCase):
             (root / "infra/supabase/migrations" / source.name).write_text(
                 "-- offline inventory only"
             )
-        self.assertEqual(PHASES.plan(root)["currentVersion"], 166)
+        self.assertEqual(PHASES.plan(root)["currentVersion"], 168)
         custody = root / "tests/database/local-custody-operator-context.test.sql"
         custody.unlink()
         with self.assertRaisesRegex(ValueError, "custody148_context_suite_required"):
@@ -95,6 +95,8 @@ class PolicyPhases(unittest.TestCase):
             ("full-closure-source-graph.test.sql", "closure164_suites_required"),
             ("postgresql-discovery-requests.test.sql", "discovery165_suite_required"),
             ("owned-postgres-target.test.sql", "owned_target166_suite_required"),
+            ("owned-human-plans.test.sql", "owned_human167_suite_required"),
+            ("owned-execution-binding.test.sql", "owned_execution168_suite_required"),
         ):
             with self.subTest(suite=suite), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)
