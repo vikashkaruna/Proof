@@ -124,6 +124,7 @@ export type MfaChallengePurpose =
   | 'factor_revocation'
   | 'catalogue_adoption'
   | 'local_custody_policy'
+  | 'owned_synthetic_enrollment'
   | 'mfa_recovery';
 
 export interface ApprovalBinding {
@@ -238,6 +239,20 @@ export interface MfaStatus {
     lastUsedAt: string | null;
   }>;
   recoveryCodesRemaining: number;
+}
+
+const DATABASE_CLOCK_MFA_PURPOSES = {
+  local_custody_policy: 'local_custody',
+  owned_synthetic_enrollment: 'owned_deployment',
+} as const;
+function databaseClockPurpose(
+  purpose: string,
+): purpose is keyof typeof DATABASE_CLOCK_MFA_PURPOSES {
+  return Object.hasOwn(DATABASE_CLOCK_MFA_PURPOSES, purpose);
+}
+function databaseClockRpc(purpose: string, phase: 'issue' | 'satisfy' | 'consume') {
+  if (!databaseClockPurpose(purpose)) throw Error('Bound MFA purpose refused');
+  return `${phase}_${DATABASE_CLOCK_MFA_PURPOSES[purpose]}_mfa_challenge`;
 }
 
 export interface IssueChallengeOptions {
@@ -999,7 +1014,7 @@ export function createMfaService(
 
     async issueChallenge(opts) {
       if (
-        (opts.purpose === 'catalogue_adoption' || opts.purpose === 'local_custody_policy') &&
+        (opts.purpose === 'catalogue_adoption' || databaseClockPurpose(opts.purpose)) &&
         (!opts.sessionId ||
           !opts.boundResourceRef ||
           !/^[0-9a-f]{64}$/.test(opts.boundPayloadSha256 ?? '') ||
@@ -1059,8 +1074,8 @@ export function createMfaService(
           : DEFAULT_CHALLENGE_TTL_MS);
 
       const supabase = clientFactory();
-      if (opts.purpose === 'local_custody_policy') {
-        const { data, error } = await supabase.rpc('issue_local_custody_mfa_challenge', {
+      if (databaseClockPurpose(opts.purpose)) {
+        const { data, error } = await supabase.rpc(databaseClockRpc(opts.purpose, 'issue'), {
           p_tenant_id: opts.tenantId,
           p_actor_id: opts.userId,
           p_session_id: opts.sessionId,
@@ -1180,7 +1195,7 @@ export function createMfaService(
 
       const challenge = data as ChallengeRow;
       if (
-        challenge.purpose === 'local_custody_policy' &&
+        databaseClockPurpose(challenge.purpose) &&
         (!sessionId ||
           !tenantId ||
           challenge.tenant_id !== tenantId ||
@@ -1189,7 +1204,7 @@ export function createMfaService(
       )
         return { ok: false, reason: 'challenge_not_found' };
       if (
-        challenge.purpose === 'local_custody_policy' &&
+        databaseClockPurpose(challenge.purpose) &&
         (await activeTotpFactor(userId))?.id !== challenge.factor_id
       )
         return { ok: false, reason: 'challenge_not_found' };
@@ -1226,7 +1241,7 @@ export function createMfaService(
         const ring = requireRing();
         const factor = await activeTotpFactor(userId);
         if (!factor?.secret_encrypted) return { ok: false, reason: 'not_enrolled' };
-        if (challenge.purpose === 'local_custody_policy' && factor.id !== challenge.factor_id)
+        if (databaseClockPurpose(challenge.purpose) && factor.id !== challenge.factor_id)
           return { ok: false, reason: 'challenge_not_found' };
 
         let opened;
@@ -1268,14 +1283,14 @@ export function createMfaService(
       }
 
       if (
-        challenge.purpose === 'local_custody_policy' &&
+        databaseClockPurpose(challenge.purpose) &&
         (await activeTotpFactor(userId))?.id !== challenge.factor_id
       )
         return { ok: false, reason: 'challenge_not_found' };
-      if (challenge.purpose === 'local_custody_policy') {
+      if (databaseClockPurpose(challenge.purpose)) {
         // The trusted service has already charged the attempt and verified the
         // code/counter above. PostgreSQL owns only the persisted clock/CAS gate.
-        const { data, error } = await supabase.rpc('satisfy_local_custody_mfa_challenge', {
+        const { data, error } = await supabase.rpc(databaseClockRpc(challenge.purpose, 'satisfy'), {
           p_tenant_id: tenantId,
           p_actor_id: userId,
           p_session_id: sessionId,
@@ -1325,7 +1340,7 @@ export function createMfaService(
 
     async consumeChallenge(opts) {
       if (!opts.challengeId) return { ok: false, reason: 'challenge_required' };
-      if (opts.purpose === 'local_custody_policy' && !opts.sessionId)
+      if (databaseClockPurpose(opts.purpose) && !opts.sessionId)
         return { ok: false, reason: 'binding_mismatch' };
 
       const supabase = clientFactory();
@@ -1340,7 +1355,7 @@ export function createMfaService(
 
       const challenge = data as ChallengeRow;
       if (
-        (opts.purpose === 'catalogue_adoption' || opts.purpose === 'local_custody_policy') &&
+        (opts.purpose === 'catalogue_adoption' || databaseClockPurpose(opts.purpose)) &&
         (!opts.tenantId || challenge.tenant_id !== opts.tenantId)
       )
         return { ok: false, reason: 'binding_mismatch' };
@@ -1366,7 +1381,7 @@ export function createMfaService(
       // Existing signed approval tokens keep their normal expiry/revocation.
       if (
         opts.purpose === 'catalogue_adoption' ||
-        opts.purpose === 'local_custody_policy' ||
+        databaseClockPurpose(opts.purpose) ||
         opts.purpose === 'approval_issuance'
       ) {
         const activeFactor = await activeTotpFactor(opts.userId);
@@ -1377,8 +1392,8 @@ export function createMfaService(
           };
       }
 
-      if (opts.purpose === 'local_custody_policy') {
-        const { data, error } = await supabase.rpc('consume_local_custody_mfa_challenge', {
+      if (databaseClockPurpose(opts.purpose)) {
+        const { data, error } = await supabase.rpc(databaseClockRpc(opts.purpose, 'consume'), {
           p_tenant_id: opts.tenantId,
           p_actor_id: opts.userId,
           p_session_id: opts.sessionId,
