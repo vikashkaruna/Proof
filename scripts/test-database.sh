@@ -18,11 +18,18 @@ fi
 test_log=$(mktemp)
 phase_dir=$(mktemp -d "${TMPDIR:-/tmp}/axiom-report-policy.XXXXXXXX")
 phase_dir=$(cd "$phase_dir" && pwd -P)
-cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -f "$test_log"; rm -rf "$phase_dir"; }
+container_id=""
+cleanup() {
+  # Only a successful create response establishes ownership. A name collision
+  # or uncertain create outcome must never remove somebody else's container.
+  if [ -n "$container_id" ]; then docker rm -f "$container_id" >/dev/null 2>&1 || true; fi
+  rm -f "$test_log"
+  rm -rf "$phase_dir"
+}
 trap cleanup EXIT
 python3 tests/database/lib/report-policy-phases.py prepare --directory "$phase_dir"
 pnpm exec tsx scripts/lib/coverage-first-report-sql-fixtures.ts "$phase_dir"
-docker run --rm -d --name "$container" --label com.axiom.fixture=database-policy-test --label com.axiom.fixture.project=axiom-db-tests --label "com.axiom.owner-worktree=$(pwd)" -e POSTGRES_HOST_AUTH_METHOD=trust "$image" >/dev/null
+container_id=$(docker run --rm -d --name "$container" --label com.axiom.fixture=database-policy-test --label com.axiom.fixture.project=axiom-db-tests --label "com.axiom.owner-worktree=$(pwd)" -e POSTGRES_HOST_AUTH_METHOD=trust "$image")
 for attempt in $(seq 1 60); do
   if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
