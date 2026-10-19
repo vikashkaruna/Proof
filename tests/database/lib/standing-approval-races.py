@@ -41,6 +41,11 @@ class Refused(RuntimeError):
     pass
 
 
+def validate_fixture_inputs(container: str, image: str) -> None:
+    if not re.fullmatch(r'[a-f0-9]{64}',container) or not re.fullmatch(r'sha256:[a-f0-9]{64}',image):
+        raise Refused('Immutable owned fixture ID and image required')
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--container', required=True)
@@ -55,6 +60,7 @@ def main() -> None:
         raise Refused('Fixture guard unavailable')
     guard = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(guard)
+    validate_fixture_inputs(args.container,args.image)
     guard.inspect(docker, args.container, ROOT, args.image)
     os.umask(0o077)
     evidence = Path(tempfile.mkdtemp(prefix='axiom-standing173-races-'))
