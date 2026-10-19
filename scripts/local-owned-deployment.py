@@ -972,19 +972,26 @@ def once(configuration_file: Path) -> str:
         return "completed"
 
 
-def reconcile(configuration_file: Path) -> dict:
+def reconcile(configuration_file: Path, selected_claim: str | None = None) -> dict:
     configuration = load_configuration(configuration_file)
     directory = Path(configuration["stateDirectory"])
     with journal_lock(directory):
         journal = directory / "current.json"
+        if selected_claim is not None:
+            selected_claim = identifier(selected_claim)
+            current = parse_json(protected_bytes(journal)) if journal.exists() else {}
+            if not isinstance(current, dict) or current.get("claimId") != selected_claim:
+                journal = directory / (selected_claim + ".json")
         if not journal.exists():
-            return {"state": "blocked", "detail": "No captured current claim"}
+            return {"state": "blocked", "detail": "No captured selected claim"}
         original_raw = protected_bytes(journal)
         state = parse_json(original_raw)
         if not isinstance(state, dict) or not isinstance(state.get("task"), dict):
             return {"state": "blocked", "detail": "Original task scope not captured"}
         task = state["task"]
         claim_id = identifier(state["claimId"])
+        if selected_claim is not None and claim_id != selected_claim:
+            raise ValueError("Foreign selected claim journal refused")
         receipt = call(configuration, "tasks/read", {"claimId": claim_id})
         fields = {
             "claimId",
@@ -1049,6 +1056,44 @@ def reconcile(configuration_file: Path) -> dict:
             final_state = terminal
         else:
             return {"state": "blocked", "detail": "Original outcome remains unconfirmed"}
+        pending_file = directory / ("renewal-pending-" + identifier(task["requestId"]) + ".json")
+        if terminal == "authority_revoked_with_original_effect_history" and pending_file.exists():
+            pending = parse_json(protected_bytes(pending_file))
+            if not isinstance(pending, dict) or not isinstance(pending.get("intent"), dict):
+                raise ValueError("Original renewal intent refused")
+            intent = pending["intent"]
+            if (
+                intent.get("tenantId") != task["tenantId"]
+                or intent.get("enrollmentId") != task["requestId"]
+            ):
+                raise ValueError("Foreign renewal scope refused")
+            identifier(intent.get("credentialId"))
+            renewal_evidence = directory / (
+                "renewal-stopped-" + intent["credentialId"] + "-" + receipt["receiptId"] + ".json"
+            )
+            if renewal_evidence.exists():
+                prior = parse_json(protected_bytes(renewal_evidence))
+                if not isinstance(prior, dict) or prior.get("receipt") != receipt:
+                    raise ValueError("Retained renewal stop proof conflict")
+                if pending == prior.get("original"):
+                    pending.update(state=terminal, stopReceiptId=receipt["receiptId"])
+                    write_private(pending_file, pending)
+                elif (
+                    pending.get("state") != terminal
+                    or pending.get("stopReceiptId") != receipt["receiptId"]
+                ):
+                    raise ValueError("Retained renewal stop proof conflict")
+            else:
+                write_private(
+                    renewal_evidence,
+                    {"original": pending, "receipt": receipt, "disposition": terminal},
+                    exclusive=True,
+                )
+                # No issuance/mutation is retried or asserted absent. The fresh
+                # scoped stop fences late authorization/issuance transactions.
+                pending.update(state=terminal, stopReceiptId=receipt["receiptId"])
+                write_private(pending_file, pending)
+
         # The original unknown journal/steps remain intact in a protected receipt.
         # Revocation proves only authority stopped; no target/no-effect or worker
         # state is inferred. No claim, authorization, token, JTI or effect retry.
@@ -1219,15 +1264,22 @@ def main() -> None:
     )
     parser.add_argument("configuration", type=Path)
     parser.add_argument("--interval", type=int, default=15)
+    parser.add_argument(
+        "--claim",
+        default=None,
+        help="Exact previously captured claim UUID for read-only reconciliation",
+    )
     args = parser.parse_args()
     os.umask(0o077)
     try:
+        if args.claim is not None and args.command != "reconcile":
+            raise ValueError("Claim selection is read-only reconciliation only")
         configuration = load_configuration(args.configuration)
         directory = Path(configuration["stateDirectory"])
         if args.command == "init-state":
             owned_directory(directory, create=True)
         elif args.command == "reconcile":
-            print(json.dumps(reconcile(args.configuration)))
+            print(json.dumps(reconcile(args.configuration, args.claim)))
         elif args.command == "prepare-config":
             print(json.dumps(prepare_configuration(configuration)))
         elif args.command == "renew-due":

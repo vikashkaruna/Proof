@@ -580,6 +580,71 @@ class OwnedPollerTests(unittest.TestCase):
                 "installation_confirmed_history",
             )
 
+    def test_archived_claim_stop_preserves_unknown_renewal_and_fences_new_mints(self):
+        original, receipt = self.reconciliation_fixture()
+        archive = self.state / (original["claimId"] + ".json")
+        (self.state / "current.json").rename(archive)
+        pending = {
+            "state": "effect_pending",
+            "intent": {
+                "tenantId": receipt["tenantId"],
+                "enrollmentId": receipt["requestId"],
+                "credentialId": "89110000-0000-4000-8000-000000000099",
+            },
+        }
+        file = self.state / ("renewal-pending-" + receipt["requestId"] + ".json")
+        MODULE.write_private(file, pending, exclusive=True)
+
+        def api(config, path, body):
+            self.assertEqual(path, "tasks/read")
+            return receipt
+
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call", side_effect=api) as call,
+            patch.object(MODULE, "fixed_effect") as effect,
+        ):
+            self.assertEqual(
+                MODULE.reconcile(self.configuration_file, original["claimId"])["state"],
+                "authority_revoked_with_original_effect_history",
+            )
+            MODULE.reconcile(self.configuration_file, original["claimId"])
+            self.assertEqual(
+                MODULE.renew_due(self.configuration_file), {"renewed": 0, "expired": 0}
+            )
+            self.assertEqual(call.call_count, 2)
+            effect.assert_not_called()
+        self.assertEqual(
+            MODULE.parse_json(MODULE.protected_bytes(file))["state"],
+            "authority_revoked_with_original_effect_history",
+        )
+        proof = next(self.state.glob("renewal-stopped-*.json"))
+        self.assertEqual(MODULE.parse_json(MODULE.protected_bytes(proof))["original"], pending)
+        self.assertFalse((self.state / "current.json").exists())
+
+    def test_foreign_pending_renewal_never_gets_cleared_by_another_scope_stop(self):
+        original, receipt = self.reconciliation_fixture()
+        pending = {
+            "state": "unconfirmed",
+            "intent": {
+                "tenantId": "foreign",
+                "enrollmentId": receipt["requestId"],
+                "credentialId": "89110000-0000-4000-8000-000000000099",
+            },
+        }
+        file = self.state / ("renewal-pending-" + receipt["requestId"] + ".json")
+        MODULE.write_private(file, pending, exclusive=True)
+        before = MODULE.protected_bytes(self.state / "current.json")
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call", return_value=receipt),
+        ):
+            with self.assertRaisesRegex(ValueError, "Foreign renewal"):
+                MODULE.reconcile(self.configuration_file)
+        self.assertEqual(MODULE.protected_bytes(self.state / "current.json"), before)
+        self.assertEqual(MODULE.parse_json(MODULE.protected_bytes(file)), pending)
+        self.assertEqual(list(self.state.glob("renewal-stopped-*.json")), [])
+
 
 if __name__ == "__main__":
     unittest.main()
