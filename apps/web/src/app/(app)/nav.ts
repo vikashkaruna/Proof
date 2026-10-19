@@ -107,6 +107,15 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         phase: 'P1',
         capability: Capability.ASSESSMENT_RUN,
       },
+      {
+        route: '/datamap/flows',
+        en: 'Declared data flows',
+        hi: 'घोषित डेटा प्रवाह',
+        phase: 'P1',
+        // This metadata/history page has its own read gate. The legacy map
+        // and estate permissions and all mutation gates remain independent.
+        capability: Capability.POSTURE_READ,
+      },
     ],
   },
   {

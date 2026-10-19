@@ -108,12 +108,14 @@ it('keeps unknown outcomes retained and blocks replacement until a matching reco
 });
 it('leaves all mutations unavailable when actual server context is disabled', async () => {
   vi.mocked(requestDataFlow).mockRejectedValue(
-    new Error('Standing approval delegation is disabled or unavailable in this deployment.'),
+    new Error('Data flow declarations are disabled or unavailable in this deployment.'),
   );
   render(<DataFlowClient tenantId={id(3)} actorId={id(1)} />);
   await screen.findByText(/disabled or unavailable/);
   expect(
-    screen.queryByRole('button', { name: /Retain owner|Retain approval|Record original/ }),
+    screen.queryByRole('button', {
+      name: /Retain declaration|Prepare independent|Prepare rejection|Prepare metadata withdrawal|Record original/,
+    }),
   ).toBeNull();
 });
 it('recovers a lost challenge reply without issuing another challenge until authoritative expiry or fencing', async () => {

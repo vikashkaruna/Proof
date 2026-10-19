@@ -240,9 +240,9 @@ export function DataFlowClient({
       <Link href="/dashboard">Back to dashboard</Link>
       <h1 className="text-2xl font-semibold">Reviewed data flow declarations</h1>
       <p>
-        Record human-declared processing relationships between registered systems and explicitly
-        named parties. A different owner, admin or live founder reviews the exact revision with an
-        authenticator.
+        Inspect human-declared processing relationships between registered systems and explicitly
+        named parties. An estate manager prepares a declaration; a different owner, admin or live
+        founder reviews the exact revision with an authenticator.
       </p>
       <p className="text-sm text-slate-600">
         These declarations are metadata, not observed transfers, connector permissions, execution
