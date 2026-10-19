@@ -103,6 +103,7 @@ function TenantAuditorWorkflow({
   const chosen = assessments.find((item) => item.assessmentRunId === selectedRun) ?? null;
   const selected = requests.find((item) => item.id === selectedRequest) ?? null;
   const refresh = useCallback(() => {
+    setError('');
     setLoading(true);
     setArtifact(null);
     setReport(null);
@@ -343,7 +344,7 @@ function TenantAuditorWorkflow({
       <div aria-label="Auditor pack requests" className="space-y-3">
         <h3 className="font-semibold">Recorded requests</h3>
         {loading && <p role="status">Loading auditor requests…</p>}
-        {!loading && requests.length === 0 && (
+        {!loading && !error && requests.length === 0 && (
           <p className="text-sm text-slate-600">No auditor review pack requests are recorded.</p>
         )}
         <ul className="space-y-2">
@@ -401,7 +402,7 @@ function TenantAuditorWorkflow({
           </button>
         </div>
       </div>
-      {selected && (
+      {selected && (!existingRequestsOnly || !error) && (
         <div
           aria-label="Selected auditor request"
           className="space-y-3 rounded-lg border border-slate-200 p-4"

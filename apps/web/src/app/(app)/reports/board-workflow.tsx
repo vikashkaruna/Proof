@@ -119,6 +119,7 @@ function TenantBoardWorkflow({
     detailState && detailState.reportId === selected?.reportId ? detailState.artifact : null;
   const chosen = assessments.find((item) => item.assessmentRunId === selectedRun) ?? null;
   const refresh = useCallback(() => {
+    setError('');
     setLoading(true);
     setDetailState(null);
     setRevision((value) => value + 1);
@@ -373,7 +374,7 @@ function TenantBoardWorkflow({
       <div aria-label="Board report requests" className="space-y-3">
         <h3 className="font-semibold">Recorded requests</h3>
         {loading && <p role="status">Loading board requests…</p>}
-        {!loading && requests.length === 0 && (
+        {!loading && !error && requests.length === 0 && (
           <p className="text-sm text-slate-600">
             No board report requests are recorded for this view.
           </p>
@@ -439,7 +440,7 @@ function TenantBoardWorkflow({
           </button>
         </div>
       </div>
-      {selected && (
+      {selected && (!existingRequestsOnly || !error) && (
         <div
           aria-label="Selected board request"
           className="space-y-3 rounded-lg border border-slate-200 p-4"
@@ -452,7 +453,7 @@ function TenantBoardWorkflow({
             <button
               type="button"
               className={button}
-              disabled={busy}
+              disabled={busy || loading}
               onClick={() => void act(`/reports/board/${selected.id}/generate`, {})}
             >
               Generate source-bound draft

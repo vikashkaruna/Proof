@@ -147,5 +147,16 @@ it('retains honest request-list failure without inventing an empty or completed 
   );
   await screen.findAllByText('Saved request queue unavailable');
   expect(screen.queryByText('All reports complete')).toBeNull();
+  expect(screen.queryByText('No board report requests are recorded for this view.')).toBeNull();
+  expect(screen.queryByText('No auditor review pack requests are recorded.')).toBeNull();
   expect(screen.queryByRole('button', { name: 'Generate source-bound draft' })).toBeNull();
+  vi.mocked(reportRequest).mockImplementation(async () =>
+    Response.json({ requests: [], total: 0, limit: 20, offset: 0 }),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh board state' }));
+  await screen.findByText('No board report requests are recorded for this view.');
+  expect(screen.getAllByText('Saved request queue unavailable')).toHaveLength(1);
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh auditor packs' }));
+  await screen.findByText('No auditor review pack requests are recorded.');
+  expect(screen.queryByText('Saved request queue unavailable')).toBeNull();
 });
