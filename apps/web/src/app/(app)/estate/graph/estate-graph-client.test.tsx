@@ -569,3 +569,93 @@ it('removes expired access while the graph is open and reflects revocation on re
   );
   expect(container.querySelectorAll('[data-edge="write"]')).toHaveLength(0);
 });
+it('shows narrow approved derivation and a safe source link without changing graph topology', () => {
+  const provenance = {
+    state: 'available' as const,
+    bySystem: {
+      'system-1': {
+        state: 'recorded' as const,
+        proposalId: '10000000-0000-4000-8000-000000000004',
+        sourceIndex: 0,
+        contentSha256: 'a'.repeat(64),
+        reviewReceiptId: '123',
+        reviewedAt: '2026-10-19T00:00:00Z',
+        sourceHref: '/estate/onboarding#proposal-10000000-0000-4000-8000-000000000004',
+      },
+    },
+  };
+  const { container, rerender } = render(
+    <EstateGraph snapshot={snapshot} input={{ ...input, provenance }} />,
+  );
+  const nodes = container.querySelectorAll('[data-node]').length,
+    edges = container.querySelectorAll('[data-edge]').length;
+  fireEvent.click(screen.getByRole('button', { name: 'system Payroll' }));
+  expect(screen.getByText(/intake item 1 → this system/)).toBeTruthy();
+  expect(screen.getByText(/Approval receipt 123/)).toBeTruthy();
+  expect(
+    screen.getByRole('link', { name: 'Open approved onboarding source' }).getAttribute('href'),
+  ).toBe(provenance.bySystem['system-1'].sourceHref);
+  expect(
+    screen.getByText(/Current configuration, connectivity and data transfers are not established/),
+  ).toBeTruthy();
+  rerender(
+    <EstateGraph
+      snapshot={snapshot}
+      input={{
+        ...input,
+        provenance: { state: 'unavailable', bySystem: { 'system-1': { state: 'unavailable' } } },
+      }}
+    />,
+  );
+  expect(screen.queryByRole('link', { name: 'Open approved onboarding source' })).toBeNull();
+  expect(screen.getByText(/Creation provenance is unavailable/)).toBeTruthy();
+  expect(container.querySelectorAll('[data-node]')).toHaveLength(nodes);
+  expect(container.querySelectorAll('[data-edge]')).toHaveLength(edges);
+});
+it('keeps readable approved metadata for read-only readers without an unavailable source link', () => {
+  render(
+    <EstateGraph
+      snapshot={snapshot}
+      input={{
+        ...input,
+        provenance: {
+          state: 'available',
+          bySystem: {
+            'system-1': {
+              state: 'recorded',
+              proposalId: '10000000-0000-4000-8000-000000000004',
+              sourceIndex: 0,
+              contentSha256: 'a'.repeat(64),
+              reviewReceiptId: '123',
+              reviewedAt: '2026-10-19T00:00:00Z',
+              sourceHref: null,
+            },
+          },
+        },
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'system Payroll' }));
+  expect(screen.getByText(/Approval receipt 123/)).toBeTruthy();
+  expect(screen.queryByRole('link', { name: 'Open approved onboarding source' })).toBeNull();
+});
+it('shows actual recorded category source in relationships, and does not invent a source for old data', () => {
+  render(
+    <EstateGraph
+      snapshot={snapshot}
+      input={{
+        ...input,
+        systems: [
+          { ...input.systems[0]!, categoryOrigins: [{ category: 'identity', source: 'observed' }] },
+        ],
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'system Payroll' }));
+  expect(screen.getByTestId('graph-detail').textContent).toContain(
+    'Recorded as observed (scan evidence not linked)',
+  );
+  expect(screen.getByTestId('graph-detail').textContent).toContain(
+    'Creation provenance is unavailable',
+  );
+});

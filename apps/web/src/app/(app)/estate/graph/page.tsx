@@ -1,8 +1,13 @@
 import Link from 'next/link';
-import { AGENT_CONTRACTS, Capability } from '@axiom/types';
+import { AGENT_CONTRACTS, can } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
 import type { GraphInput } from '@/lib/estate-graph';
+import {
+  approvedGraphProposals,
+  projectApprovedDerivation,
+  unavailableProvenance,
+} from '@/lib/estate-graph-provenance';
 import { EstateGraph } from './estate-graph-client';
 import { routeCapability } from '@/app/(app)/nav';
 import { moduleBarProps } from '@/lib/module-bar';
@@ -58,6 +63,15 @@ export default async function EstateGraphPage() {
       name: s.name,
       status: s.status,
       categories: [...new Set((s.system_data_categories ?? []).map((d) => d.category_key))].sort(),
+      categoryOrigins: (s.system_data_categories ?? []).map((d) => ({
+        category: d.category_key,
+        source:
+          d.source === 'declared'
+            ? ('declared' as const)
+            : d.source === 'observed'
+              ? ('observed' as const)
+              : ('unknown' as const),
+      })),
     })),
     connectors: (connectors.data ?? []).map((c) => ({
       id: c.id,
@@ -76,6 +90,52 @@ export default async function EstateGraphPage() {
       revokedAt: g.revoked_at,
     })),
   };
+  // Narrow projection only: never fetch raw intake/source snapshots, review
+  // prose, actors, endpoint/configuration fields or whole ledger details.
+  input.provenance = unavailableProvenance(input.systems);
+  if (!failed) {
+    try {
+      const proposals = await ctx.supabase
+        .from('onboarding_proposals')
+        .select(
+          'id,tenant_id,estate_id,content_sha256,status,reviewed_at,onboarding_proposal_systems(tenant_id,proposal_id,source_index,system_id)',
+        )
+        .eq('tenant_id', tenant)
+        .eq('status', 'approved')
+        .limit(2)
+        .limit(101, { referencedTable: 'onboarding_proposal_systems' })
+        .abortSignal(AbortSignal.timeout(5000));
+      if (proposals.error) throw new Error('Source unavailable');
+      const rows = approvedGraphProposals.parse(proposals.data);
+      let ledger: unknown = [];
+      if (rows.length) {
+        const result = await ctx.supabase
+          .from('audit_ledger')
+          .select(
+            'id,tenant_id,target_ref,actor_type,action_type,result,occurred_at,commitment:detail->>contentSha256,system_ids:detail->systemIds',
+          )
+          .eq('tenant_id', tenant)
+          .eq('action_type', 'onboarding.proposal.approved')
+          .in(
+            'target_ref',
+            rows.map((p) => p.id),
+          )
+          .limit(3)
+          .abortSignal(AbortSignal.timeout(5000));
+        if (result.error) throw new Error('Receipt unavailable');
+        ledger = result.data;
+      }
+      input.provenance = projectApprovedDerivation(
+        tenant,
+        input.systems,
+        rows,
+        ledger,
+        can(routeCapability('/estate'), { role: ctx.role }),
+      );
+    } catch {
+      /* Keep existing graph available with explicit unknown provenance. */
+    }
+  }
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader

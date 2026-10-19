@@ -95,3 +95,28 @@ describe('estate graph (W3.5)', () => {
     expect(positions.size).toBe(nodes.length);
   });
 });
+
+it('preserves recorded category origin labels without promoting observation to verified evidence', () => {
+  const graph = buildEstateGraph({
+    ...input,
+    systems: [
+      {
+        ...input.systems[0]!,
+        categories: ['contact', 'identity', 'other'],
+        categoryOrigins: [
+          { category: 'contact', source: 'observed' },
+          { category: 'identity', source: 'declared' },
+        ],
+      },
+    ],
+  });
+  expect(graph.edges.find((e) => e.to === 'category:contact')?.detail.label).toBe(
+    'Recorded as observed (scan evidence not linked)',
+  );
+  expect(graph.edges.find((e) => e.to === 'category:identity')?.detail.label).toBe(
+    'Declared category',
+  );
+  expect(graph.edges.find((e) => e.to === 'category:other')?.detail.label).toBe(
+    'Category source unknown',
+  );
+});

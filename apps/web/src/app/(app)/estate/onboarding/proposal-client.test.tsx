@@ -87,3 +87,17 @@ it('shows proposed fields from the actual intake for analyst review', () => {
     'Source region and personal-data declarations remain in the original snapshot',
   );
 });
+it('exposes the exact approved source anchor for readable provenance without granting review controls', () => {
+  const approved = {
+    ...proposal,
+    status: 'approved' as const,
+    reviewed_by: 'reviewer-1',
+    review_reason: 'Recorded client review',
+    onboarding_proposal_systems: [{ source_index: 0, system_id: 'system-1' }],
+  };
+  render(<ProposalClient {...base} data={{ intake, proposals: [approved] }} />);
+  const target = document.getElementById(`proposal-${approved.id}`);
+  expect(target?.textContent).toContain('approved');
+  expect(target?.textContent).toContain('Original source-to-system links are retained');
+  expect(screen.queryByRole('button', { name: 'Record review' })).toBeNull();
+});

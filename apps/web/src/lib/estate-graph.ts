@@ -3,10 +3,24 @@
  * can read. Access edges come solely from active, unrevoked connector grants,
  * so an agent with no grant has no edge — the default for eight of ten agents.
  */
+import {
+  categoryOriginLabel,
+  type CategoryOrigin,
+  type GraphProvenance,
+  type SystemDerivation,
+} from './estate-graph-provenance';
 export interface GraphInput {
+  provenance?: GraphProvenance;
   agents: { name: string; displayName: string }[];
   estates: { id: string; name: string; status: string }[];
-  systems: { id: string; estateId: string; name: string; status: string; categories: string[] }[];
+  systems: {
+    id: string;
+    estateId: string;
+    name: string;
+    status: string;
+    categories: string[];
+    categoryOrigins?: { category: string; source: CategoryOrigin }[];
+  }[];
   connectors: { id: string; systemId: string; name: string; status: string; assurance: string }[];
   grants: {
     id: string;
@@ -24,6 +38,7 @@ export interface GraphNode {
   kind: NodeKind;
   label: string;
   detail: Record<string, string>;
+  derivation?: SystemDerivation;
 }
 export type EdgeKind = 'contains' | 'declares' | 'read' | 'write';
 export interface GraphEdge {
@@ -82,7 +97,8 @@ export function buildEstateGraph(input: GraphInput, filter: GraphFilter = {}) {
       id: `system:${s.id}`,
       kind: 'system' as const,
       label: s.name,
-      detail: { categories: s.categories.join(', ') || 'none declared' },
+      detail: { categories: s.categories.join(', ') || 'none recorded' },
+      derivation: input.provenance?.bySystem[s.id] ?? { state: 'unavailable' as const },
     })),
     ...estates.map((e) => ({
       id: `estate:${e.id}`,
@@ -122,7 +138,11 @@ export function buildEstateGraph(input: GraphInput, filter: GraphFilter = {}) {
         kind: 'declares' as const,
         from: `system:${s.id}`,
         to: `category:${c}`,
-        detail: {},
+        detail: {
+          label: categoryOriginLabel(
+            s.categoryOrigins?.find((o) => o.category === c)?.source ?? 'unknown',
+          ),
+        },
       })),
     ),
     ...grants.map((g) => ({
