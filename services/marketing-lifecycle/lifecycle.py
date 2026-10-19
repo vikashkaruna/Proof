@@ -334,7 +334,8 @@ class Controller:
                 now = int(self.clock())
                 phase = state["phase"]
                 leases = state["leases"]
-                assert isinstance(leases, dict)
+                if not isinstance(leases, dict):
+                    return unavailable("gate_unavailable")
                 try:
                     if path == "/gate/release":
                         lease = leases.get(request)

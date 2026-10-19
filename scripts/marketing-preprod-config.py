@@ -12,7 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
+import subprocess  # nosec B404  # fixed read-only gcloud inventory argv from validated configuration
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("ops_env_parse", ROOT / "scripts/lib/ops-env-parse.py")
@@ -59,7 +59,7 @@ def profile(env: dict[str, str], release: dict, versions: dict, services: bool, 
     mapping = {
         "cloud_sql_instance_name": "CLOUD_SQL_INSTANCE_NAME", "cloud_sql_database_name": "CLOUD_SQL_DATABASE_NAME",
         "cloud_sql_tier": "CLOUD_SQL_TIER", "cloud_sql_database_version": "CLOUD_SQL_DATABASE_VERSION",
-        "cloud_sql_admin_user": "CLOUD_SQL_DATABASE_USER", "cloud_sql_admin_password": "CLOUD_SQL_ADMIN_PASSWORD",
+        "cloud_sql_admin_user": "CLOUD_SQL_DATABASE_USER", "cloud_sql_admin_password": "CLOUD_SQL_ADMIN_PASSWORD",  # nosec B105  # configuration secret reference/key name or absent optional bearer, never a credential value
         "network_name": "MARKETING_NETWORK_NAME", "subnetwork_name": "MARKETING_SUBNETWORK_NAME",
         "sql_range_name": "MARKETING_SQL_RANGE_NAME", "subnet_cidr": "MARKETING_SUBNET_CIDR",
     }
@@ -102,8 +102,8 @@ def profile(env: dict[str, str], release: dict, versions: dict, services: bool, 
     result["service_account_ids"] = {c: required("MARKETING_" + c.upper() + "_ACCOUNT_ID") for c in components}
     result["service_settings"] = {c: {"cpu": required("MARKETING_" + c.upper() + "_CPU"), "memory": required("MARKETING_" + c.upper() + "_MEMORY"), "port": int(required("MARKETING_" + c.upper() + "_PORT"))} for c in components}
     refs = {
-        "auth": {"GOTRUE_DB_DATABASE_URL": "MARKETING_AUTH_DB_URL_SECRET", "GOTRUE_JWT_SECRET": "MARKETING_JWT_SECRET"},
-        "rest": {"PGRST_DB_URI": "MARKETING_REST_DB_URL_SECRET", "PGRST_JWT_SECRET": "MARKETING_JWT_SECRET"},
+        "auth": {"GOTRUE_DB_DATABASE_URL": "MARKETING_AUTH_DB_URL_SECRET", "GOTRUE_JWT_SECRET": "MARKETING_JWT_SECRET"},  # nosec B105  # configuration secret reference/key name or absent optional bearer, never a credential value
+        "rest": {"PGRST_DB_URI": "MARKETING_REST_DB_URL_SECRET", "PGRST_JWT_SECRET": "MARKETING_JWT_SECRET"},  # nosec B105  # configuration secret reference/key name or absent optional bearer, never a credential value
         "bff": {"SUPABASE_SERVICE_KEY": "MARKETING_SERVICE_KEY_SECRET"},
     }
     result["service_secrets"] = {}
@@ -158,7 +158,7 @@ def main() -> int:
         env = loader.parse(args.env_file)
         release = json.loads(args.release_manifest.read_text())
         versions = json.loads(args.secret_manifest.read_text()) if args.secret_manifest else {}
-        current = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        current = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()  # nosec B603, B607  # fixed read-only gcloud inventory argv from validated configuration
         if release.get("release_sha") != current:
             raise ValueError("Release manifest differs from this checkout")
         lifecycle_proof = json.loads(args.lifecycle_manifest.read_text()) if args.lifecycle_manifest else {}

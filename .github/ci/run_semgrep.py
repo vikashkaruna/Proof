@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404  # fixed validated scanner invocation; credentials excluded from argv
 import sys
 import tempfile
 import urllib.request
@@ -210,7 +210,7 @@ def scan(*, managed=False, root=ROOT, policy=POLICY):
     try:
         with log.open("w") as output:
             log.chmod(0o600)
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603  # fixed validated scanner invocation; credentials excluded from argv
                 args,
                 cwd=root,
                 env=env,

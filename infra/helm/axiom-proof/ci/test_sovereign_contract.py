@@ -3,7 +3,8 @@
 import os
 import pathlib
 import shutil
-import subprocess
+import subprocess  # nosec B404  # local Helm rendering and fixed local Python validation only
+import sys
 import unittest
 
 import yaml
@@ -33,7 +34,9 @@ def render(onprem=False, overrides=()):
         ]
     for value in overrides:
         args += ["--set-string", value]
-    return subprocess.run(args, capture_output=True, text=True, check=False, timeout=30)
+    return subprocess.run(  # nosec B603  # fixed local Helm/validator argv, synthetic chart values, no cluster calls
+        args, capture_output=True, text=True, check=False, timeout=30
+    )
 
 
 def deployments(result):
@@ -125,8 +128,8 @@ class SovereignHelmTests(unittest.TestCase):
                 self.assertEqual(env["PII_REDACTION_ENABLED"]["value"], "true")
                 self.assertIn("API_KEY", env)
                 self.assertNotIn("MODEL_GATEWAY_API_KEY", env)
-        scoped = subprocess.run(
-            ["python3", str(CHART / "ci/assert-secret-scoping.py")],
+        scoped = subprocess.run(  # nosec B603  # fixed local Helm/validator argv, synthetic chart values, no cluster calls
+            [sys.executable, str(CHART / "ci/assert-secret-scoping.py")],
             check=False,
             input=result.stdout,
             capture_output=True,
@@ -156,8 +159,8 @@ class SovereignHelmTests(unittest.TestCase):
                         if entry["name"] == name
                     )
                     env["valueFrom"]["secretKeyRef"]["key"] = "authority-private-key"
-                    guarded = subprocess.run(
-                        ["python3", str(CHART / "ci/assert-secret-scoping.py")],
+                    guarded = subprocess.run(  # nosec B603  # fixed local Helm/validator argv, synthetic chart values, no cluster calls
+                        [sys.executable, str(CHART / "ci/assert-secret-scoping.py")],
                         input=yaml.safe_dump_all(docs),
                         capture_output=True,
                         text=True,
@@ -195,8 +198,8 @@ class SovereignHelmTests(unittest.TestCase):
                     container(deployment)["env"].append(
                         {"name": name, "value": "synthetic-unissued-authority-field"}
                     )
-                    guarded = subprocess.run(
-                        ["python3", str(CHART / "ci/assert-secret-scoping.py")],
+                    guarded = subprocess.run(  # nosec B603  # fixed local Helm/validator argv, synthetic chart values, no cluster calls
+                        [sys.executable, str(CHART / "ci/assert-secret-scoping.py")],
                         input=yaml.safe_dump_all(docs),
                         capture_output=True,
                         text=True,
@@ -207,7 +210,7 @@ class SovereignHelmTests(unittest.TestCase):
                     self.assertIn(name, guarded.stderr)
 
     def test_onprem_example_refuses_without_approved_inputs(self):
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603  # fixed local Helm/validator argv, synthetic chart values, no cluster calls
             [
                 HELM,
                 "template",

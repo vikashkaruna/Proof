@@ -6,7 +6,7 @@ import io
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
 import tempfile
 import unittest
 import urllib.error
@@ -119,7 +119,7 @@ class SemgrepPolicyTests(unittest.TestCase):
             ".github/semgrep/policy.json",
             "services/bff/src/routes/sovereign-license.ts",
         ]
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603, B607  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
             ["git", "check-ignore", "--no-index", "--stdin"],
             cwd=scanner.ROOT,
             input="\n".join(paths) + "\n",
@@ -310,7 +310,7 @@ class SemgrepPolicyTests(unittest.TestCase):
     def test_managed_scanner_errors_never_turn_green(self):
         with (
             tempfile.TemporaryDirectory() as directory,
-            patch.dict(os.environ, {"SEMGREP_APP_TOKEN": "synthetic-only"}),
+            patch.dict(os.environ, {"SEMGREP_APP_TOKEN": "synthetic-only"}),  # nosec B105  # synthetic fixture sentinel only, never an authentication credential
             patch.object(
                 scanner.subprocess,
                 "run",
@@ -367,7 +367,7 @@ class SemgrepPolicyTests(unittest.TestCase):
         marker = "synthetic-private-finding"
         with (
             tempfile.TemporaryDirectory() as tmp,
-            patch.dict(os.environ, {"SEMGREP_APP_TOKEN": "synthetic-only"}),
+            patch.dict(os.environ, {"SEMGREP_APP_TOKEN": "synthetic-only"}),  # nosec B105  # synthetic fixture sentinel only, never an authentication credential
         ):
             root = Path(tmp)
 
@@ -414,7 +414,7 @@ class SemgrepPolicyTests(unittest.TestCase):
                 "import * as cp from 'child_process';\nfunction invoke(command: string) { cp.exec(command); }\nfunction calculate(source: string) { return eval(source); }\nprocess.env['NODE_TLS_REJECT_UNAUTHORIZED'] = 0;\n"
             )
             credential = "AKIA" + "ABCDEFGHIJKLMNOP"
-            key = subprocess.run(
+            key = subprocess.run(  # nosec B603, B607  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
                 ["openssl", "genpkey", "-algorithm", "ED25519"],
                 capture_output=True,
                 text=True,
@@ -438,7 +438,7 @@ class SemgrepPolicyTests(unittest.TestCase):
                 "--disable-version-check",
                 "--json",
             ]
-            unsafe_scan = subprocess.run(
+            unsafe_scan = subprocess.run(  # nosec B603  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
                 [*base, str(unsafe)],
                 cwd=root,
                 check=False,
@@ -477,7 +477,7 @@ class SemgrepPolicyTests(unittest.TestCase):
                     for result in unsafe_report["results"]
                 )
             )
-            safe_scan = subprocess.run(
+            safe_scan = subprocess.run(  # nosec B603  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
                 [*base, str(safe)],
                 cwd=root,
                 check=False,

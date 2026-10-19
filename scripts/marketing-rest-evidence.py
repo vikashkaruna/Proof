@@ -17,7 +17,7 @@ import io
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404  # fixed Docker inspection/run argv, immutable image ID, network-none evidence worker
 import tarfile
 from pathlib import Path
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
@@ -40,7 +40,7 @@ def write(directory: Path, name: str, data: bytes) -> dict[str, str]:
 
 
 def single_layer(image_id: str) -> bytes:
-    saved = subprocess.run(["docker", "save", image_id], capture_output=True, check=True, timeout=300).stdout
+    saved = subprocess.run(["docker", "save", image_id], capture_output=True, check=True, timeout=300).stdout  # nosec B603, B607  # fixed Docker inspection/run argv, immutable image ID, network-none evidence worker
     with tarfile.open(fileobj=io.BytesIO(saved), mode="r:") as archive:
         manifest = json.load(archive.extractfile("manifest.json"))
         if len(manifest) != 1 or len(manifest[0]["Layers"]) != 1:
@@ -55,7 +55,7 @@ def single_layer(image_id: str) -> bytes:
 
 def binary_version(image_id: str) -> dict[str, object]:
     argv = ["/bin/postgrest", "--version"]
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603, B607  # fixed Docker inspection/run argv, immutable image ID, network-none evidence worker
         ["docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL",
          "--security-opt", "no-new-privileges", "--platform", "linux/amd64",
          "--entrypoint", argv[0], image_id, *argv[1:]],
