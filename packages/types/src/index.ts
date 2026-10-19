@@ -55,4 +55,4 @@ export * from './monitoring-read';
 export * from './owned-deployment';
 export * from './standing-delegation';
 export * from './data-flow-declarations';
-export * from './scheduled-coverage.js';
+export * from './scheduled-coverage';

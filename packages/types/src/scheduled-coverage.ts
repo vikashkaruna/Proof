@@ -1,7 +1,7 @@
 /** Explicit owner delegation for metadata-only scheduled coverage reassessment.
  * Discovery is provenance, never a source of questionnaire/legal declarations. */
 import { z } from 'zod';
-import { canonicalLocalCustody } from './local-custody-policy.js';
+import { canonicalLocalCustody } from './local-custody-policy';
 const uuid = z.uuid().transform((v) => v.toLowerCase());
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const instant = z.iso.datetime({ offset: true });
@@ -183,5 +183,20 @@ export const coverageScopeContext = z
       )
       .max(100),
     fires: z.array(coverageFireOutcome).max(100),
+  })
+  .strict();
+/** Safe public projection: contains no internal numerical assessment estimates. */
+export const coveragePresentation = z
+  .object({
+    tenantId: uuid,
+    runId: uuid,
+    engagementId: uuid,
+    fireId: uuid,
+    scopeId: uuid,
+    scopeReceiptId: receipt,
+    discoveryId: uuid,
+    discoveryResultSha256: hash,
+    basis: z.literal('technical_provenance_only'),
+    declarationPolicy: z.literal('all_business_facts_unknown'),
   })
   .strict();
