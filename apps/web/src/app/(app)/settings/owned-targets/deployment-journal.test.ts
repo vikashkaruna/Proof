@@ -158,3 +158,35 @@ describe('durable setup recovery', () => {
     ).not.toHaveProperty('code');
   });
 });
+
+it('keeps stop intent separate from installation and excludes codes from its durable proof', () => {
+  const request = {
+    operationKey,
+    expectedManifestSha256: 'a'.repeat(64),
+    expectedApprovalId: operationKey,
+    reason: 'Stop the exact retained synthetic enrollment authority',
+    acknowledgeOwnedSynthetic: true,
+  };
+  const challenge = deploymentJournal.parse({
+    ...original(),
+    intent: { phase: 'revoke_challenge', request },
+  });
+  const verify = deploymentJournal.parse({
+    ...original(),
+    intent: { phase: 'revoke_verify', request, challengeId: operationKey },
+  });
+  const revoke = deploymentJournal.parse({
+    ...original(),
+    intent: { phase: 'revoke', request, challengeId: operationKey },
+  });
+  expect(deploymentBody(challenge)).toEqual({ request });
+  expect(deploymentBody(verify, '482901')).toEqual({
+    request,
+    challengeId: operationKey,
+    code: '482901',
+  });
+  expect(deploymentBody(revoke)).toEqual({ request, challengeId: operationKey });
+  expect(() => deploymentBody(verify)).toThrow('Enter your current');
+  expect(JSON.stringify(verify)).not.toContain('482901');
+  expect(deploymentJournal.safeParse({ ...verify, code: '482901' }).success).toBe(false);
+});

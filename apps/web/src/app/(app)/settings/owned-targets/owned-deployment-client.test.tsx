@@ -243,3 +243,213 @@ it('preserves an unresolved operation and refuses to send when scoped readback i
   expect(fetcher.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
   expect(readDeploymentJournal(localStorage, tenantId, actorId)).toEqual(original);
 });
+
+it.each(['revoke_verify', 'revoke'] as const)(
+  'recovers a lost %s reply without replacing its exact stop request or repeating completed work',
+  async (lostPhase) => {
+    const request = {
+      operationKey,
+      expectedManifestSha256: 'a'.repeat(64),
+      expectedApprovalId: requestId,
+      reason: 'Stop this exact synthetic enrollment authority',
+      acknowledgeOwnedSynthetic: true,
+    } as const;
+    const start = deploymentJournal.parse({
+      ...original,
+      intent: { phase: lostPhase, request, challengeId },
+    });
+    retainDeploymentJournal(localStorage, start);
+    const recorded = new Set<string>();
+    const posts: { path: string; body: unknown }[] = [];
+    let dropReply = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, options: RequestInit) => {
+        if (options.method === 'POST') {
+          const phase = url.endsWith('/revoke-verify') ? 'revoke_verify' : 'revoke';
+          expect(url.endsWith('/revoke-verify') || url.endsWith('/revoke')).toBe(true);
+          const body: unknown = JSON.parse(String(options.body));
+          posts.push({ path: url, body });
+          expect(readDeploymentJournal(localStorage, tenantId, actorId)?.intent.request).toEqual(
+            request,
+          );
+          recorded.add(phase);
+          if (dropReply) {
+            dropReply = false;
+            throw Error('Lost committed stop reply');
+          }
+          return Response.json({ data: null });
+        }
+        if (!url.includes('/operations/')) return Response.json({ data: [] });
+        const phase = url.includes('/operations/revoke_verify/') ? 'revoke_verify' : 'revoke';
+        const intent = { phase, request, challengeId };
+        const saved = recorded.has(phase);
+        return Response.json({
+          data: {
+            tenantId,
+            actorId,
+            requestId,
+            operationKey,
+            phase,
+            outcome: saved ? 'recorded' : 'not_recorded',
+            canonicalRequestHash: saved
+              ? await sha256(
+                  ownedDeploymentOperationCanonicalJSON({
+                    tenantId,
+                    actorId,
+                    requestId,
+                    operationKey,
+                    intent,
+                  }),
+                )
+              : null,
+            intent: saved ? intent : null,
+            receiptId: saved ? (phase === 'revoke_verify' ? '501' : '502') : null,
+            result: null,
+            phaseResult: saved && phase === 'revoke_verify' ? { phase, verified: true } : null,
+          },
+        });
+      }),
+    );
+    const props = { tenantId, actorId, founder: false, engagements: [] };
+    const first = render(<OwnedDeploymentClient {...props} />);
+    if (lostPhase === 'revoke_verify') {
+      fireEvent.change(await screen.findByLabelText('Authenticator or recovery code'), {
+        target: { value: '482901' },
+      });
+    }
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name:
+          lostPhase === 'revoke_verify'
+            ? 'Verify code for this stop request'
+            : 'Revoke this setup authority',
+      }),
+    );
+    await screen.findByRole('alert');
+    expect(posts).toHaveLength(1);
+    expect(JSON.stringify(readDeploymentJournal(localStorage, tenantId, actorId))).not.toContain(
+      '482901',
+    );
+    first.unmount();
+    render(<OwnedDeploymentClient {...props} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Check original step' }));
+    if (lostPhase === 'revoke_verify') {
+      await screen.findByRole('button', { name: 'Revoke this setup authority' });
+      expect(posts).toHaveLength(1);
+      fireEvent.click(screen.getByRole('button', { name: 'Revoke this setup authority' }));
+    }
+    await waitFor(() => expect(readDeploymentJournal(localStorage, tenantId, actorId)).toBeNull());
+    expect(posts).toHaveLength(lostPhase === 'revoke_verify' ? 2 : 1);
+    expect(posts.at(-1)?.body).toEqual({ request, challengeId });
+    expect(screen.getByRole('status').textContent).toContain('Setup authority revoked');
+  },
+);
+
+it('lets a current non-founder prepare a separate stop for an expired approval and recover a lost challenge', async () => {
+  const row = {
+    requestId,
+    tenantId,
+    actorId,
+    engagementId: requestId,
+    connectorId: requestId,
+    state: 'expired',
+    manifestSha256: 'a'.repeat(64),
+    environment: 'local',
+    label: 'Owned synthetic audit configuration',
+    scope: 'owned_synthetic_config.audit_log_enable',
+    fixtureId: requestId,
+    resourceId: requestId,
+    bindingId: requestId,
+    custodyPolicyId: requestId,
+    custodyEpoch: 1,
+    requestedAt: '2020-01-01T00:00:00Z',
+    expiresAt: '2020-01-02T00:00:00Z',
+    reason: 'Original approved synthetic demonstration request',
+    preflight: null,
+    approval: {
+      approvalId: requestId,
+      approvedBy: actorId,
+      approvedAt: '2020-01-01T00:00:00Z',
+      expiresAt: '2020-01-02T00:00:00Z',
+      receiptId: '601',
+    },
+    installation: null,
+    limitations: ['Synthetic local configuration only'],
+  };
+  let saved = false;
+  const posts: unknown[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, options: RequestInit) => {
+      if (options.method === 'POST') {
+        expect(url.endsWith('/revoke-challenge')).toBe(true);
+        posts.push(JSON.parse(String(options.body)) as unknown);
+        saved = true;
+        throw Error('Lost challenge reply');
+      }
+      if (!url.includes('/operations/')) return Response.json({ data: [row] });
+      const intent = readDeploymentJournal(localStorage, tenantId, actorId)!.intent;
+      return Response.json({
+        data: {
+          tenantId,
+          actorId,
+          requestId,
+          operationKey: intent.request.operationKey,
+          phase: 'revoke_challenge',
+          outcome: saved ? 'recorded' : 'not_recorded',
+          canonicalRequestHash: saved
+            ? await sha256(
+                ownedDeploymentOperationCanonicalJSON({
+                  tenantId,
+                  actorId,
+                  requestId,
+                  operationKey: intent.request.operationKey,
+                  intent,
+                }),
+              )
+            : null,
+          intent: saved ? intent : null,
+          receiptId: saved ? '602' : null,
+          result: null,
+          phaseResult: saved
+            ? {
+                phase: 'revoke_challenge',
+                challenge: { challengeId, expiresAt: '2099-01-01T00:00:00Z', maxAttempts: 3 },
+              }
+            : null,
+        },
+      });
+    }),
+  );
+  const props = { tenantId, actorId, founder: false, engagements: [] };
+  const first = render(<OwnedDeploymentClient {...props} />);
+  await screen.findByRole('option', { name: /Setup authority expired/ });
+  fireEvent.change(screen.getByLabelText('Setup request'), { target: { value: requestId } });
+  expect(screen.queryByRole('button', { name: 'Install the approved setup' })).toBeNull();
+  fireEvent.change(screen.getByLabelText('Reason for stopping this setup'), {
+    target: { value: 'Revoke the exact expired synthetic setup authority' },
+  });
+  fireEvent.click(
+    screen.getByLabelText(
+      'I reviewed this exact enrollment and want to revoke its setup authority. This does not undo its target setting.',
+    ),
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare stop request' }));
+  await screen.findByRole('alert');
+  expect(posts).toHaveLength(1);
+  const retained = readDeploymentJournal(localStorage, tenantId, actorId)!;
+  expect(retained.intent.phase).toBe('revoke_challenge');
+  expect(retained.intent.request).toMatchObject({
+    expectedApprovalId: requestId,
+    expectedManifestSha256: row.manifestSha256,
+  });
+  first.unmount();
+  render(<OwnedDeploymentClient {...props} />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Check original step' }));
+  await screen.findByRole('button', { name: 'Verify code for this stop request' });
+  expect(posts).toHaveLength(1);
+  expect(readDeploymentJournal(localStorage, tenantId, actorId)?.intent.request).toEqual(
+    retained.intent.request,
+  );
+});

@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { formatDateTime } from '@/lib/display-time';
 import {
   ownedDeploymentList,
   ownedDeploymentOptions,
@@ -31,7 +32,7 @@ const states: Record<OwnedDeploymentSummary['state'], string> = {
   preflight_refused: 'Preparation checks did not pass',
   approved: 'Approved; ready to install',
   installing: 'Installation in progress',
-  active: 'Setup confirmed',
+  active: 'Installation confirmed',
   unconfirmed: 'Outcome needs review',
   revoked: 'Setup authority revoked',
   expired: 'Setup authority expired',
@@ -57,6 +58,8 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
     [selected, setSelected] = useState(''),
     [reason, setReason] = useState(''),
     [ack, setAck] = useState(false),
+    [stopReason, setStopReason] = useState(''),
+    [stopAck, setStopAck] = useState(false),
     [code, setCode] = useState(''),
     [retireAck, setRetireAck] = useState(false),
     [pending, setPending] = useState<DeploymentJournal | null>(null),
@@ -151,44 +154,64 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
       );
       return;
     }
-    if (original.intent.phase === 'challenge') {
-      if (receipt.phaseResult?.phase !== 'challenge')
+    if (original.intent.phase === 'challenge' || original.intent.phase === 'revoke_challenge') {
+      if (receipt.phaseResult?.phase !== original.intent.phase)
         throw Error('Recorded challenge is unavailable');
       const challenge = receipt.phaseResult.challenge;
       if (Date.parse(challenge.expiresAt) <= Date.now())
         throw Error(
-          'The recorded challenge expired. Retire the old step after the server confirms that no approval or installation effect exists, then review a fresh request.',
+          'The recorded challenge expired. Retire the old step after the server confirms that this step made no mutating effect, then review a fresh request.',
         );
       retainDeploymentJournal(localStorage, {
         ...original,
-        intent: {
-          phase: 'verify',
-          request: original.intent.request,
-          challengeId: challenge.challengeId,
-        },
+        intent:
+          original.intent.phase === 'revoke_challenge'
+            ? {
+                phase: 'revoke_verify',
+                request: original.intent.request,
+                challengeId: challenge.challengeId,
+              }
+            : {
+                phase: 'verify',
+                request: original.intent.request,
+                challengeId: challenge.challengeId,
+              },
       });
       setMessage(
-        'Enter your current authenticator or recovery code. Approval still needs your confirmation.',
+        original.intent.phase === 'revoke_challenge'
+          ? 'Enter your current authenticator or recovery code. Revoking authority still needs your separate confirmation.'
+          : 'Enter your current authenticator or recovery code. Approval still needs your confirmation.',
       );
       return;
     }
-    if (original.intent.phase === 'verify') {
+    if (original.intent.phase === 'verify' || original.intent.phase === 'revoke_verify') {
       retainDeploymentJournal(localStorage, {
         ...original,
-        intent: { ...original.intent, phase: 'approve' },
+        intent:
+          original.intent.phase === 'revoke_verify'
+            ? { ...original.intent, phase: 'revoke' }
+            : { ...original.intent, phase: 'approve' },
       });
       setMessage(
-        'Your code was verified for this exact setup. Review the frozen request and confirm founder approval.',
+        original.intent.phase === 'revoke_verify'
+          ? 'Your code was verified for this exact stop request. Confirm revocation of its setup authority.'
+          : 'Your code was verified for this exact setup. Review the frozen request and confirm founder approval.',
       );
       return;
     }
     completeDeploymentJournal(localStorage, original, receipt.receiptId);
+    if (original.intent.phase === 'revoke') {
+      setStopReason('');
+      setStopAck(false);
+    }
     setCode('');
     setRetireAck(false);
     setMessage(
       receipt.phaseResult?.phase === 'fence'
         ? `The server retired the original step and blocked its late retries. Receipt ${receipt.receiptId}. ${receipt.phaseResult.receipt.requiresPreflight ? 'Run fresh preparation checks before reviewing another approval.' : 'You can select and review a new step.'} No replacement approval or target change was made.`
-        : `Step recorded. Receipt ${receipt.receiptId}.`,
+        : original.intent.phase === 'revoke'
+          ? `Setup authority revoked. Receipt ${receipt.receiptId}. The target setting and audit history are preserved.`
+          : `Step recorded. Receipt ${receipt.receiptId}.`,
     );
     await reload();
   }
@@ -202,7 +225,7 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
     const suffix =
       original.intent.phase === 'request'
         ? ''
-        : `/${original.requestId}/${original.intent.phase === 'fence' ? 'fence-intent' : original.intent.phase}`;
+        : `/${original.requestId}/${original.intent.phase === 'fence' ? 'fence-intent' : original.intent.phase.replaceAll('_', '-')}`;
     try {
       await deploymentTransport(
         scope,
@@ -222,7 +245,10 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
       const current = await readback(original);
       if (current.outcome === 'unconfirmed')
         throw Error('An effect is still unconfirmed. Keep the original step for reconciliation.');
-      if (original.intent.phase === 'approve' && current.outcome === 'recorded') {
+      if (
+        (original.intent.phase === 'approve' || original.intent.phase === 'revoke') &&
+        current.outcome === 'recorded'
+      ) {
         await recover(original, current);
         return;
       }
@@ -232,7 +258,7 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
       await send(fence);
     });
   }
-  function begin(phase: 'request' | 'preflight' | 'challenge' | 'install') {
+  function begin(phase: 'request' | 'preflight' | 'challenge' | 'install' | 'revoke_challenge') {
     void run(async () => {
       if (readDeploymentJournal(localStorage, tenantId, actorId))
         throw Error('Check the retained step before starting another.');
@@ -260,7 +286,20 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
       } else {
         if (!row) throw Error('Select the retained setup request first');
         requestId = row.requestId;
-        if (phase === 'preflight')
+        if (phase === 'revoke_challenge') {
+          if (!row.approval || !stopAck)
+            throw Error('Review and acknowledge the exact setup authority to stop');
+          intent = {
+            phase,
+            request: {
+              operationKey,
+              expectedManifestSha256: row.manifestSha256,
+              expectedApprovalId: row.approval.approvalId,
+              reason: stopReason,
+              acknowledgeOwnedSynthetic: true,
+            },
+          };
+        } else if (phase === 'preflight')
           intent = { phase, request: { operationKey, expectedManifestSha256: row.manifestSha256 } };
         else if (phase === 'install') {
           if (!row.approval) throw Error('Recorded founder approval is required');
@@ -346,11 +385,19 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
           <h2 className="font-semibold">Continue the original setup step</h2>
           <p>
             Step:{' '}
-            {pending.intent.phase === 'approve' ? 'Confirm founder approval' : pending.intent.phase}
+            {pending.intent.phase === 'approve'
+              ? 'Confirm founder approval'
+              : pending.intent.phase === 'revoke'
+                ? 'Confirm stop of setup authority'
+                : pending.intent.phase === 'revoke_verify'
+                  ? 'Verify code for the stop request'
+                  : pending.intent.phase === 'revoke_challenge'
+                    ? 'Prepare the stop request'
+                    : pending.intent.phase}
             . Its exact request is saved in this browser. Check its receipt before retrying.
           </p>
           {'reason' in pending.intent.request && <p>Reason: {pending.intent.request.reason}</p>}
-          {pending.intent.phase === 'verify' && (
+          {(pending.intent.phase === 'verify' || pending.intent.phase === 'revoke_verify') && (
             <label className="block">
               Authenticator or recovery code
               <input
@@ -371,21 +418,27 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
             </button>
             <button
               className={primary}
-              disabled={busy || (pending.intent.phase === 'verify' && !code.trim())}
+              disabled={
+                busy || (['verify', 'revoke_verify'].includes(pending.intent.phase) && !code.trim())
+              }
               onClick={() => void run(() => send(pending))}
             >
               {pending.intent.phase === 'approve'
                 ? 'Approve this reviewed setup'
-                : pending.intent.phase === 'verify'
-                  ? 'Verify code for this setup'
-                  : 'Retry original step'}
+                : pending.intent.phase === 'revoke'
+                  ? 'Revoke this setup authority'
+                  : pending.intent.phase === 'revoke_verify'
+                    ? 'Verify code for this stop request'
+                    : pending.intent.phase === 'verify'
+                      ? 'Verify code for this setup'
+                      : 'Retry original step'}
             </button>
           </div>
           {!['install', 'fence'].includes(pending.intent.phase) && (
             <div className="space-y-2 border-t border-slate-200 pt-3">
               <p className="text-sm">
                 If this step expired or you need to review a fresh request, ask the server to retire
-                it. Retirement is refused while an approval or uncertain installation effect exists.
+                it. Retirement is refused while this step has a mutating or uncertain effect.
               </p>
               <label className="flex gap-2 text-sm">
                 <input
@@ -411,7 +464,9 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
               {pending.requestId} · {pending.intent.request.operationKey}
             </p>
             <p className="text-sm">
-              Local synthetic audit configuration only. Setup does not change the audit setting.
+              {pending.intent.phase.startsWith('revoke')
+                ? 'Stopping authority blocks further setup and execution access. It preserves existing resources and history and does not undo the audit setting.'
+                : 'Local synthetic audit configuration only. Setup does not change the audit setting.'}
             </p>
             {pending.intent.phase !== 'fence' && (
               <p className="break-all text-xs">
@@ -486,7 +541,7 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
                   <option value="">Choose a setup</option>
                   {options.map((o) => (
                     <option key={o.manifestSha256} value={o.manifestSha256}>
-                      {o.label} · expires {o.expiresAt}
+                      {o.label} · expires {formatDateTime(o.expiresAt)}
                     </option>
                   ))}
                 </select>
@@ -536,13 +591,15 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
                   setSelected(e.target.value);
                   setAck(false);
                   setReason('');
+                  setStopAck(false);
+                  setStopReason('');
                 }}
               >
                 <option value="">Choose a request</option>
                 {rows.map((r) => (
                   <option key={r.requestId} value={r.requestId}>
                     {engagements.find((e) => e.id === r.engagementId)?.title ?? 'Engagement'} ·{' '}
-                    {states[r.state]} · {r.requestedAt}
+                    {states[r.state]} · {formatDateTime(r.requestedAt)}
                   </option>
                 ))}
               </select>
@@ -550,6 +607,29 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
             {row && (
               <>
                 <p className="font-medium">{states[row.state]}</p>
+                <section
+                  aria-label="Current setup authority"
+                  className="rounded-lg bg-slate-50 p-3 text-sm"
+                >
+                  <h3 className="font-semibold">Current authority</h3>
+                  <p>
+                    {row.currentAuthority?.state === 'valid_recorded_scope'
+                      ? 'Recorded scope currently valid'
+                      : row.currentAuthority?.state === 'inactive'
+                        ? 'Authority inactive'
+                        : 'Authority needs verification'}
+                  </p>
+                  <p>
+                    {row.currentAuthority?.detail ??
+                      'Only the historical setup state is available. Refresh and independently verify current authority before execution.'}
+                  </p>
+                  {row.currentAuthority?.credentialExpiresAt && (
+                    <p>
+                      Credential expires {formatDateTime(row.currentAuthority.credentialExpiresAt)}
+                    </p>
+                  )}
+                  <p>This status does not confirm that a worker is running or paused.</p>
+                </section>
                 <p>Request reason: {row.reason}</p>
                 {row.limitations.map((item) => (
                   <p key={item} className="text-sm text-slate-700">
@@ -637,6 +717,46 @@ export function OwnedDeploymentClient({ tenantId, actorId, founder, engagements 
                     </Link>{' '}
                     to change the synthetic audit setting through its separate dry run and approval.
                   </p>
+                )}
+                {row.approval && row.state !== 'revoked' && (
+                  <section
+                    aria-label="Stop setup authority"
+                    className="space-y-3 rounded-xl border border-slate-300 p-4"
+                  >
+                    <h3 className="font-semibold">Stop this setup authority</h3>
+                    <p className="text-sm">
+                      A current organisation owner, administrator or founder can revoke this exact
+                      enrollment with a fresh authenticator or recovery code, including after its
+                      original approval expires. Existing resources, target settings and audit
+                      history are preserved. An uncertain installation still needs reconciliation.
+                    </p>
+                    <label className="block">
+                      Reason for stopping this setup
+                      <textarea
+                        className={field}
+                        minLength={20}
+                        maxLength={2000}
+                        value={stopReason}
+                        onChange={(e) => setStopReason(e.target.value)}
+                      />
+                    </label>
+                    <label className="flex gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={stopAck}
+                        onChange={(e) => setStopAck(e.target.checked)}
+                      />
+                      I reviewed this exact enrollment and want to revoke its setup authority. This
+                      does not undo its target setting.
+                    </label>
+                    <button
+                      className={button}
+                      disabled={busy || !ready || !stopAck || stopReason.trim().length < 20}
+                      onClick={() => begin('revoke_challenge')}
+                    >
+                      Prepare stop request
+                    </button>
+                  </section>
                 )}
                 <details>
                   <summary>Technical references and receipts</summary>

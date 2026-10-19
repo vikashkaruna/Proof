@@ -92,7 +92,12 @@ export async function retainDeploymentFence(
   const phase = original.intent.phase;
   if (phase === 'install' || phase === 'fence')
     throw Error('Installation effects cannot be retired in this screen');
-  const targetPhase = phase === 'request' || phase === 'preflight' ? phase : 'decision';
+  const targetPhase =
+    phase === 'request' || phase === 'preflight'
+      ? phase
+      : phase.startsWith('revoke')
+        ? 'revocation'
+        : 'decision';
   const next = deploymentJournal.parse({
     ...original,
     intent: {
@@ -141,12 +146,14 @@ export function completeDeploymentJournal(
 /** Never persist a code, session token, signing key or installation credential. */
 export function deploymentBody(original: DeploymentJournal, code?: string) {
   const value = original.intent;
-  if (value.phase === 'challenge') return { request: value.request };
-  if (value.phase === 'verify') {
+  if (value.phase === 'challenge' || value.phase === 'revoke_challenge')
+    return { request: value.request };
+  if (value.phase === 'verify' || value.phase === 'revoke_verify') {
     if (!code?.trim()) throw Error('Enter your current authenticator or recovery code');
     return { request: value.request, challengeId: value.challengeId, code: code.trim() };
   }
-  if (value.phase === 'approve') return { request: value.request, challengeId: value.challengeId };
+  if (value.phase === 'approve' || value.phase === 'revoke')
+    return { request: value.request, challengeId: value.challengeId };
   return value.request;
 }
 export async function deploymentTransport(
