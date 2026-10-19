@@ -3,7 +3,10 @@ import { z } from 'zod';
 import type { Variables } from '../types.js';
 import type { MfaService } from '../services/mfa.js';
 import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
-import { PrativedanAssessmentDraftStore } from '../services/prativedan-assessment-draft-store.js';
+import {
+  PrativedanAssessmentDraftStore,
+  type PrativedanAssessmentRpcClient,
+} from '../services/prativedan-assessment-draft-store.js';
 import {
   PrativedanAssessmentDraftController,
   type PrativedanAssessmentRuntimeBinding,
@@ -34,6 +37,7 @@ const reviewSchema = requestSchema.extend({
 export function prativedanAccountedDraftRoutes(deps: {
   mfa: MfaService;
   client?: PrativedanPrivateClient;
+  humanWriterFactory?: () => PrativedanAssessmentRpcClient;
 }) {
   const app = new Hono<{ Variables: Variables }>();
   app.use('/reports/accounted-drafts/*', boundedJsonBody(16384));
@@ -75,6 +79,7 @@ export function prativedanAccountedDraftRoutes(deps: {
     };
     const atomic = (command: unknown) => exchange({ kind: 'atomic', command });
     const store = new PrativedanAssessmentDraftStore({
+      humanWriterFactory: deps.humanWriterFactory,
       controllerCall: async (name, args) => {
         if (
           !binding ||
@@ -187,7 +192,7 @@ export function prativedanAccountedDraftRoutes(deps: {
       if (step === 'reconcile')
         return c.json({ data: await controller.reconcile(context, input.reviewedRequestText) });
       if (step === 'review') {
-        const review = reviewSchema.parse(input);
+        const { reviewedRequestText: _reviewedRequestText, ...review } = reviewSchema.parse(input);
         return c.json({
           data: await controller.review(context, input.reviewedRequestText, review),
         });
