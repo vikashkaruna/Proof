@@ -656,6 +656,7 @@ describe.each([
   { purpose: 'owned_synthetic_revocation', suffix: 'owned_deployment_revocation' },
   { purpose: 'standing_policy_revision', suffix: 'standing_policy' },
   { purpose: 'data_flow_declaration', suffix: 'data_flow_declaration' },
+  { purpose: 'scheduled_coverage', suffix: 'scheduled_coverage' },
 ] as const)('$purpose dedicated step-up', ({ purpose, suffix }) => {
   const binding = 'e'.repeat(64);
   let custodyDbNow: number | null;

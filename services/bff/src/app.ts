@@ -256,6 +256,7 @@ export function createApp(
       approvalEngine,
       dataFlowDeclarationsEnabled: env.AXIOM_DATA_FLOW_DECLARATIONS_ENABLED === 'true',
       standingCoordinatorEnabled: standingCoordinator !== null,
+      scheduledCoverageEnabled: env.AXIOM_SCHEDULED_COVERAGE_ENABLED === 'true',
       standingCoordinatorStatus: standingCoordinator
         ? () => standingCoordinator.health()
         : undefined,

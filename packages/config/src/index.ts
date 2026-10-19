@@ -138,6 +138,7 @@ const EnvFields = z.object({
   AXIOM_POSTGRESQL_DISCOVERY_SOCKET_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_DATA_FLOW_DECLARATIONS_ENABLED: z.enum(['true', 'false']).default('false'),
   AXIOM_STANDING_POLICY_COORDINATOR_ENABLED: z.enum(['true', 'false']).default('false'),
+  AXIOM_SCHEDULED_COVERAGE_ENABLED: z.enum(['true', 'false']).default('false'),
   AXIOM_POSTGRESQL_SANDBOX_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_ASSESSMENT_PRODUCER_SOCKET_CONFIG_FILE: z.string().min(1).max(4096).optional(),
@@ -409,6 +410,15 @@ const EnvSchema = EnvFields.superRefine((env, ctx) => {
       path: ['AXIOM_STANDING_POLICY_COORDINATOR_ENABLED'],
       message:
         'Standing approval coordinator requires an explicitly reviewed strict local/test deployment',
+    });
+  if (
+    env.AXIOM_SCHEDULED_COVERAGE_ENABLED === 'true' &&
+    (!['local', 'test'].includes(env.ENVIRONMENT ?? '') || env.AXIOM_AUTH_MODE !== 'strict')
+  )
+    ctx.addIssue({
+      code: 'custom',
+      path: ['AXIOM_SCHEDULED_COVERAGE_ENABLED'],
+      message: 'Scheduled coverage requires an explicitly reviewed strict local/test deployment',
     });
   const planningKey = env.AXIOM_PLANNING_SOURCE_SIGNING_KEY;
   if (

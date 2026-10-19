@@ -1,3 +1,7 @@
+import {
+  ScheduledCoverageProducer,
+  type CoverageProducerBinding,
+} from './scheduled-coverage-producer.js';
 import { canonicalJson } from '@axiom/ledger';
 import { resolvePublicControlAssessmentSource } from './public-control-assessment-source.js';
 import { canonicalAssessmentInput } from './assessment-input.js';
@@ -48,6 +52,7 @@ const uuid = z.uuid().transform((value) => value.toLowerCase());
 export const assessmentProducerConfiguration = z
   .object({
     schemaVersion: z.literal(1),
+    scheduledCoverageEnabled: z.boolean().default(false),
     tenants: z
       .array(
         z
@@ -88,6 +93,11 @@ const controlSchema = z.object({
     .max(5000),
 });
 export interface AssessmentRequestProducer {
+  coverageAvailableForTenant?(tenantId: string): boolean | Promise<boolean>;
+  scheduledCoverage?: Pick<
+    ScheduledCoverageProducer,
+    'run' | 'health' | 'request' | 'reserve' | 'reconcile'
+  >;
   configurationForTenant?(tenantId: string): boolean;
   sourceRequirementForTenant?(
     tenantId: string,
@@ -131,6 +141,7 @@ export async function composeAssessmentProducer(
     awsKms?: DispatchAwsKmsPort;
     gcpKms?: DispatchGcpKmsPort;
     writer?: () => SupabaseClient;
+    agentWriter?: () => SupabaseClient;
     localWrapper?: typeof localDispatchKeyWrapper;
   } = {},
 ): Promise<AssessmentRequestProducer> {
@@ -142,6 +153,7 @@ export async function composeAssessmentProducer(
     >();
     const ownedKeys = new Set<string>();
     const localTenants = new Set<string>();
+    const coverageBindings: CoverageProducerBinding[] = [];
     for (const tenant of config.tenants) {
       if (registry.has(tenant.tenantId)) throw new DispatchRefused();
       const id = tenant.tenantId as TenantId;
@@ -169,6 +181,12 @@ export async function composeAssessmentProducer(
           ports.writer ?? createHumanActionWriter,
           keys.custody,
         );
+        coverageBindings.push({
+          tenantId: id,
+          workloadId: tenant.workloadId,
+          custody: keys.custody,
+          wrapper: wrapOnly,
+        });
         registry.set(id, {
           workloadId: tenant.workloadId,
           dispatch: {
@@ -213,7 +231,21 @@ export async function composeAssessmentProducer(
         },
       });
     }
+    if (
+      config.scheduledCoverageEnabled &&
+      (!ports.agentWriter || coverageBindings.length !== config.tenants.length)
+    )
+      throw new DispatchRefused();
+    const scheduledCoverage = config.scheduledCoverageEnabled
+      ? new ScheduledCoverageProducer(ports.agentWriter!(), coverageBindings)
+      : undefined;
     return Object.freeze({
+      ...(scheduledCoverage
+        ? {
+            scheduledCoverage,
+            coverageAvailableForTenant: (tenantId: string) => registry.has(uuid.parse(tenantId)),
+          }
+        : {}),
       configurationForTenant: (tenantId: string) => registry.has(uuid.parse(tenantId)),
       sourceRequirementForTenant: (tenantId: string) => {
         const id = uuid.parse(tenantId);

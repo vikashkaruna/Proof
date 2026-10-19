@@ -612,3 +612,65 @@ describe('immutable assessment questionnaire provenance', () => {
     expect((await request()).status).toBe(503);
   });
 });
+
+describe('scheduled coverage is technical provenance only', () => {
+  function scheduled() {
+    const saved = seedFinalizedPacket();
+    saved.run.metadata = { request_kind: 'scheduled_coverage_reassessment_v1' };
+    for (const value of Object.values(saved.provenance.applicability)) {
+      value.value = null;
+      value.provenance = 'unknown';
+    }
+    for (const row of saved.provenance.controls) {
+      row.caller_affirmed_count = 0;
+      row.caller_denied_count = 0;
+      row.unknown_count = row.known_boolean_question_count;
+      row.answer_state = 'unknown';
+      row.applicability_state = row.control_id === 'D' ? 'unknown' : 'unconditional';
+      for (const question of row.questions) question.declaration = 'unknown';
+    }
+    const proof = {
+      tenantId: T,
+      runId: RUN,
+      engagementId: E,
+      fireId: PROOF,
+      scopeId: OLD,
+      scopeReceiptId: '10',
+      discoveryId: OTHER,
+      discoveryResultSha256: 'd'.repeat(64),
+      basis: 'technical_provenance_only',
+      declarationPolicy: 'all_business_facts_unknown',
+    };
+    fake.onRpc('read_scheduled_coverage_presentation', () => proof);
+    return { ...saved, proof };
+  }
+  it('withholds every score and exposure even when internal computation retained numbers', async () => {
+    scheduled();
+    const response = await request('', UserRole.VIEWER);
+    expect(response.status).toBe(200);
+    const body = AssessmentSnapshotSchema.parse(await response.json());
+    expect(body.scheduledCoverage?.basis).toBe('technical_provenance_only');
+    expect(body.exposureInr).toBeNull();
+    expect(
+      body.controls.every(
+        (c) => c.score === null && c.scoreBand === null && c.status === 'unknown',
+      ),
+    ).toBe(true);
+  });
+  it.each(['tenantId', 'runId', 'engagementId'] as const)(
+    'refuses foreign %s presentation proofs',
+    async (key) => {
+      const saved = scheduled();
+      saved.proof[key] = PROOF;
+      expect((await request()).status).toBe(503);
+    },
+  );
+  it('refuses a scheduled result containing caller-derived business facts', async () => {
+    const saved = scheduled();
+    Object.assign(saved.provenance.applicability.processes_children, {
+      value: true,
+      provenance: 'caller_declared_unverified',
+    });
+    expect((await request()).status).toBe(503);
+  });
+});

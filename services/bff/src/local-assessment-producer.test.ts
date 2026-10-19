@@ -93,7 +93,7 @@ beforeEach(() => {
     if (filename === backendFile) return (backendBytes = Buffer.from(JSON.stringify(backendInput)));
     throw Error('private-file-marker');
   });
-  mocks.client.mockReturnValueOnce(db).mockReturnValueOnce(writer);
+  mocks.client.mockReset().mockReturnValueOnce(db).mockReturnValueOnce(writer);
   mocks.compose.mockResolvedValue(producer);
   mocks.x509.mockResolvedValue(undefined);
   mocks.start.mockResolvedValue({ socketPath: '/run/assessment-producer/producer.sock' });
@@ -123,7 +123,7 @@ describe('dedicated local producer entrypoint', () => {
         global: { headers: { Authorization: `Bearer ${backend().humanWriterKey}` } },
       });
       expect(mocks.compose).toHaveBeenCalledWith(
-        configuration().producer,
+        { ...configuration().producer, scheduledCoverageEnabled: false },
         db,
         expect.objectContaining({ writer: expect.any(Function) }),
       );
@@ -289,5 +289,73 @@ describe('dedicated local producer entrypoint', () => {
     expect(configBytes.every((value) => value === 0)).toBe(true);
     expect(backendBytes.every((value) => value === 0)).toBe(true);
     expect(mocks.start).not.toHaveBeenCalled();
+  });
+});
+
+describe('explicit scheduled coverage existing-agent credential boundary', () => {
+  const agentFile = '/run/secrets/coverage-writer.jwt';
+  function enabled(role = 'agent_ledger_writer', checkError = false) {
+    configInput = {
+      ...configuration(),
+      producer: { ...configuration().producer, scheduledCoverageEnabled: true },
+      agentWriterFile: agentFile,
+    };
+    const bytes = Buffer.from(token(role));
+    mocks.read.mockImplementation(async (name) => {
+      if (name === configFile) return (configBytes = Buffer.from(JSON.stringify(configInput)));
+      if (name === backendFile) return (backendBytes = Buffer.from(JSON.stringify(backendInput)));
+      if (name === agentFile) return bytes;
+      throw Error('unexpected protected input');
+    });
+    const abortSignal = vi.fn().mockResolvedValue({
+      data: {
+        schemaVersion: 1,
+        authority: 'explicit_owner_scope_required',
+        taskScopes: ['control_library.read', 'findings.write'],
+      },
+      error: checkError ? { code: 'unavailable' } : null,
+    });
+    const rpc = vi.fn().mockReturnValue({ abortSignal });
+    const agent = { rpc };
+    mocks.client.mockReturnValueOnce(agent);
+    return { bytes, rpc, agent };
+  }
+  it('requires fixed existing-agent role and live narrow RPC before composition, then wipes the file bytes', async () => {
+    const fixture = enabled();
+    await prepareLocalProducer(['--check', configFile], {});
+    expect(fixture.rpc).toHaveBeenCalledWith('scheduled_coverage_writer_check', {});
+    const ports = mocks.compose.mock.calls[0]?.[2] as { agentWriter: () => unknown };
+    expect(ports.agentWriter()).toBe(fixture.agent);
+    expect(fixture.bytes.every((v) => v === 0)).toBe(true);
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+  it.each(['service_role', 'human_action_writer', 'authenticated'])(
+    'refuses %s as scheduled coordinator and wipes the file',
+    async (role) => {
+      const fixture = enabled(role);
+      await expect(prepareLocalProducer(['--serve', configFile], {})).rejects.toThrow(
+        'startup refused',
+      );
+      expect(fixture.bytes.every((v) => v === 0)).toBe(true);
+      expect(mocks.compose).not.toHaveBeenCalled();
+      expect(fixture.rpc).not.toHaveBeenCalled();
+    },
+  );
+  it('refuses a stale/missing backend contract before compose or socket creation', async () => {
+    const fixture = enabled('agent_ledger_writer', true);
+    await expect(prepareLocalProducer(['--serve', configFile], {})).rejects.toThrow(
+      'startup refused',
+    );
+    expect(fixture.bytes.every((v) => v === 0)).toBe(true);
+    expect(mocks.compose).not.toHaveBeenCalled();
+    expect(mocks.start).not.toHaveBeenCalled();
+  });
+  it('never adopts a third credential when the reviewed producer feature is off', async () => {
+    configInput = { ...configuration(), agentWriterFile: agentFile };
+    await expect(prepareLocalProducer(['--serve', configFile], {})).rejects.toThrow(
+      'startup refused',
+    );
+    expect(mocks.compose).not.toHaveBeenCalled();
+    expect(mocks.read).not.toHaveBeenCalledWith(agentFile);
   });
 });

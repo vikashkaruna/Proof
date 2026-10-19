@@ -1,3 +1,4 @@
+import { readAssessmentBases, assessmentMetrics } from '@/lib/assessment-basis';
 import Link from 'next/link';
 import { ACTIVE_RUN_STALE_MS, Capability, can, capabilitiesFor, type UserRole } from '@axiom/types';
 import { DataPlaceholder, PageHeader, formatDateTime } from '@axiom/ui';
@@ -70,7 +71,15 @@ export default async function DashboardPage() {
     actions.error || !actions.data
       ? null
       : actions.data.filter((row) => row.approval_status === 'awaiting_approval').length;
-  const rawPosture = engagement.error ? null : engagement.data?.posture_score;
+  const bases = await readAssessmentBases(
+    supabase,
+    tenantId,
+    engagement.data?.id ? [engagement.data.id] : [],
+  );
+  const rawPosture = engagement.error
+    ? null
+    : assessmentMetrics(bases.get(engagement.data?.id ?? ''), engagement.data?.posture_score, null)
+        .score;
   const normalizedPosture =
     rawPosture == null
       ? null

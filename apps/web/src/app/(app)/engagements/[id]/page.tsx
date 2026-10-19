@@ -1,3 +1,4 @@
+import { readAssessmentBases, assessmentMetrics } from '@/lib/assessment-basis';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireCapabilityContext } from '@/lib/tenant-context';
@@ -51,6 +52,14 @@ export default async function EngagementDetailPage({
     .eq('tenant_id', tenantId)
     .eq('engagement_id', id);
 
+  const bases = await readAssessmentBases(supabase, tenantId, [id]);
+  const basis = bases.get(id);
+  const metrics = assessmentMetrics(
+    basis,
+    engagement.posture_score,
+    engagement.estimated_exposure_inr,
+  );
+  const showCalculations = basis === 'recorded_assessment';
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
@@ -79,10 +88,7 @@ export default async function EngagementDetailPage({
             <CardTitle>Posture</CardTitle>
           </CardHeader>
           <CardContent>
-            <PostureScore
-              score={engagement.posture_score}
-              exposureInr={engagement.estimated_exposure_inr}
-            />
+            <PostureScore score={metrics.score} exposureInr={metrics.exposureInr} />
           </CardContent>
         </Card>
 
@@ -146,14 +152,20 @@ export default async function EngagementDetailPage({
                       <code className="font-mono text-xs text-indigo-700">{f.control_id}</code>
                     </td>
                     <td className="px-4 py-2">
-                      <StatusBadge status={f.status} />
+                      <StatusBadge status={showCalculations ? f.status : 'unassessed'} />
                     </td>
-                    <td className="px-4 py-2 font-mono text-xs">{Number(f.score).toFixed(0)}</td>
                     <td className="px-4 py-2 font-mono text-xs">
-                      {Number(f.risk_points).toFixed(1)}
+                      {showCalculations ? Number(f.score).toFixed(0) : 'Unknown'}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs">
+                      {showCalculations ? Number(f.risk_points).toFixed(1) : 'Unknown'}
                     </td>
                     <td className="px-4 py-2 text-xs text-slate-600">
-                      <span className="line-clamp-2">{f.rationale}</span>
+                      <span className="line-clamp-2">
+                        {showCalculations
+                          ? f.rationale
+                          : 'Business facts remain Unknown; numerical calculation is withheld.'}
+                      </span>
                     </td>
                   </tr>
                 ))}

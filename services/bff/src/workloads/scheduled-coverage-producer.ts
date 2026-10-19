@@ -60,6 +60,49 @@ export class ScheduledCoverageProducer {
       throw Error('Scheduled coverage receipt binding refused');
     return value;
   }
+  private phase: 'idle' | 'running' | 'unconfirmed' | 'unavailable' | 'stopped' = 'idle';
+  private checkedAt: string | null = null;
+  health() {
+    return {
+      configured: true,
+      phase: this.phase,
+      checkedAt: this.checkedAt,
+      declarationPolicy: 'all_business_facts_unknown',
+      executionEnabled: false,
+    } as const;
+  }
+  async run(signal: AbortSignal) {
+    while (!signal.aborted) {
+      this.phase = 'running';
+      for (const tenantId of this.#bindings.keys()) {
+        if (signal.aborted) break;
+        try {
+          const next = await this.reserve(tenantId, signal);
+          const ref = next.fires[0];
+          if (ref) {
+            const outcome = await this.request(ref, signal);
+            this.phase = ['unconfirmed', 'handed_off'].includes(outcome.state)
+              ? 'unconfirmed'
+              : 'idle';
+          } else this.phase = 'idle';
+        } catch {
+          this.phase = 'unavailable';
+        }
+        this.checkedAt = new Date().toISOString();
+      }
+      if (signal.aborted) break;
+      await new Promise<void>((resolve) => {
+        const done = () => {
+          clearTimeout(timer);
+          signal.removeEventListener('abort', done);
+          resolve();
+        };
+        const timer = setTimeout(done, 10000);
+        signal.addEventListener('abort', done, { once: true });
+      });
+    }
+    this.phase = 'stopped';
+  }
   async reserve(tenantId: string, signal?: AbortSignal) {
     const t = this.tenant(tenantId);
     if (signal?.aborted) throw Error('Scheduled coverage interrupted');

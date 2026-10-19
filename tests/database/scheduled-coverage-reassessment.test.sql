@@ -1,0 +1,264 @@
+-- Prefix: actual163/171 synthetic custody+MFA+cleanup and exact catalogue seed.
+-- No retained source, browser factor verification, wrapping or worker is claimed.
+reset role;
+-- Genuine current-selection RPC; consumed SQL factor row is an explicit fixture stand-in.
+do $$declare request text;binding text;ch uuid:=gen_random_uuid();f jsonb;begin
+ f:=controller_security.catalogue161_fingerprint('0.1.1');
+ request:=controller_security.canonical_questionnaire_json(jsonb_build_object('version',1,'operationKey',pg_temp.pg_id(799),'libraryVersion','0.1.1','rowsHash',f->>'rowsHash','questionnaireDigest',f->>'questionnaireDigest','manifestSha256',f->>'manifestSha256','mappingVersion','public-evidence-1','reason','Select approved exact source for isolated coverage fixture','confirmed',true,'transition','make_current','previousCurrentVersion',null));
+ binding:=encode(sha256(convert_to(controller_security.canonical_questionnaire_json(jsonb_build_array('axiom.catalogue-version.make-current',1,pg_temp.pg_id(1)::text,pg_temp.id(2)::text,pg_temp.id(102)::text,encode(sha256(convert_to(request,'UTF8')),'hex'))),'UTF8')),'hex');
+ insert into public.mfa_challenges(id,user_id,tenant_id,factor_id,purpose,bound_resource_ref,bound_payload_sha256,created_at,expires_at,satisfied_at,consumed_at,consumed_for,satisfied_with)values(ch,pg_temp.id(2),pg_temp.pg_id(1),pg_temp.id(42),'catalogue_adoption',pg_temp.pg_id(799)::text,binding,clock_timestamp()-interval '2 seconds',clock_timestamp()+interval '4 minutes',clock_timestamp()-interval '1 second',clock_timestamp(),pg_temp.pg_id(799)::text,'totp');
+ set local role human_action_writer;perform public.set_current_catalogue_version(pg_temp.pg_id(1),pg_temp.id(2),pg_temp.id(102),request,ch);reset role;
+end$$;
+update public.workload_identities set spiffe_id='spiffe://local.axiomproof.test/agent/parikshan'where id=pg_temp.id(31);
+create temporary table coverage175_saved(k text primary key,v jsonb,r text);
+grant select,insert,update on coverage175_saved to service_role,human_action_writer,agent_ledger_writer,axiom_assessment_controller;
+insert into public.engagements(id,tenant_id,estate_id,library_version,title)values(pg_temp.pg_id(800),pg_temp.pg_id(1),pg_temp.pg_id(3),'0.1.1','Original synthetic baseline');
+set local role human_action_writer;
+insert into coverage175_saved values('baseline',public.delegate_workload_task(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(31),'parikshan',pg_temp.pg_id(3),pg_temp.pg_id(800),pg_temp.pg_id(801),repeat('a',64),repeat('b',64),array['control_library.read','findings.write'],clock_timestamp()+interval '10 minutes'),null);
+reset role;
+set local role service_role;
+insert into coverage175_saved select 'baseline-start',public.start_workload_assessment(pg_temp.pg_id(1),(v->>'run_id')::uuid,pg_temp.id(31),repeat('b',64),repeat('a',64),clock_timestamp()+interval '5 minutes'),null from coverage175_saved where k='baseline';
+reset role;
+select pg_temp.ok((select not(v?'error')from coverage175_saved where k='baseline-start'),'real existing assessment start');
+set local role service_role;
+insert into coverage175_saved select 'baseline-complete',public.complete_workload_assessment(pg_temp.pg_id(1),(select(v->>'run_id')::uuid from coverage175_saved where k='baseline'),pg_temp.id(31),repeat('b',64),v->>'library_digest',jsonb_build_object('library_version','0.1.1','posture_score',0,'estimated_exposure_inr',0,'findings',(select jsonb_agg(jsonb_build_object('control_id',c->>'id','score',0,'risk_points',0,'rationale','Synthetic baseline only'))from jsonb_array_elements(v->'controls')c)),clock_timestamp()+interval '5 minutes'),null from coverage175_saved where k='baseline-start';
+insert into coverage175_saved select 'baseline-confirm',public.confirm_workload_assessment(pg_temp.pg_id(1),(v->>'run_id')::uuid),null from coverage175_saved where k='baseline';
+reset role;
+select pg_temp.ok((select not(v?'error')from coverage175_saved where k='baseline-complete'),'real existing assessment complete');
+select pg_temp.ok((select finalized_receipt is not null from public.workload_assessment_packets where run_id=(select(v->>'run_id')::uuid from coverage175_saved where k='baseline')),'real original finalized baseline');
+create function pg_temp.coverage175_intent(n int,phase text default 'authorize')returns text language sql as $$
+select controller_security.canonical_questionnaire_json(jsonb_build_object('phase',$2,'request',case when $2='authorize'then jsonb_build_object('schemaVersion',1,'purpose','axiom.scheduled-coverage.authority.v1','operationKey',pg_temp.pg_id($1),'tenantId',pg_temp.pg_id(1),'ownerId',pg_temp.id(1),'previousScopeId',null,'source',controller_security.coverage175_source(pg_temp.pg_id(1),pg_temp.pg_id(50),(select(v->>'run_id')::uuid from coverage175_saved where k='baseline'),(select(v#>>'{fires,0,fireId}')::uuid from scheduled_saved where k='fire'),pg_temp.id(31)),'expiresAt',to_char(clock_timestamp()+interval '4 minutes','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),'maxFires',2,'taskScopes',jsonb_build_array('control_library.read','findings.write'),'declarationPolicy','all_business_facts_unknown','discoveryUse','technical_provenance_only','reason','Explicit scheduled unknown-only findings scope')else jsonb_build_object('schemaVersion',1,'operationKey',pg_temp.pg_id($1),'scopeId',pg_temp.pg_id(810),'requestSha256',(select encode(sha256(convert_to(r,'UTF8')),'hex')from coverage175_saved where k='intent'),'reason','Explicit original scheduled coverage revocation')end))$$;
+insert into coverage175_saved values('intent',null,pg_temp.coverage175_intent(810));
+create function pg_temp.coverage175_mfa(intent text)returns uuid language plpgsql as $$declare op uuid:=(intent::jsonb#>>'{request,operationKey}')::uuid;binding text;ch uuid;begin
+ binding:=encode(sha256(convert_to(controller_security.canonical_questionnaire_json(jsonb_build_array('axiom.scheduled-coverage.'||(intent::jsonb->>'phase'),1,pg_temp.pg_id(1)::text,pg_temp.id(1)::text,pg_temp.id(101)::text,encode(sha256(convert_to(intent,'UTF8')),'hex'))),'UTF8')),'hex');
+ set local role service_role;ch:=(public.issue_scheduled_coverage_mfa_challenge(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),op,binding,300000)->>'id')::uuid;reset role;
+ update public.mfa_challenges set attempts=1 where id=ch;
+ set local role service_role;
+ perform public.satisfy_scheduled_coverage_mfa_challenge(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),op,binding,ch,1,'totp');
+ perform public.consume_scheduled_coverage_mfa_challenge(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),pg_temp.id(41),op,binding,ch,1,op);
+ reset role;return ch;end$$;
+insert into coverage175_saved select 'challenge',jsonb_build_object('id',pg_temp.coverage175_mfa(r)),r from coverage175_saved where k='intent';
+set local role human_action_writer;
+insert into coverage175_saved select 'recorded',public.record_scheduled_coverage_scope(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),r,(v->>'id')::uuid),r from coverage175_saved where k='challenge';
+select pg_temp.ok(public.record_scheduled_coverage_scope(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),r,null)=v,'lost scope reply returns exact original proof')from coverage175_saved where k='recorded';
+reset role;
+select pg_temp.ok((select v->>'recorded'='true'and v->>'scopeId'=pg_temp.pg_id(810)::text from coverage175_saved where k='recorded'),'real new owner findings.write delegation recorded');
+-- A source which existed before this new scope cannot be consumed as a new fire.
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','pre-approval discovery does not create findings work');
+reset role;
+update public.monitoring_schedules set next_run_at=clock_timestamp()-interval '1 second'where id=pg_temp.pg_id(21);
+set local role axiom_assessment_controller;
+insert into scheduled_saved values('new-fire',public.reserve_monitoring_read_dispatch(pg_temp.pg_id(1)),null);
+insert into scheduled_saved select 'new-claim',public.claim_monitoring_read_dispatch(pg_temp.pg_id(1),(v#>>'{fires,0,fireId}')::uuid),null from scheduled_saved where k='new-fire';
+reset role;
+set local role service_role;
+select pg_temp.ok(public.claim_postgresql_discovery(pg_temp.pg_id(1),(v->>'requestId')::uuid)is not null,'new actual read claim')from scheduled_saved where k='new-claim';
+reset role;
+insert into public.connector_discovery_runs(id,tenant_id,connector_id,grant_id,spiffe_id,operation,record_count,result,correlation_id,created_at)select pg_temp.pg_id(820),pg_temp.pg_id(1),pg_temp.pg_id(6),pg_temp.pg_id(8),'spiffe://local.axiomproof.test/agent/drishti','enumerate',0,'[]',(v->>'requestId')::uuid,clock_timestamp()from scheduled_saved where k='new-claim';
+set local role service_role;
+select public.retain_postgresql_discovery(pg_temp.pg_id(1),(v->>'requestId')::uuid,pg_temp.pg_id(820))from scheduled_saved where k='new-claim';
+reset role;
+set local role axiom_assessment_controller;
+select pg_temp.ok(public.settle_monitoring_read_dispatch(pg_temp.pg_id(1),(v#>>'{fires,0,fireId}')::uuid,(v#>>'{fires,0,fireId}')::uuid,'read_completed',true)->>'state'='confirmed','new source independently cleanup confirmed')from scheduled_saved where k='new-fire';
+reset role;
+-- Every current authority pin is repeated at the real reservation boundary.
+savepoint coverage175_factor;
+update public.mfa_challenges set factor_id=pg_temp.id(42) where id=(select (v->>'id')::uuid from coverage175_saved where k='challenge');
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current factor drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_factor;
+savepoint coverage175_actor;
+update public.mfa_challenges set user_id=pg_temp.id(2) where id=(select (v->>'id')::uuid from coverage175_saved where k='challenge');
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current actor drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_actor;
+savepoint coverage175_session;
+update auth.sessions set not_after=clock_timestamp()-interval '1 second'where id=pg_temp.id(101);
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current session drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_session;
+savepoint coverage175_purpose;
+update public.mfa_challenges set purpose='monitoring_read_scope'where id=(select(v->>'id')::uuid from coverage175_saved where k='challenge');
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current purpose drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_purpose;
+savepoint coverage175_domain;
+update public.mfa_challenges set bound_payload_sha256=repeat('f',64)where id=(select(v->>'id')::uuid from coverage175_saved where k='challenge');
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current domain drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_domain;
+savepoint coverage175_consumedfor;
+update public.mfa_challenges set consumed_for=pg_temp.pg_id(999)::text where id=(select(v->>'id')::uuid from coverage175_saved where k='challenge');
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current consumedfor drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_consumedfor;
+savepoint coverage175_owner;
+update public.tenant_users set role='viewer'where tenant_id=pg_temp.pg_id(1)and user_id=pg_temp.id(1);
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current owner drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_owner;
+savepoint coverage175_grant;
+update public.connector_grants set revoked_at=clock_timestamp()where id=pg_temp.pg_id(8);
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current grant drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_grant;
+savepoint coverage175_workload;
+update public.workload_identities set status='disabled'where id=pg_temp.id(31);
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current workload drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_workload;
+savepoint coverage175_catalogue;
+update public.control_libraries set is_current=false where version='0.1.1';
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current catalogue drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_catalogue;
+savepoint coverage175_kill;
+insert into public.kill_switch_state(scope_key,scope,tenant_id,engaged)values(pg_temp.pg_id(1)::text,'tenant',pg_temp.pg_id(1),true);
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current kill drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_kill;
+savepoint coverage175_originalfactor;
+update public.user_mfa_factors set status='revoked'where id=pg_temp.id(41);insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypted)values(pg_temp.id(48),pg_temp.id(1),'totp','active','SQL replacement stand-in');
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','current originalfactor drift refuses findings work');
+reset role;
+rollback to savepoint coverage175_originalfactor;
+set local role agent_ledger_writer;
+insert into coverage175_saved values('reserved',public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1)),null);
+select pg_temp.ok(jsonb_array_length(v->'fires')=1,'new confirmed source reserves one real coverage fire')from coverage175_saved where k='reserved';
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))=v,'lost reservation reply recovers same fire')from coverage175_saved where k='reserved';
+insert into coverage175_saved select 'claimed',public.claim_scheduled_coverage_fire(pg_temp.pg_id(1),(v#>>'{fires,0,fireId}')::uuid),null from coverage175_saved where k='reserved';
+select pg_temp.ok(v->>'state'='runnable'and(v->>'inputText')::jsonb->'answers'='{}'and(v->>'inputText')::jsonb->'sdf_self_attested'='null'and(v->>'inputText')::jsonb->'processes_children'='null'and(v->>'inputText')::jsonb->'processes_health'='null','actual assignment preserves all unknown declarations')from coverage175_saved where k='claimed';
+select pg_temp.ok(public.claim_scheduled_coverage_fire(pg_temp.pg_id(1),(v->>'fireId')::uuid)->>'state'='handed_off','lost claim reply cannot relaunch')from coverage175_saved where k='claimed';
+insert into coverage175_saved select 'enqueued',public.enqueue_scheduled_coverage_dispatch(pg_temp.pg_id(1),(v->>'fireId')::uuid,repeat('c',64),pg_temp.policy()#>>'{keyPolicy,primary}',decode(repeat('ab',12),'hex'),decode(repeat('ef',100),'hex'),decode(repeat('cd',32),'hex')),null from coverage175_saved where k='claimed';
+select pg_temp.ok(v->>'state'='dispatched'and v->>'runId'is not null,'actual private175 dispatch persists original run')from coverage175_saved where k='enqueued';
+reset role;
+select pg_temp.ok((select count(*)=1 from public.assessment_dispatch_jobs),'one175 job after repeated original claims');
+select pg_temp.ok((select count(*)=1 from public.audit_ledger where actor_type='agent'and actor_id='scheduled-coverage-coordinator'and action_type='assessment.requested'),'actual agent attribution without human impersonation');
+-- Existing scoped controller is still the only worker handoff authority.
+set local role axiom_assessment_controller;
+insert into coverage175_saved select 'controller-claim',public.claim_local_assessment_dispatch(pg_temp.pg_id(1),(v->>'jobId')::uuid,pg_temp.id(21),(select v#>>'{source,custodyPolicySha256}'from coverage175_saved where k='claimed'),(select v#>>'{source,keyPolicySha256}'from coverage175_saved where k='claimed')),null from coverage175_saved where k='enqueued';
+reset role;
+select pg_temp.ok((select not(v?'error')from coverage175_saved where k='controller-claim'),'real existing private controller claim accepts exact175 source');
+set local role axiom_assessment_controller;
+insert into coverage175_saved select 'started',public.start_workload_assessment(pg_temp.pg_id(1),(v->>'runId')::uuid,pg_temp.id(31),repeat('c',64),(select v->>'inputSha256'from coverage175_saved where k='claimed'),clock_timestamp()+interval '2 minutes'),null from coverage175_saved where k='enqueued';
+reset role;
+select pg_temp.ok((select not(v?'error')from coverage175_saved where k='started'),'real175 worker starts frozen catalogue');
+create function pg_temp.coverage175_result(packet jsonb)returns jsonb language plpgsql as $$declare c jsonb;questions jsonb;rows jsonb:='[]';n integer;begin
+ for c in select value from jsonb_array_elements(packet->'controls')order by value->>'id'loop
+  select coalesce(jsonb_agg(jsonb_build_object('question_id',q->>'id','declaration','unknown')order by q->>'id'),'[]')into questions from jsonb_array_elements(c->'assessment_questions')q where q->>'type'='boolean';n:=jsonb_array_length(questions);
+  rows:=rows||jsonb_build_array(jsonb_build_object('control_id',c->>'id','questions',questions,'known_boolean_question_count',n,'caller_affirmed_count',0,'caller_denied_count',0,'unknown_count',n,'answer_state',case when n=0 then'not_boolean_assessable'else'unknown'end,'applicability_state',case when(c->>'sdf_only')::boolean or(c->>'children_only')::boolean then'unknown'else'unconditional'end));
+ end loop;
+ return jsonb_build_object('library_version',packet->>'library_version','posture_score',0,'estimated_exposure_inr',0,'findings',(select jsonb_agg(jsonb_build_object('control_id',definition->>'id','score',0,'risk_points',0,'rationale','Synthetic unknown-only fixture; no legal conclusion'))from jsonb_array_elements(packet->'controls')definition),
+ 'questionnaire_provenance',jsonb_build_object('version',1,'source_library_version',packet->>'library_version','source_library_digest',packet->>'library_digest','estimates','provisional','review_required',true,'controls',rows,'applicability',jsonb_build_object('sdf_self_attested','{"value":null,"provenance":"unknown"}'::jsonb,'processes_children','{"value":null,"provenance":"unknown"}'::jsonb,'processes_health','{"value":null,"provenance":"unknown"}'::jsonb)));
+end$$;
+insert into coverage175_saved select 'result',pg_temp.coverage175_result(v),null from coverage175_saved where k='started';
+select pg_temp.ok(controller_security.coverage175_unknown_result((select v from coverage175_saved where k='result'),v->'controls'),'complete all-unknown provenance allowed')from coverage175_saved where k='started';
+select pg_temp.ok(not controller_security.coverage175_unknown_result(jsonb_set((select v from coverage175_saved where k='result'),'{questionnaire_provenance,controls,0,answer_state}','null'),v->'controls'),'missing/null declaration state refused')from coverage175_saved where k='started';
+select pg_temp.ok(not controller_security.coverage175_unknown_result(jsonb_set((select v from coverage175_saved where k='result'),'{questionnaire_provenance,applicability,processes_children,value}','true'),v->'controls'),'discovery cannot claim children facts')from coverage175_saved where k='started';
+set local role axiom_assessment_controller;
+insert into coverage175_saved select 'completed',public.complete_workload_assessment(pg_temp.pg_id(1),(select(v->>'runId')::uuid from coverage175_saved where k='enqueued'),pg_temp.id(31),repeat('c',64),(select v->>'library_digest'from coverage175_saved where k='started'),v,clock_timestamp()+interval '2 minutes'),null from coverage175_saved where k='result';
+reset role;
+-- Revocation after computation still fences independent finalization. The
+-- authority reduction is itself a fresh exact original-owner MFA decision.
+create function pg_temp.coverage175_deny(q text)returns void language plpgsql as $$begin
+ begin execute q;exception when insufficient_privilege then return;end;raise exception 'Unexpected175 authority';end$$;
+savepoint coverage175_before_finalize;
+insert into coverage175_saved values('revoke-before-finalize',null,pg_temp.coverage175_intent(812,'revoke'));
+update coverage175_saved set v=jsonb_build_object('id',pg_temp.coverage175_mfa(r))where k='revoke-before-finalize';
+set local role human_action_writer;
+select pg_temp.ok(public.record_scheduled_coverage_scope(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),r,(v->>'id')::uuid)->>'revoked'='true','actual fresh revocation recorded before finalization')from coverage175_saved where k='revoke-before-finalize';
+reset role;
+set local role axiom_assessment_controller;
+select pg_temp.coverage175_deny('select public.confirm_workload_assessment(pg_temp.pg_id(1),(select(v->>''runId'')::uuid from coverage175_saved where k=''enqueued''))');
+reset role;
+select pg_temp.ok((select finalized_receipt is null from public.workload_assessment_packets where run_id=(select(v->>'runId')::uuid from coverage175_saved where k='enqueued')),'revocation prevents new finalization receipt');
+rollback to savepoint coverage175_before_finalize;
+set local role axiom_assessment_controller;
+insert into coverage175_saved select 'finalized',public.confirm_workload_assessment(pg_temp.pg_id(1),(v->>'runId')::uuid),null from coverage175_saved where k='enqueued';
+reset role;
+select pg_temp.ok((select not(v?'error')from coverage175_saved where k='completed'),'actual175 result completed');
+select pg_temp.ok((select finalized_receipt is not null from public.workload_assessment_packets where run_id=(select(v->>'runId')::uuid from coverage175_saved where k='enqueued')),'actual175 result finalized under original current authority');
+set local role agent_ledger_writer;
+insert into coverage175_saved select 'readback',public.read_scheduled_coverage_fire(pg_temp.pg_id(1),(v->>'fireId')::uuid),null from coverage175_saved where k='enqueued';
+select pg_temp.ok(v->>'state'='finalized'and v->>'resultDigest'is not null,'exact original result readback finalizes truthful fire')from coverage175_saved where k='readback';
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','completed source cannot be scheduled again');
+reset role;
+select pg_temp.ok((select count(*)=2 from public.engagements where id in(pg_temp.pg_id(800),(select(v->>'engagementId')::uuid from coverage175_saved where k='enqueued'))),'new engagement preserves baseline engagement');
+-- Ordinary backend can read a frozen projection, never mint delegated work.
+select pg_temp.ok(not has_function_privilege(role_name,signature,'execute'),'no generic175 write/kernel for '||role_name||':'||signature)
+from unnest(array['anon','authenticated','service_role','human_action_writer'])role_name,unnest(array['public.reserve_scheduled_coverage_fire(uuid)','public.claim_scheduled_coverage_fire(uuid,uuid)','public.enqueue_scheduled_coverage_dispatch(uuid,uuid,text,text,bytea,bytea,bytea)'])signature;
+select pg_temp.ok(not has_function_privilege('agent_ledger_writer','public.record_scheduled_coverage_scope(uuid,uuid,uuid,text,uuid)','execute'),'agent cannot invent human delegation');
+select pg_temp.ok(not has_function_privilege(role_name,signature,'execute'),'private175 kernel unavailable to '||role_name)
+from unnest(array['anon','authenticated','service_role','human_action_writer','agent_ledger_writer','axiom_assessment_controller'])role_name,unnest(array['controller_security.coverage175_delegate(uuid,uuid,uuid,text,uuid,uuid,uuid,text,text,text[],timestamptz,uuid)','controller_security.coverage175_enqueue_core(uuid,uuid,uuid,uuid,uuid,uuid,uuid,text,text,timestamptz,text,bytea,bytea,bytea,uuid)'])signature;
+set local role service_role;
+insert into coverage175_saved select 'presentation',public.read_scheduled_coverage_presentation(pg_temp.pg_id(1),(v->>'runId')::uuid),null from coverage175_saved where k='enqueued';
+reset role;
+select pg_temp.ok((select v->>'basis'='technical_provenance_only'and not(v?|array['posture_score','estimated_exposure_inr','score'])from coverage175_saved where k='presentation'),'safe public scheduled projection has no estimates');
+-- Existing questionnaire source5/document6 already withholds all metrics. No
+-- new report version, historical digest rewrite or automatic founder approval.
+do $$declare tenant uuid:=pg_temp.pg_id(1);eng uuid;run uuid;request jsonb;source text;sha text;doc jsonb;begin
+ select(v->>'engagementId')::uuid,(v->>'runId')::uuid into eng,run from coverage175_saved where k='enqueued';
+ perform pg_temp.ok(public.board_assessment_source_valid(tenant,run,eng),'real175 packet has original finalized receipt chain');
+ request:=public.request_board_report(tenant,pg_temp.id(1),pg_temp.pg_id(830),eng,run,'Scheduled technical coverage review',pg_temp.pg_id(831));
+ perform pg_temp.ok(not(request?'error'),'existing owner Board report request accepts175 finalized source');
+ select source_text,source_sha256 into strict source,sha from public.board_request_sources where tenant_id=tenant and request_id=(request->>'requestId')::uuid;
+ perform pg_temp.ok(source::jsonb->>'schema_version'='5'and source::jsonb#>>'{presentation_policy,metrics}'='withheld','new175 Board report uses existing metrics-withheld source5');
+ doc:=controller_security.questionnaire155_document('board',source,sha,tenant,eng,run,(request->>'requestId')::uuid,'Scheduled technical coverage review','2026-10-19T00:00:00.000Z');
+ perform pg_temp.ok(doc->>'schema_version'='6'and doc#>>'{metrics,state}'='withheld'and not(doc?|array['posture_score','estimated_exposure_inr']),'existing Board document6 withholds numerical conclusions');
+ request:=public.request_statutory_report(tenant,pg_temp.id(1),pg_temp.pg_id(832),eng,run,'auditor','Scheduled technical auditor review',pg_temp.pg_id(833));
+ perform pg_temp.ok(not(request?'error'),'existing owner auditor request accepts175 finalized source');
+ select source_text,source_sha256 into strict source,sha from public.statutory_request_sources where tenant_id=tenant and request_id=(request->>'requestId')::uuid;
+ doc:=controller_security.questionnaire155_document('auditor',source,sha,tenant,eng,run,(request->>'requestId')::uuid,'Scheduled technical auditor review','2026-10-19T00:00:00.000Z');
+ perform pg_temp.ok(doc->>'schema_version'='6'and doc#>>'{metrics,state}'='withheld','existing auditor document6 withholds numerical conclusions');
+ perform pg_temp.ok((select count(*)=0 from public.reports where tenant_id=tenant),'requests do not automatically draft/publish/approve reports');
+end$$;
+set constraints all immediate;
+-- Prior effects reached their final-clock boundary before a later owner decision.
+-- New bounded scope expires on the real DB clock after a one-shot handoff.
+-- Crashed caller readback becomes uncertainty, never a replacement job.
+create function pg_temp.coverage175_next_read(n integer)returns uuid language plpgsql as $$declare fire jsonb;claim jsonb;begin
+ update public.monitoring_schedules set next_run_at=clock_timestamp()-interval '1 second'where id=pg_temp.pg_id(21);
+ set local role axiom_assessment_controller;
+ fire:=public.reserve_monitoring_read_dispatch(pg_temp.pg_id(1));claim:=public.claim_monitoring_read_dispatch(pg_temp.pg_id(1),(fire#>>'{fires,0,fireId}')::uuid);reset role;
+ set local role service_role;perform pg_temp.ok(public.claim_postgresql_discovery(pg_temp.pg_id(1),(claim->>'requestId')::uuid)is not null,'short-lived source actual read claim');reset role;
+ insert into public.connector_discovery_runs(id,tenant_id,connector_id,grant_id,spiffe_id,operation,record_count,result,correlation_id,created_at)values(pg_temp.pg_id(n),pg_temp.pg_id(1),pg_temp.pg_id(6),pg_temp.pg_id(8),'spiffe://local.axiomproof.test/agent/drishti','enumerate',0,'[]',(claim->>'requestId')::uuid,clock_timestamp());
+ set local role service_role;perform public.retain_postgresql_discovery(pg_temp.pg_id(1),(claim->>'requestId')::uuid,pg_temp.pg_id(n));reset role;
+ set local role axiom_assessment_controller;perform pg_temp.ok(public.settle_monitoring_read_dispatch(pg_temp.pg_id(1),(fire#>>'{fires,0,fireId}')::uuid,(fire#>>'{fires,0,fireId}')::uuid,'read_completed',true)->>'state'='confirmed','short-lived source independent cleanup');reset role;
+ return(fire#>>'{fires,0,fireId}')::uuid;end$$;
+insert into coverage175_saved values('short-intent',null,controller_security.canonical_questionnaire_json(jsonb_set(jsonb_set((select r::jsonb from coverage175_saved where k='intent'),'{request,operationKey}',to_jsonb(pg_temp.pg_id(850))),'{request,previousScopeId}',to_jsonb(pg_temp.pg_id(810)))||jsonb_build_object('request',(select(r::jsonb->'request')||jsonb_build_object('operationKey',pg_temp.pg_id(850),'previousScopeId',pg_temp.pg_id(810),'expiresAt',to_char(clock_timestamp()+interval '10 seconds','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))from coverage175_saved where k='intent'))));
+update coverage175_saved set v=jsonb_build_object('id',pg_temp.coverage175_mfa(r))where k='short-intent';
+set local role human_action_writer;
+select pg_temp.ok(public.record_scheduled_coverage_scope(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),r,(v->>'id')::uuid)->>'recorded'='true','explicit short expiry scope recorded')from coverage175_saved where k='short-intent';
+reset role;
+select pg_temp.coverage175_next_read(851);
+set local role agent_ledger_writer;
+insert into coverage175_saved values('orphan',public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1)),null);
+select pg_temp.ok(jsonb_array_length(v->'fires')=1,'short-lived scope reserves exactly one fire')from coverage175_saved where k='orphan';
+select pg_temp.ok(public.claim_scheduled_coverage_fire(pg_temp.pg_id(1),(v#>>'{fires,0,fireId}')::uuid)->>'state'='runnable','one original short-lived handoff')from coverage175_saved where k='orphan';
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))=v,'retained handoff precedes all new due source')from coverage175_saved where k='orphan';
+reset role;
+select pg_sleep(10.1);
+set local role agent_ledger_writer;
+select pg_temp.ok(public.read_scheduled_coverage_fire(pg_temp.pg_id(1),(v#>>'{fires,0,fireId}')::uuid)->>'state'='unconfirmed','real expiry of handed-off fire records uncertainty')from coverage175_saved where k='orphan';
+select pg_temp.ok(public.claim_scheduled_coverage_fire(pg_temp.pg_id(1),(v#>>'{fires,0,fireId}')::uuid)->>'state'='unconfirmed','expired orphan never relaunches')from coverage175_saved where k='orphan';
+select pg_temp.ok(public.reserve_scheduled_coverage_fire(pg_temp.pg_id(1))->'fires'='[]','expired original scope never authorizes fresh work');
+reset role;
+select pg_temp.ok((select count(*)=1 from public.assessment_dispatch_jobs),'uncertain handoff creates no replacement job');
+set local role service_role;
+select pg_temp.ok(public.read_scheduled_coverage_scope_operation(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),r)->>'recorded'='true','expired scope original human receipt remains readable')from coverage175_saved where k='short-intent';
+reset role;
+set constraints all immediate;
+rollback;

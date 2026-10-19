@@ -39,7 +39,11 @@ const reply = z.union([
   z
     .object({
       configuration: z
-        .object({ tenantId: uuid, sourceRequirement: AssessmentSourceRequirementSchema })
+        .object({
+          tenantId: uuid,
+          sourceRequirement: AssessmentSourceRequirementSchema,
+          scheduledCoverageEnabled: z.boolean().optional(),
+        })
         .strict(),
     })
     .strict(),
@@ -142,7 +146,13 @@ export async function startAssessmentProducerSocket(options: {
         );
         if (!ended)
           send(200, {
-            configuration: { tenantId: query.tenantId, sourceRequirement: requirement },
+            configuration: {
+              tenantId: query.tenantId,
+              sourceRequirement: requirement,
+              ...((await options.producer.coverageAvailableForTenant?.(query.tenantId))
+                ? { scheduledCoverageEnabled: true }
+                : {}),
+            },
           });
         return;
       }
@@ -305,6 +315,16 @@ export function assessmentProducerSocketClient(configuration: unknown): Assessme
   const config = assessmentProducerSocketConfiguration.parse(configuration);
   return Object.freeze({
     configurationForTenant: (tenantId: string) => config.tenantIds.includes(uuid.parse(tenantId)),
+    async coverageAvailableForTenant(tenantId: string) {
+      const id = uuid.parse(tenantId);
+      if (!config.tenantIds.includes(id)) return false;
+      const result = await producerSocketExchange(config, '/assessment/configuration', {
+        tenantId: id,
+      });
+      if (!('configuration' in result) || result.configuration.tenantId !== id)
+        throw new DispatchRefused();
+      return result.configuration.scheduledCoverageEnabled === true;
+    },
     async sourceRequirementForTenant(tenantId: string) {
       const id = uuid.parse(tenantId);
       if (!config.tenantIds.includes(id)) return 'unknown';

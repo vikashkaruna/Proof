@@ -1,4 +1,5 @@
 import { dataFlowDeclarationRoutes } from './data-flow-declarations.js';
+import { scheduledCoverageRoutes } from './scheduled-coverage.js';
 import type { StandingCoordinator } from '../services/standing-coordinator.js';
 import { standingApprovalRoutes } from './standing-approvals.js';
 import { monitoringReadScopeRoutes } from './monitoring-read-scopes.js';
@@ -248,6 +249,7 @@ interface Deps {
   publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
   dataFlowDeclarationsEnabled?: boolean;
   standingCoordinatorEnabled?: boolean;
+  scheduledCoverageEnabled?: boolean;
   standingCoordinatorStatus?: () => ReturnType<StandingCoordinator['health']>;
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
@@ -265,6 +267,14 @@ export function v1Routes(deps: Deps) {
       mfa: deps.mfa,
       enabled: deps.standingCoordinatorEnabled ?? false,
       status: deps.standingCoordinatorStatus,
+    }),
+  );
+  app.route(
+    '/',
+    scheduledCoverageRoutes({
+      mfa: deps.mfa,
+      enabled: deps.scheduledCoverageEnabled ?? false,
+      available: deps.assessmentRequests?.coverageAvailableForTenant,
     }),
   );
   app.route('/', ownedSyntheticPlanRoutes(deps.ownedSynthetic));
