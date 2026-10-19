@@ -30,6 +30,7 @@ import { ApprovalActions } from './approval-actions';
 import { KillSwitchButton } from './kill-switch-button';
 import { DryRunHistory, type DryRunRow } from './dry-run-history';
 import { RunDryRunButton } from './run-dry-run-button';
+import { OwnedEffectObservation } from './owned-effect-observation';
 import { ApprovalProofArchive } from './approval-proof-archive';
 import { DryRunDiffView } from '../../execution/dry-run-diff';
 import { moduleBarProps } from '@/lib/module-bar';
@@ -69,6 +70,7 @@ interface RemediationAction {
   rollback_validated: boolean;
   rollback_validated_at: string | null;
   execution_status: string | null;
+  execution_batch_id?: string | null;
   rollback_definition: { estimatedRollbackTimeSeconds?: number } | null;
   approval_status: string;
   approved_at: string | null;
@@ -95,15 +97,22 @@ export default async function PlanDetailPage({ params }: PageProps) {
   // W1 · SEC-9/SEC-8: this page read the session directly, so any signed-in
   // user could open any plan the RLS policy let through, and — once login MFA
   // landed — could do so without having met the second factor.
-  const { supabase, tenantId, email, role, approvalScopes, isAxiomInternal } =
+  const { supabase, tenantId, userId, isDemo, email, role, approvalScopes, isAxiomInternal } =
     await requireCapabilityContext(Capability.PLAN_READ);
 
   // Reading a plan and approving it are different authorities. A viewer sees
   // the actions, the blast radius and the dry-run diff, and no buttons.
-  const canApprove = can(Capability.PLAN_APPROVE, { role, approvalScopes });
+  const canApprove = can(Capability.PLAN_APPROVE, { role });
   const canReject = can(Capability.PLAN_REJECT, { role, approvalScopes });
   const canExecute = can(Capability.PLAN_EXECUTE, { role, approvalScopes });
   const canRequestDryRun = can(Capability.PLAN_CREATE, { role, approvalScopes });
+  const canObserveOwnedEffect =
+    canExecute &&
+    canRequestDryRun &&
+    isDemo &&
+    process.env.AXIOM_OWNED_SYNTHETIC_ENABLED === 'true' &&
+    ['local', 'test'].includes(process.env.ENVIRONMENT ?? '') &&
+    (process.env.AXIOM_AUTH_MODE ?? 'strict') === 'strict';
   const canKillSwitch = can(Capability.KILL_SWITCH_ENGAGE_TENANT, { role });
   const canExportEvidence = can(Capability.EVIDENCE_EXPORT, { role });
 
@@ -168,9 +177,23 @@ export default async function PlanDetailPage({ params }: PageProps) {
   const planBlocker = describePlanStatusBlocker(typedPlan.status);
 
   const eligible = actions.filter((a) => readinessByAction.get(a.id)?.ready === true);
+  const approvableEligible = eligible.filter(
+    (a) =>
+      !canApprove ||
+      can(Capability.PLAN_APPROVE, { role, approvalScopes, actionClass: a.action_type }),
+  );
   const blocked = actions.filter((a) => readinessByAction.get(a.id)?.ready !== true);
   const blockerReasonsByAction = Object.fromEntries(
-    actions.map((a) => [a.id, blockerReasons(readinessByAction.get(a.id))]),
+    actions.map((a) => [
+      a.id,
+      [
+        ...blockerReasons(readinessByAction.get(a.id)),
+        ...(canApprove &&
+        !can(Capability.PLAN_APPROVE, { role, approvalScopes, actionClass: a.action_type })
+          ? ['Outside your approval scope. An approver assigned this action class must review it.']
+          : []),
+      ],
+    ]),
   );
   const approvedUnrecorded = actions.filter((a) =>
     approvedWithoutRecordedRun(a.approval_status, readinessByAction.get(a.id)),
@@ -364,11 +387,12 @@ export default async function PlanDetailPage({ params }: PageProps) {
         </CardHeader>
         <CardContent>
           <ApprovalActions
+            key={`${typedPlan.tenant_id}/${typedPlan.id}`}
             planId={typedPlan.id}
             tenantId={typedPlan.tenant_id}
             planStatus={typedPlan.status}
             actions={actions}
-            eligible={eligible}
+            eligible={approvableEligible}
             blocked={blocked}
             blockerReasons={blockerReasonsByAction}
             planBlocker={planBlocker}
@@ -391,13 +415,26 @@ export default async function PlanDetailPage({ params }: PageProps) {
 
       <div className="flex flex-col gap-3">
         {actions.map((a) => (
-          <ActionCard
-            key={a.id}
-            planId={typedPlan.id}
-            action={a}
-            latestDryRun={latestDryRunByAction.get(a.id) ?? null}
-            readiness={readinessByAction.get(a.id) ?? null}
-          />
+          <div key={a.id} className="flex flex-col gap-3">
+            <ActionCard
+              planId={typedPlan.id}
+              action={a}
+              latestDryRun={latestDryRunByAction.get(a.id) ?? null}
+              readiness={readinessByAction.get(a.id) ?? null}
+            />
+            {canObserveOwnedEffect &&
+              a.execution_batch_id &&
+              a.action_type === 'config.audit_log_enable' &&
+              latestDryRunByAction.get(a.id)?.simulated_by === 'owned-postgresql-measurement' && (
+                <OwnedEffectObservation
+                  tenantId={tenantId}
+                  actorId={userId}
+                  planId={typedPlan.id}
+                  actionId={a.id}
+                  batchId={a.execution_batch_id}
+                />
+              )}
+          </div>
         ))}
       </div>
 

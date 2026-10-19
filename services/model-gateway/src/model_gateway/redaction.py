@@ -19,7 +19,7 @@ import logging
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, Literal
 
 # DPDPA-specific patterns (high-precision, low-false-positive)
 DPDPA_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
@@ -62,6 +62,34 @@ class RedactionSummary:
     redactions: dict[str, int]
     original_hash: str  # SHA-256 of the original (for ledger)
     redacted_hash: str  # SHA-256 of the redacted output
+    ner_status: Literal["not_run", "unavailable", "failed", "completed"] = "not_run"
+
+
+@dataclass(frozen=True)
+class HostedEgressEligibility:
+    """Local policy observation, never an HTTP input or anonymization claim."""
+
+    state: Literal["qualified", "unqualified"]
+    input_sha256: str
+    output_sha256: str
+    policy_sha256: str
+
+
+def hosted_egress_eligibility(summary: RedactionSummary) -> HostedEgressEligibility:
+    """Arbitrary free text has no reviewed language/input policy yet.
+
+    Even successful English NER cannot establish the language or anonymization
+    of arbitrary/multilingual text. Remain closed until a separately reviewed
+    server-owned policy qualifies exact bytes. No caller or environment flag
+    can turn regex success, NER availability, or pii_redacted into authority.
+    This prerequisite does not implement the semantic draft/accounting flow.
+    """
+    return HostedEgressEligibility(
+        state="unqualified",
+        input_sha256=summary.original_hash,
+        output_sha256=summary.redacted_hash,
+        policy_sha256=hashlib.sha256(b"hosted-free-text-unqualified-v1").hexdigest(),
+    )
 
 
 def redact(text: str) -> RedactionSummary:
@@ -91,6 +119,7 @@ def redact(text: str) -> RedactionSummary:
 
     # Presidio covers the PII classes that cannot be safely identified with a
     # portable regex alone, especially PERSON and LOCATION/ADDRESS.
+    ner_status: Literal["unavailable", "failed", "completed"] = "unavailable"
     analyzer = _presidio_analyzer()
     if analyzer is not None and out:
         try:
@@ -109,6 +138,7 @@ def redact(text: str) -> RedactionSummary:
                 ],
                 score_threshold=0.6,
             )
+            ner_status = "completed"
             labels = {
                 "PERSON": "PERSON",
                 "LOCATION": "LOCATION",
@@ -128,12 +158,14 @@ def redact(text: str) -> RedactionSummary:
         except Exception:  # noqa: BLE001 - fail back to deterministic regexes
             # The regex pass above already ran; never log the text itself.
             logging.getLogger(__name__).warning("redaction.ner_unavailable")
+            ner_status = "failed"
 
     return RedactionSummary(
         redacted_text=out,
         redactions=redactions,
         original_hash=original_hash,
         redacted_hash=hashlib.sha256(out.encode("utf-8")).hexdigest(),
+        ner_status=ner_status,
     )
 
 

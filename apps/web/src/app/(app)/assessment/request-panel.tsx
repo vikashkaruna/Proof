@@ -12,6 +12,8 @@ import Link from 'next/link';
 import { canonicalJson } from '@axiom/ledger';
 import {
   AssessmentRequestSchema,
+  type AssessmentSourceRequirement,
+  type AssessmentSourceRefusal,
   ASSESSMENT_REQUEST_MAX_BYTES,
   type AssessmentReviewReference,
 } from '@axiom/types';
@@ -24,6 +26,8 @@ import {
   retainAssessmentJournal,
   clearFinalizedAssessmentJournal,
   submitAssessmentRequest,
+  AssessmentSourceRequiredError,
+  archiveRejectedAssessmentJournal,
   resolveAssessmentSourceIntent,
   clearCancelledAssessmentSourceJournal,
   cancelUnclaimedAssessmentRequest,
@@ -40,6 +44,7 @@ interface Props {
   canRequest: boolean;
   reviewRef?: AssessmentReviewReference;
   configuration?: 'configured' | 'unconfigured' | 'unknown';
+  sourceRequirement?: AssessmentSourceRequirement;
   hasSavedResults: boolean;
   onFinalized: () => void;
 }
@@ -59,6 +64,7 @@ function RequestPanel({
   canRequest,
   reviewRef,
   configuration = 'unknown',
+  sourceRequirement = 'unknown',
   hasSavedResults,
   onFinalized,
 }: Props) {
@@ -99,6 +105,10 @@ function RequestPanel({
     }
   }, [raw, tenantId, actorId]);
   const { retained, ready } = journal;
+  const reviewRequired = sourceRequirement === 'public_control_review_required' && !reviewRef;
+  const sourceModeUnknown = sourceRequirement === 'unknown' && !reviewRef;
+  const directSourceWithheld = reviewRequired || sourceModeUnknown;
+  const [sourceRefusal, setSourceRefusal] = useState<AssessmentSourceRefusal | null>(null);
   const [confirmedUnknown, setConfirmedUnknown] = useState(false);
   const [intake, setIntake] = useState(false);
   const [reviewed, setReviewed] = useState<ReviewedQuestionnaire | null>(null);
@@ -146,6 +156,7 @@ function RequestPanel({
       !ready ||
       !canRequest ||
       configuration === 'unconfigured' ||
+      directSourceWithheld ||
       retained ||
       hasSavedResults ||
       completedHere ||
@@ -209,6 +220,8 @@ function RequestPanel({
           });
       });
     } catch (cause) {
+      if (mounted.current && cause instanceof AssessmentSourceRequiredError)
+        setSourceRefusal(cause.refusal);
       if (mounted.current)
         setError(
           cause instanceof Error
@@ -293,9 +306,53 @@ function RequestPanel({
           });
       });
     } catch (cause) {
+      if (mounted.current && cause instanceof AssessmentSourceRequiredError)
+        setSourceRefusal(cause.refusal);
       if (mounted.current)
         setError(
           cause instanceof Error ? cause.message : 'The original request could not be confirmed.',
+        );
+    } finally {
+      active.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
+  async function archiveRejected() {
+    if (
+      active.current ||
+      !ready ||
+      !retained ||
+      !sourceRefusal ||
+      sourceRefusal.operationKey !== retained.request.operationKey
+    )
+      return;
+    const expected = retained,
+      proof = sourceRefusal;
+    active.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      if (!navigator.locks)
+        throw new Error(
+          'This browser cannot safely coordinate retained requests. Use a supported browser.',
+        );
+      await navigator.locks.request(key, () =>
+        archiveRejectedAssessmentJournal(localStorage, expected, proof),
+      );
+      if (mounted.current) {
+        setSourceRefusal(null);
+        setConfirmedUnknown(false);
+        setMessage({
+          operationKey: null,
+          text: 'The rejected browser reference and its server refusal were archived locally. Continue with a saved source review in Discovery.',
+        });
+      }
+    } catch (cause) {
+      if (mounted.current)
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : 'The retained reference could not be safely archived.',
         );
     } finally {
       active.current = false;
@@ -440,7 +497,9 @@ function RequestPanel({
       <p className="mt-2">
         {reviewRef
           ? 'Request an assessment from the exact recorded human review shown here.'
-          : 'Enter reviewed questionnaire declarations or request an unknown-answer draft.'}{' '}
+          : directSourceWithheld
+            ? 'Start in Discovery and save the exact public-control human review for this assessment.'
+            : 'Enter reviewed questionnaire declarations or request an unknown-answer draft.'}{' '}
         Answers and applicability flags stay unknown until you explicitly choose otherwise.
         Estimates are provisional and declarations remain unverified; neither establishes
         compliance. Discovery, evidence and reports run separately.
@@ -452,6 +511,27 @@ function RequestPanel({
             ? 'Assessment producer configuration is present. Controller health and execution readiness have not been verified.'
             : 'Assessment configuration could not be verified. Availability is unknown; this does not establish execution readiness.'}
       </p>
+      {sourceModeUnknown && (
+        <p className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+          The deployment’s accepted source requirement could not be verified. Direct questionnaire
+          and unknown-answer submissions are withheld. Existing retained requests can still be
+          checked.{' '}
+          <Link href="/discovery" className="font-medium text-teal-800 underline">
+            Open Discovery for a saved public-control review
+          </Link>
+          .
+        </p>
+      )}
+      {reviewRequired && (
+        <p className="mt-3 rounded border border-slate-200 bg-slate-50 p-3">
+          This deployment accepts assessments only from a saved public-control human review.
+          Questionnaire and unknown-answer requests are unavailable here.{' '}
+          <Link href="/discovery" className="font-medium text-teal-800 underline">
+            Open Discovery and review the source
+          </Link>
+          . Existing retained requests can still be checked using their original request ID.
+        </p>
+      )}
       {reviewRef && (
         <p className="mt-2 break-all">
           Frozen human review: {reviewRef.reviewId}. The server loads its saved answers; no browser
@@ -596,9 +676,29 @@ function RequestPanel({
                 onClick={retry}
                 className="ml-2 rounded-lg border border-slate-300 px-3 py-2 font-semibold disabled:opacity-50"
               >
-                Retry original request
+                {sourceRequirement === 'public_control_review_required' &&
+                !retained.request.reviewRef
+                  ? 'Verify original request admission'
+                  : 'Retry original request'}
               </button>
             )}
+          {sourceRefusal?.operationKey === retained.request.operationKey && (
+            <div className="mt-3 rounded border border-slate-200 p-3">
+              <p>
+                The server positively refused this exact unsupported request before dispatch.
+                Archiving checks the exact job again and preserves its rejection receipt in this
+                browser.
+              </p>
+              <button
+                type="button"
+                disabled={busy || !ready}
+                onClick={() => void archiveRejected()}
+                className="mt-2 rounded border border-slate-300 px-3 py-2 font-semibold"
+              >
+                Archive rejected browser reference
+              </button>
+            </div>
+          )}
           {displayedStatus?.status === 'finalization_recorded' && (
             <div>
               <p>
@@ -651,8 +751,16 @@ function RequestPanel({
         <div className="mt-3 space-y-3">
           {hasSavedResults || completedHere ? (
             <p>
-              This assessment already has saved results. Create a separate engagement for another
-              assessment.
+              This assessment already has saved results.{' '}
+              <Link href="/engagements" className="font-semibold text-teal-700 underline">
+                Create a separate engagement for another assessment
+              </Link>
+              .
+            </p>
+          ) : directSourceWithheld ? (
+            <p>
+              New submission is unavailable until a saved source review is selected. Use its exact
+              assessment link from Discovery.
             </p>
           ) : (
             <>
@@ -716,6 +824,7 @@ function RequestPanel({
                   busy ||
                   !ready ||
                   configuration === 'unconfigured' ||
+                  directSourceWithheld ||
                   !confirmedUnknown ||
                   (intake && !reviewed)
                 }

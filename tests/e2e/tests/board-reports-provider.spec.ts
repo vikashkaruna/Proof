@@ -948,8 +948,13 @@ test.describe('real-provider board report lifecycle', () => {
           },
         );
         expect(unsupported.status()).toBe(409);
+        // Full closure now has its own source graph. This fixture has a
+        // released report but has not yet sealed either assessment dossier.
+        // Require that specific prerequisite refusal, never fabricated closure.
         expect(((await unsupported.json()) as { error: { code: string } }).error.code).toBe(
-          'source_bound_dossier_required',
+          dossierType === 'full_closure'
+            ? 'sealed_assessment_sources_required'
+            : 'source_bound_dossier_required',
         );
       }
       const prepared = await post(page, `/engagements/${assessment.engagementId}/closure/pramaan`, {

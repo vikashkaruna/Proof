@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@axiom/ledger": "workspace:*",
-    "zod": "^4.6.5"
+    "zod": "^4.6.5",
+    "@axiom/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^7.0.2",

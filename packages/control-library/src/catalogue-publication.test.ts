@@ -682,3 +682,17 @@ describe('reference prerequisites never bootstrap or activate the base library',
       ).toEqual([]);
     });
 });
+
+it('explicitly publishes candidate rows without activation, approval or sector adoption', async () => {
+  const { publishCatalogueCandidate } = await import('./catalogue-publication');
+  const db = new CatalogueFake();
+  const result = await publishCatalogueCandidate(db, '0.2.0');
+  expect(result.libraryVerified).toBe(true);
+  expect(db.tables.get('controls')?.filter((row) => row.library_version === '0.2.0')).toHaveLength(
+    46,
+  );
+  expect(db.tables.get('control_libraries')?.find((row) => row.is_current)?.version).toBe('0.1.1');
+  expect(db.calls.some((call) => call.startsWith('rpc:') || call.includes('activate'))).toBe(false);
+  expect(db.tables.get('approved_catalogue_versions')).toBeUndefined();
+  await expect(publishCatalogueCandidate(db, '0.3.0')).rejects.toThrow('candidate_version_refused');
+});

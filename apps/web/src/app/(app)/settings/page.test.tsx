@@ -74,7 +74,8 @@ it('places member management in its own settings section after the page header f
   );
 });
 
-it('links to the gated local dispatch-key custody workflow', async () => {
+it('links authorised owners to the local dispatch-key custody workflow', async () => {
+  state.role = 'owner';
   const html = renderToStaticMarkup(await SettingsPage());
   expect(html).toContain('href="/settings/local-custody"');
   expect(html).toContain('Local dispatch-key custody');
@@ -83,4 +84,9 @@ it('links to the gated local dispatch-key custody workflow', async () => {
   expect(anchor).toContain('bg-teal-700');
   for (const step of ['Owner requests', 'Founder approves', 'Operator activates'])
     expect(html).toContain(step);
+});
+
+it('hides custody management for read-only members', async () => {
+  const html = renderToStaticMarkup(await SettingsPage());
+  expect(html).not.toContain('href="/settings/local-custody"');
 });

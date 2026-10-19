@@ -5,7 +5,13 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AgentLabel, formatINRCrore, PageHeader } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
-import type { AgentName, AssessmentSnapshot, AssessmentReviewReference } from '@axiom/types';
+import { coveragePresentation } from '@axiom/types';
+import type {
+  AgentName,
+  AssessmentSnapshot,
+  AssessmentReviewReference,
+  AssessmentSourceRequirement,
+} from '@axiom/types';
 import { AssessmentRequestPanel } from './request-panel';
 
 export interface AssessmentClientProps {
@@ -15,6 +21,7 @@ export interface AssessmentClientProps {
   actorId?: string;
   reviewRef?: AssessmentReviewReference;
   configuration?: 'configured' | 'unconfigured' | 'unknown';
+  sourceRequirement?: AssessmentSourceRequirement;
 }
 
 export interface PipelineStage {
@@ -70,6 +77,7 @@ export function AssessmentClient({
   actorId,
   reviewRef,
   configuration = 'unknown',
+  sourceRequirement = 'unknown',
 }: AssessmentClientProps) {
   const router = useRouter();
   const controls = snapshot?.controls ?? [];
@@ -79,6 +87,13 @@ export function AssessmentClient({
   const unassessedCount = snapshot?.summary.unassessed ?? 0;
   const unknownCount = snapshot?.summary.unknown ?? 0;
   const notApplicableCount = snapshot?.summary.not_applicable ?? 0;
+  const coverageBasis = coveragePresentation.safeParse(snapshot?.scheduledCoverage);
+  const hasScheduledCoverage =
+    coverageBasis.success &&
+    coverageBasis.data.tenantId === snapshot?.tenantId &&
+    coverageBasis.data.engagementId === snapshot?.engagement?.id;
+  const coverageBasisUnavailable =
+    snapshot?.scheduledCoverage !== undefined && !hasScheduledCoverage;
   const provenance = snapshot?.provenance;
   const hasDeclarations = provenance?.status === 'caller_declared_unverified';
   const totalControlsCount = controls.length;
@@ -171,9 +186,32 @@ export function AssessmentClient({
           canRequest={canInvokeAgent}
           reviewRef={reviewRef}
           configuration={configuration}
+          sourceRequirement={sourceRequirement}
           hasSavedResults={controls.some((control) => control.score !== null)}
           onFinalized={() => router.refresh()}
         />
+      )}
+
+      {hasScheduledCoverage && (
+        <section
+          aria-labelledby="scheduled-coverage-heading"
+          className="mb-4 rounded-lg border border-teal-200 bg-teal-50 p-4 text-sm text-slate-700"
+        >
+          <h2 id="scheduled-coverage-heading" className="font-semibold text-[#1E2A4A]">
+            Scheduled technical coverage
+          </h2>
+          <p className="mt-1">
+            This saved result covers technical observations only. Business questionnaire answers and
+            applicability remain Unknown. Scores and exposure are withheld; this is not a compliance
+            status.
+          </p>
+        </section>
+      )}
+      {coverageBasisUnavailable && (
+        <p role="alert" className="mb-4 rounded-lg border border-slate-200 bg-white p-4 text-sm">
+          The source basis for this saved result could not be verified. Refresh the assessment
+          before relying on it.
+        </p>
       )}
 
       <div
@@ -209,9 +247,11 @@ export function AssessmentClient({
               determination.
             </p>
             <p className="mt-2" data-testid="assessment-questionnaire-provenance">
-              {hasDeclarations
-                ? 'Questionnaire declarations are unverified. Scores and exposure are provisional estimates requiring review. Unknown answers or applicability are not a failed control.'
-                : 'Questionnaire provenance is unavailable for these saved results. Score bands do not establish verified answers or compliance.'}
+              {hasScheduledCoverage
+                ? 'Business questionnaire answers and applicability remain Unknown; scores and exposure are withheld.'
+                : hasDeclarations
+                  ? 'Questionnaire declarations are unverified. Scores and exposure are provisional estimates requiring review. Unknown answers or applicability are not a failed control.'
+                  : 'Questionnaire provenance is unavailable for these saved results. Score bands do not establish verified answers or compliance.'}
             </p>
             {hasDeclarations && provenance.applicability && (
               <dl

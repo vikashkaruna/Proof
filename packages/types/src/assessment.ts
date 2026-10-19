@@ -1,3 +1,4 @@
+import { coveragePresentation } from './scheduled-coverage';
 import { z } from 'zod';
 
 const answerCount = z.number().int().min(0).max(5000);
@@ -115,6 +116,7 @@ export const AssessmentControlSchema = z
       ctx.addIssue({ code: 'custom', message: 'Assessment control provenance is inconsistent' });
   });
 export const AssessmentSnapshotSchema = z.object({
+  scheduledCoverage: coveragePresentation.optional(),
   tenantId: z.uuid(),
   engagement: z
     .object({ id: z.uuid(), title: z.string(), libraryVersion: z.string(), status: z.string() })

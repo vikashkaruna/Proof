@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { AssessmentConfigurationSchema } from '../../../packages/types/src/assessment-request';
 import { expect, test } from '@playwright/test';
 import { createMfaAccount, selectTenant, signIn, signInAs, state } from '../fixtures';
 import { tenantCookie } from '../target';
@@ -82,29 +82,35 @@ test('an assessment creator can start an intake and open its saved assessment', 
   await savedAssessment.first().click();
   await expect(page).toHaveURL(/\/assessment\?engagement=[0-9a-f-]+$/);
   await expect(page.getByTestId('assessment-provenance')).toContainText('October source review');
-  await expect(
-    page.getByRole('button', { name: 'Request unknown-answer assessment' }),
-  ).toBeDisabled();
-  await page.getByRole('checkbox', { name: /every answer and applicability flag/ }).check();
   const configurationResponse = await page.request.get('/api/bff/v1/assessment/configuration', {
     headers: { 'X-Tenant-Id': tenantId },
   });
   expect(configurationResponse.status()).toBe(200);
-  const configuration = z
-    .object({
-      tenantId: z.uuid(),
-      configuration: z.enum(['configured', 'unconfigured', 'unknown']),
-      executionReadiness: z.literal('not_verified'),
-    })
-    .parse(await configurationResponse.json());
+  const configuration = AssessmentConfigurationSchema.parse(await configurationResponse.json());
+  expect(configuration.configuration).not.toBe('unknown');
   expect(configuration.tenantId).toBe(tenantId);
   const requestButton = page.getByRole('button', { name: 'Request unknown-answer assessment' });
-  if (configuration.configuration === 'unconfigured') {
+  if (configuration.sourceRequirement !== 'questionnaire_or_public_review') {
+    const panel = page.getByRole('region', { name: 'Request a saved assessment' });
+    await expect(requestButton).toHaveCount(0);
+    await expect(panel.getByRole('checkbox')).toHaveCount(0);
+    await expect(panel.getByRole('link', { name: /Open Discovery/ })).toHaveAttribute(
+      'href',
+      '/discovery',
+    );
+    await expect(panel).toContainText(
+      configuration.sourceRequirement === 'public_control_review_required'
+        ? 'This deployment accepts assessments only from a saved public-control human review.'
+        : 'The deployment’s accepted source requirement could not be verified.',
+    );
+  } else if (configuration.configuration === 'unconfigured') {
     await expect(requestButton).toBeDisabled();
     await expect(
       page.getByText(/Assessment requests are not configured for this organisation\./),
     ).toBeVisible();
   } else {
+    await expect(requestButton).toBeDisabled();
+    await page.getByRole('checkbox', { name: /every answer and applicability flag/ }).check();
     await expect(requestButton).toBeEnabled();
   }
   const createdId = new URL(page.url()).searchParams.get('engagement');

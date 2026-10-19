@@ -12,12 +12,13 @@ import { OwnedTargetPanel } from './owned-target-panel';
 import { DataPlaceholder, PageHeader, formatDateTime } from '@axiom/ui';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { moduleBarProps } from '@/lib/module-bar';
+import { ownedDeploymentAccess } from '@/lib/owned-deployment-access';
 import { routeCapability } from '@/app/(app)/nav';
 
 export const dynamic = 'force-dynamic';
 
 export default async function PlansListPage() {
-  const { supabase, tenantId, userId, role } = await requireCapabilityContext(
+  const { supabase, tenantId, userId, role, isAxiomInternal } = await requireCapabilityContext(
     routeCapability('/plans'),
   );
   const { data: plans, error } = await supabase
@@ -66,6 +67,15 @@ export default async function PlansListPage() {
         actorId={userId}
         canPropose={can(Capability.PLAN_CREATE, { role }) && can(Capability.AGENT_INVOKE, { role })}
       />
+      {ownedDeploymentAccess(role, isAxiomInternal).available && (
+        <p className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+          Need a synthetic target first?{' '}
+          <Link className="font-semibold text-teal-800 underline" href="/settings/owned-targets">
+            Prepare and verify demo execution setup
+          </Link>{' '}
+          before creating its separately approved remediation plan.
+        </p>
+      )}
       {ownedEnabled && (
         <>
           {ownedEngagements?.error && (

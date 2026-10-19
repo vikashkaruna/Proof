@@ -1,6 +1,8 @@
 import { Signer } from '@aws-sdk/rds-signer';
 import mysql from 'mysql2/promise';
 import pg from 'pg';
+import { Socket } from 'node:net';
+import { PostgresDeadline, PostgresDeadlineExceeded } from './postgres-deadline.js';
 import { z } from 'zod';
 import type { ConnectorInvocation } from '@axiom/types';
 import type { SqlSession, SqlSessionFactory } from './postgres-read.js';
@@ -19,7 +21,9 @@ export const SqlEndpointSchema = z
   .strict();
 export type SqlEndpoint = z.infer<typeof SqlEndpointSchema>;
 
-/** Returns a short-lived password for one connection. Never a stored secret. */
+/** Returns one backend-only credential for one connection. Cloud credentials
+ * are short-lived IAM tokens; the explicit local sandbox broker pins an expiring
+ * protected password file. Neither credential reaches an agent or response. */
 export interface SqlCredentialProvider {
   password(endpoint: SqlEndpoint): Promise<string>;
 }
@@ -55,27 +59,72 @@ export function postgresSessions(options: {
   credentials: SqlCredentialProvider;
   connectTimeoutMs?: number;
 }): SqlSessionFactory {
-  return async (context) => {
+  return async (context, signal) => {
     const candidate = options.endpoint(context);
     const parsed = SqlEndpointSchema.safeParse(candidate);
     if (!parsed.success) throw new SqlEndpointRefused();
     const endpoint = parsed.data;
-    const client = new pg.Client({
-      host: endpoint.host,
-      port: endpoint.port,
-      database: endpoint.database,
-      user: endpoint.user,
-      password: await options.credentials.password(endpoint),
-      ssl: { ca: endpoint.caPem, rejectUnauthorized: true, servername: endpoint.host },
-      connectionTimeoutMillis: options.connectTimeoutMs ?? 5000,
-      application_name: 'axiom-drishti',
-    });
-    await client.connect();
-    const session: SqlSession = {
-      query: async (text, values) => client.query(text, values ? [...values] : undefined),
-      end: () => client.end(),
+    const scope = new PostgresDeadline(Date.parse(context.deadline), Date.now, signal);
+    let socket: Socket | undefined;
+    let closed: Promise<void> | undefined;
+    let aborting: Promise<void> | undefined;
+    const abort = () => {
+      scope.abort();
+      aborting ??= (async () => {
+        socket?.destroy();
+        await closed;
+        scope.dispose();
+      })();
+      return aborting;
     };
-    return session;
+    const stop = () => {
+      socket?.destroy();
+    };
+    scope.signal.addEventListener('abort', stop, { once: true });
+    try {
+      // AWS's signer has no cancellation API. Never allocate a socket after a
+      // timed-out/late credential; its detached result grants no database access.
+      const password = await scope.run(() => options.credentials.password(endpoint));
+      const remaining = Date.parse(context.deadline) - Date.now();
+      if (remaining <= 0 || scope.signal.aborted) throw new PostgresDeadlineExceeded();
+      socket = new Socket();
+      closed = new Promise<void>((resolve) => socket!.once('close', resolve));
+      const client = new pg.Client({
+        host: endpoint.host,
+        port: endpoint.port,
+        database: endpoint.database,
+        user: endpoint.user,
+        password,
+        ssl: { ca: endpoint.caPem, rejectUnauthorized: true, servername: endpoint.host },
+        stream: () => socket,
+        pipeline: false,
+        connectionTimeoutMillis: Math.min(options.connectTimeoutMs ?? 5000, remaining),
+        query_timeout: Math.min(5000, remaining),
+        statement_timeout: Math.min(5000, remaining),
+        idle_in_transaction_session_timeout: Math.min(5000, remaining),
+        application_name: 'axiom-drishti',
+      });
+      // Connection errors must not become unhandled events or disclose target data.
+      client.on('error', () => undefined);
+      await scope.run(() => client.connect());
+      return {
+        query: (text, values) =>
+          scope.run(() => client.query(text, values ? [...values] : undefined)),
+        abort,
+        end: async () => {
+          try {
+            if (!scope.signal.aborted) await scope.run(() => client.end());
+          } finally {
+            scope.signal.removeEventListener('abort', stop);
+            await abort();
+          }
+        },
+      };
+    } catch (error) {
+      scope.signal.removeEventListener('abort', stop);
+      await abort();
+      throw error;
+    }
   };
 }
 

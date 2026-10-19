@@ -51,7 +51,9 @@ async function forward(request: NextRequest, context: RouteContext) {
                 target.pathname,
               )
             ? 4096
-            : /^\/v1\/plans\/owned-synthetic(?:\/(?:cancel|outcome))?$/.test(target.pathname)
+            : /^\/v1\/(?:plans\/owned-synthetic(?:\/(?:cancel|outcome|observe-effect))?|standing-approvals\/(?:challenge|verify|record|recover|fence)|owned-deployments(?:\/[0-9a-fA-F-]{36}\/(?:preflight|challenge|verify|approve|install|fence-intent|revoke-challenge|revoke-verify|revoke))?)$/.test(
+                  target.pathname,
+                )
               ? 16384
               : /^\/v1\/(?:evidence-packs|reports)(?:\/|$)/.test(target.pathname)
                 ? 64 * 1024

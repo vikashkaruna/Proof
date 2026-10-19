@@ -33,6 +33,33 @@ export const assessmentContainerConfiguration = z
 export function assessmentContainerFactory(
   config: z.input<typeof assessmentContainerConfiguration>,
 ): AssessmentProcessFactory {
+  return isolatedReadWorkerFactory(config, 'assessment');
+}
+
+/** Dedicated Drishti process, never a shared runtime or a caller-selected command. */
+export function discoveryContainerFactory(
+  config: z.input<typeof assessmentContainerConfiguration>,
+): AssessmentProcessFactory {
+  return isolatedReadWorkerFactory(config, 'discovery');
+}
+export const ownedExecutionContainerConfiguration = assessmentContainerConfiguration
+  .extend({
+    resourcePrefix: z
+      .string()
+      .regex(/^axiom-proof-local-owned-execution-worker(?:-[a-z0-9]{1,12})?$/),
+  })
+  .strict();
+export function ownedExecutionContainerFactory(
+  config: z.input<typeof ownedExecutionContainerConfiguration>,
+): AssessmentProcessFactory {
+  const { resourcePrefix, ...base } = ownedExecutionContainerConfiguration.parse(config);
+  return isolatedReadWorkerFactory(base, 'owned-execution', resourcePrefix);
+}
+function isolatedReadWorkerFactory(
+  config: z.input<typeof assessmentContainerConfiguration>,
+  role: 'assessment' | 'discovery' | 'owned-execution',
+  resourcePrefix?: string,
+): AssessmentProcessFactory {
   let args: readonly string[];
   let executable: string;
   try {
@@ -82,7 +109,11 @@ export function assessmentContainerFactory(
       '/usr/local/bin/python',
       value.image,
       '-m',
-      'axiom.assessment_supervisor',
+      role === 'assessment'
+        ? 'axiom.assessment_supervisor'
+        : role === 'discovery'
+          ? 'axiom.discovery_supervisor'
+          : 'axiom.owned_execution_supervisor',
       '--private-stdio',
     ];
   } catch {
@@ -91,7 +122,10 @@ export function assessmentContainerFactory(
   return (): ChildProcessWithoutNullStreams => {
     // Each invocation creates a new PID/mount/network namespace, including when
     // a previous job is still alive. Private input is written only by Channel.
-    const name = `axiom-assessment-${randomUUID()}`;
+    const name =
+      role === 'owned-execution'
+        ? `${resourcePrefix}-${randomUUID()}`
+        : `axiom-${role}-${randomUUID()}`;
     return spawn(executable, [...args.slice(0, 3), '--name', name, ...args.slice(3)], {
       stdio: ['pipe', 'pipe', 'pipe'],
       // Docker uses an explicit local daemon, never ambient contexts or cloud

@@ -122,7 +122,7 @@ function sign(
 }
 beforeAll(() => {
   directory = mkdtempSync(join(tmpdir(), 'axiom-mtls-'));
-  for (const root of ['root', 'foreign']) {
+  for (const root of ['root', 'foreign', 'expired-root']) {
     key(root);
     openssl([
       'req',
@@ -142,6 +142,17 @@ beforeAll(() => {
       root + '.pem',
     ]);
   }
+  openssl([
+    'x509',
+    '-in',
+    'expired-root.pem',
+    '-signkey',
+    'expired-root.key',
+    '-days',
+    '0',
+    '-out',
+    'expired-root.pem',
+  ]);
   for (const name of ['server', 'producer', 'controller']) sign(name);
   sign('wrong-san', `URI:${uri('unmapped')}`);
   sign('mixed', `URI:${uri('producer')},DNS:localhost`);
@@ -158,7 +169,7 @@ beforeAll(() => {
   sign('foreign-client', `URI:${uri('producer')}`, 'clientAuth', 'foreign');
 });
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
-function source(name: string, purpose: 'client' | 'server', certificate = name) {
+function source(name: string, purpose: 'client' | 'server', certificate = name, bundle = ['root']) {
   let emit: (value: unknown) => void = () => {},
     fail = () => {};
   const health = vi.fn(async (): Promise<number | null> => Date.now() + 10000);
@@ -169,7 +180,7 @@ function source(name: string, purpose: 'client' | 'server', certificate = name) 
         spiffeId: uri(name),
         x509Svid: new X509Certificate(pem(certificate)).raw,
         x509SvidKey: Buffer.from(generateKeyDer(certificate)),
-        bundle: new X509Certificate(pem('root')).raw,
+        bundle: Buffer.concat(bundle.map((root) => new X509Certificate(pem(root)).raw)),
       },
     ],
     crl: [],
@@ -205,9 +216,10 @@ function fixture(
   window = 1500,
   endpoint: LocalKeyTlsEndpoint = { host: '127.0.0.1', port: 0 },
   serverCertificate = 'server',
+  bundle = ['root'],
 ) {
-  const server = source('server', 'server', serverCertificate),
-    client = source('producer', 'client');
+  const server = source('server', 'server', serverCertificate, bundle),
+    client = source('producer', 'client', 'producer', bundle);
   const service = {
     wrap: vi.fn<LocalKeyService['wrap']>(async () => ({
       keyRef: keyRef,
@@ -279,37 +291,40 @@ async function raw(
   }
 }
 describe('unmounted real TLS, owned loopback ephemeral generation only', () => {
-  it('uses real mutual PKIX, exact URI and checked response with client counterpart', async () => {
-    const f = fixture();
-    try {
-      const address = await f.listening;
-      const result = await requestLocalKeyMtls({
-        source: f.client.value,
-        identities: mappings,
-        serverIdentity: uri('server'),
-        endpoint: address,
-        deadline: f.deadline,
-        request,
-      });
-      expect(result).toEqual({
-        version: 1,
-        keyRef: keyRef,
-        key: Buffer.alloc(61, 3).toString('base64'),
-      });
-      await expect(f.done).resolves.toBeUndefined();
-      expect(f.service.wrap).toHaveBeenCalledOnce();
-      expect(f.service.wrap.mock.calls[0]?.[0]).toMatchObject({
-        tenantId: tenant,
-        workloadId: workload,
-        servicePrincipal: uri('producer'),
-        role: 'producer',
-      });
-    } finally {
-      f.server.fail();
-      f.client.fail();
-      await f.done.catch(() => {});
-    }
-  });
+  it.each([{ bundle: ['root'] }, { bundle: ['expired-root', 'root'] }])(
+    'uses real mutual PKIX with current anchors from bundle $bundle',
+    async ({ bundle }) => {
+      const f = fixture(1500, { host: '127.0.0.1', port: 0 }, 'server', bundle);
+      try {
+        const address = await f.listening;
+        const result = await requestLocalKeyMtls({
+          source: f.client.value,
+          identities: mappings,
+          serverIdentity: uri('server'),
+          endpoint: address,
+          deadline: f.deadline,
+          request,
+        });
+        expect(result).toEqual({
+          version: 1,
+          keyRef: keyRef,
+          key: Buffer.alloc(61, 3).toString('base64'),
+        });
+        await expect(f.done).resolves.toBeUndefined();
+        expect(f.service.wrap).toHaveBeenCalledOnce();
+        expect(f.service.wrap.mock.calls[0]?.[0]).toMatchObject({
+          tenantId: tenant,
+          workloadId: workload,
+          servicePrincipal: uri('producer'),
+          role: 'producer',
+        });
+      } finally {
+        f.server.fail();
+        f.client.fail();
+        await f.done.catch(() => {});
+      }
+    },
+  );
   it('refuses release if a real server leaf expires during deferred final client health', async () => {
     const name = 'short-server';
     key(name);
@@ -612,16 +627,19 @@ describe('unmounted real TLS, owned loopback ephemeral generation only', () => {
         const address = await f.listening;
         if (!('port' in address)) throw new Error('Owned loopback required');
         if (kind === 'unfinished-handshake') {
-          socket = netConnect(address);
+          socket = netConnect({ host: address.host, port: address.port });
           socket.on('error', () => {});
-          await new Promise<void>((resolve) => socket!.once('connect', resolve));
+          await new Promise<void>((resolve, reject) => {
+            socket!.once('connect', resolve);
+            socket!.once('error', reject);
+          });
         }
         await expect(f.done).rejects.toThrow();
         expect(f.service.wrap).not.toHaveBeenCalled();
         socket?.destroy();
         await expect(
           new Promise<void>((resolve, reject) => {
-            const probe = netConnect(address);
+            const probe = netConnect({ host: address.host, port: address.port });
             probe.once('connect', () => {
               probe.destroy();
               reject(new Error('Owned listener survived'));

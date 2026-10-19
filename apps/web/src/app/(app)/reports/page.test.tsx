@@ -2,7 +2,12 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { UserRole } from '@axiom/types';
-const state = vi.hoisted(() => ({ role: 'admin' as string, internal: false, search: '' }));
+const state = vi.hoisted(() => ({
+  role: 'admin' as string,
+  internal: false,
+  search: '',
+  live: false,
+}));
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
   useSearchParams: () => new URLSearchParams(state.search),
@@ -13,6 +18,7 @@ vi.mock('@/lib/tenant-context', () => ({
     userId: '22222222-2222-4222-8222-222222222222',
     role: state.role,
     isAxiomInternal: state.internal,
+    supabase: { rpc: () => ({ abortSignal: async () => ({ data: state.live, error: null }) }) },
   }),
 }));
 import ReportsPage from './page';
@@ -23,6 +29,7 @@ beforeEach(() => {
   state.role = UserRole.ADMIN;
   state.internal = false;
   state.search = '';
+  state.live = false;
 });
 it('refuses an agent and presents no mutation or fake output to a viewer', async () => {
   state.role = UserRole.AGENT;
@@ -261,4 +268,21 @@ it('identifies the reports agent in the shared header and keeps the board workfl
   const board = labels.find((l) => l.closest('section[aria-label="Board report workflow"]'));
   expect(board?.getAttribute('data-agent')).toBe('prativedan');
   expect(board?.getAttribute('data-state')).toBe('idle');
+});
+
+it('shows the founder workspace link only after current live designation while preserving the report reader for other roles', async () => {
+  for (const role of [UserRole.OWNER, UserRole.ADMIN, UserRole.REVIEWER, UserRole.VIEWER]) {
+    state.role = role;
+    state.internal = true;
+    state.live = true;
+    const view = renderToStaticMarkup(await ReportsPage());
+    expect(view).not.toContain('href="/reports/founder-review"');
+    expect(view).toContain('Loading recorded reports');
+  }
+  state.role = UserRole.FOUNDER;
+  state.internal = true;
+  state.live = false;
+  expect(renderToStaticMarkup(await ReportsPage())).not.toContain('href="/reports/founder-review"');
+  state.live = true;
+  expect(renderToStaticMarkup(await ReportsPage())).toContain('href="/reports/founder-review"');
 });

@@ -1,3 +1,16 @@
+import { dataFlowDeclarationRoutes } from './data-flow-declarations.js';
+import { scheduledCoverageRoutes } from './scheduled-coverage.js';
+import type { StandingCoordinator } from '../services/standing-coordinator.js';
+import { standingApprovalRoutes } from './standing-approvals.js';
+import { monitoringReadScopeRoutes } from './monitoring-read-scopes.js';
+import {
+  prativedanAccountedDraftRoutes,
+  type PrativedanPrivateClient,
+} from './prativedan-accounted-drafts.js';
+import {
+  postgresqlDiscoveryRoutes,
+  type DiscoveryRequestController,
+} from './postgresql-discovery.js';
 import { mfaRecoveryRoutes } from './mfa-recovery.js';
 import { localCustodyPolicyRoutes } from './local-custody-policy.js';
 import { engagementIntakeRoutes } from './engagement-intake.js';
@@ -20,6 +33,7 @@ import type { AssessmentRequestProducer } from '../workloads/assessment-producer
 import { assessmentRoutes } from './assessment.js';
 import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
+import { catalogueVersionRoutes } from './catalogue-versions.js';
 import { catalogueReferenceRoutes } from './catalogue-references.js';
 import { publicWebsiteControlReviewRoutes } from './public-website-control-review.js';
 import { publicControlReviewSetRoutes } from './public-control-review-sets.js';
@@ -50,6 +64,7 @@ import { invokeGenericAgent } from '../services/generic-agent-invocation.js';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import {
+  ACTIVE_RUN_STALE_MS,
   IssueApprovalRequestSchema,
   ExecutePlanRequestSchema,
   type ExecutePlanRequest,
@@ -79,13 +94,13 @@ import { requireCapability } from '../middleware/authorize.js';
 import {
   APPROVABLE_PLAN_STATUSES,
   Capability,
+  ApprovedLibraryVersionSchema,
   authorize,
   describePlanStatusBlocker,
 } from '@axiom/types';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
 import { loadEnv } from '@axiom/config';
-import { LIBRARY_VERSION } from '@axiom/control-library';
 
 const env = loadEnv();
 
@@ -225,11 +240,17 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 }
 
 interface Deps {
+  prativedan?: PrativedanPrivateClient;
+  discoveryController?: DiscoveryRequestController;
   licensePublicKeyPem?: string;
   ownedSynthetic?: OwnedSyntheticRouteDeps | null;
   stagedEvidence?: StagedEvidenceRoutesDeps;
   assessmentRequests?: AssessmentRequestProducer;
   publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
+  dataFlowDeclarationsEnabled?: boolean;
+  standingCoordinatorEnabled?: boolean;
+  scheduledCoverageEnabled?: boolean;
+  standingCoordinatorStatus?: () => ReturnType<StandingCoordinator['health']>;
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
   ledger: LedgerService;
@@ -237,13 +258,33 @@ interface Deps {
   realtime: RealtimeService;
 }
 
-/** Runs still running/queued this long after starting are reported as stalled. */
-const ACTIVE_RUN_STALE_MS = 60 * 60_000;
-
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
   // Exact owned paths precede generic /plans/:id; middleware never escapes this source scope.
+  app.route(
+    '/',
+    standingApprovalRoutes({
+      mfa: deps.mfa,
+      enabled: deps.standingCoordinatorEnabled ?? false,
+      status: deps.standingCoordinatorStatus,
+    }),
+  );
+  app.route(
+    '/',
+    scheduledCoverageRoutes({
+      mfa: deps.mfa,
+      enabled: deps.scheduledCoverageEnabled ?? false,
+      available: deps.assessmentRequests?.coverageAvailableForTenant,
+    }),
+  );
   app.route('/', ownedSyntheticPlanRoutes(deps.ownedSynthetic));
+  app.route(
+    '/',
+    dataFlowDeclarationRoutes({
+      mfa: deps.mfa,
+      enabled: deps.dataFlowDeclarationsEnabled ?? false,
+    }),
+  );
   app.route('/', estateRoutes());
   app.route('/', consentRoutes());
   // Specific staged options must precede the legacy /evidence/:id route.
@@ -251,6 +292,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', evidenceRoutes());
   app.route('/', evidencePackRoutes());
   app.route('/', boardReportRoutes());
+  app.route('/', prativedanAccountedDraftRoutes({ mfa: deps.mfa, client: deps.prativedan }));
   app.route('/', dpbReportRoutes());
   app.route('/', technicalReportRoutes());
   app.route('/', w2ParityRoutes());
@@ -269,7 +311,13 @@ export function v1Routes(deps: Deps) {
   app.route('/', sudhaarReviewAdoptionRoutes({ killSwitch: deps.killSwitch }));
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
+  app.route('/', postgresqlDiscoveryRoutes(deps.discoveryController));
+  app.route(
+    '/',
+    monitoringReadScopeRoutes({ mfa: deps.mfa, controller: deps.discoveryController }),
+  );
   app.route('/', catalogueReferenceRoutes());
+  app.route('/', catalogueVersionRoutes({ mfa: deps.mfa }));
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', localCustodyPolicyRoutes({ mfa: deps.mfa }));
   app.route('/', mfaRecoveryRoutes({ mfa: deps.mfa }));
@@ -3842,6 +3890,21 @@ export function v1Routes(deps: Deps) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '')
         .slice(0, 45) || 'organization';
+    const currentCatalogue = await admin.rpc('read_current_catalogue_version');
+    const currentVersion = z
+      .object({ version: ApprovedLibraryVersionSchema })
+      .strict()
+      .safeParse(currentCatalogue.data);
+    if (currentCatalogue.error || !currentVersion.success)
+      return c.json(
+        {
+          error: {
+            code: 'current_catalogue_unavailable',
+            message: 'The approved current control library could not be verified.',
+          },
+        },
+        503,
+      );
     const { data, error } = await createHumanActionWriter().rpc('onboard_organization', {
       p_user_id: user.id,
       p_slug: `${baseSlug}-${randomUUID()}`,
@@ -3853,7 +3916,7 @@ export function v1Routes(deps: Deps) {
       p_dpo_name: input.dpo_name ?? null,
       p_dpo_email: input.dpo_email ?? null,
       p_systems: input.systems ?? [],
-      p_library_version: LIBRARY_VERSION,
+      p_library_version: currentVersion.data.version,
       p_correlation_id: randomUUID(),
     });
     if (error) {

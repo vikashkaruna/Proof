@@ -110,3 +110,16 @@ async def test_canonical_action_ids(engine):
     # Verify still works
     result = await engine.verify("t1", {"spec": spec, "signature": token.signature})
     assert result.valid is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("purpose", ["owned_synthetic_enrollment_v1", "unknown", None, 123])
+async def test_signed_foreign_purpose_cannot_authorize_same_action(engine, purpose):
+    from dataclasses import replace
+
+    token = await engine.issue("t1", "p1", ["a1"], "u1", "batch", 1, True, "2099-01-01T00:00:00Z")
+    spec = replace(token.spec, conditions={"purpose": purpose})
+    signature = await engine.sign("t1", spec)
+    result = await engine.verify("t1", {"spec": spec.to_canonical(), "signature": signature})
+    assert not result.valid
+    assert result.reason == "purpose_mismatch"

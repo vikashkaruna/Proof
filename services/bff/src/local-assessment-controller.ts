@@ -1,3 +1,4 @@
+import { requireLocalX509Material } from './workloads/local-x509-preflight.js';
 import { pathToFileURL } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
 import { z } from 'zod';
@@ -49,6 +50,8 @@ export async function prepareLocalController(args: string[], env: NodeJS.Process
     });
     await requireControllerBackend(db, config.controller.tenantId);
     const components = await composeLocalAssessmentController(config.controller, db);
+    if (args[0] === '--check')
+      await requireLocalX509Material(config.controller.keys.workload, 'client');
     return {
       mode: args[0] as '--check' | '--serve',
       serve: () =>
@@ -57,6 +60,7 @@ export async function prepareLocalController(args: string[], env: NodeJS.Process
           socketGroup: config.socket.socketGroup,
           controller: components.controller,
           scheduling: components.scheduling,
+          monitoring: components.monitoring,
         }),
     };
   } catch {

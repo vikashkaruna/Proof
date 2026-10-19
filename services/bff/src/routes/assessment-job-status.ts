@@ -1,3 +1,4 @@
+import { readScheduledCoverageOriginal } from '../services/scheduled-coverage-projection.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createSupabaseAdmin } from '@axiom/supabase';
@@ -146,7 +147,10 @@ export function assessmentJobStatusRoutes() {
         engagement.tenant_id !== tenantId
       )
         return c.json(unavailable, 503);
-      const original = await readOriginalAssessmentRequest(db, job, run);
+      const original =
+        run.metadata.request_kind === 'scheduled_coverage_reassessment_v1'
+          ? await readScheduledCoverageOriginal(db, job, run)
+          : await readOriginalAssessmentRequest(db, job, run);
       const requestLibraryVersion = original?.libraryVersion ?? engagement.library_version;
       const packet = packetRead.data ? packetSchema.parse(packetRead.data) : null;
       if (

@@ -7,10 +7,16 @@ export { categoryHints };
 export interface SqlSession {
   query(text: string, values?: readonly unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
   end(): Promise<void>;
+  /** PostgreSQL adapters force-close the owned transport and confirm its close event. */
+  abort?(): Promise<void>;
 }
 /** Opens one session for one invocation. The W4.6 credential path supplies it;
  * this adapter never sees a connection string or password. */
-export type SqlSessionFactory = (context: ConnectorInvocation) => Promise<SqlSession>;
+export type SqlSessionFactory = (
+  context: ConnectorInvocation,
+  signal?: AbortSignal,
+  operation?: 'enumerate' | 'sample',
+) => Promise<SqlSession>;
 
 export class SqlConnectorRefused extends Error {
   constructor(readonly reason: string) {

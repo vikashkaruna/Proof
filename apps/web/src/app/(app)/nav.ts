@@ -107,6 +107,15 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         phase: 'P1',
         capability: Capability.ASSESSMENT_RUN,
       },
+      {
+        route: '/datamap/flows',
+        en: 'Declared data flows',
+        hi: 'घोषित डेटा प्रवाह',
+        phase: 'P1',
+        // This metadata/history page has its own read gate. The legacy map
+        // and estate permissions and all mutation gates remain independent.
+        capability: Capability.POSTURE_READ,
+      },
     ],
   },
   {
@@ -143,10 +152,9 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         en: 'Remediation Plans',
         hi: 'सुधार योजना',
         phase: 'P3',
-        // Everyone in the approval chain: the maker drafts, the reviewer
-        // comments, the approver decides. Approval itself is gated on the
-        // buttons inside and at the BFF.
-        capability: Capability.PLAN_COMMENT,
+        // Read-only members also need a route to recorded actions, dry runs
+        // and rollback details. Mutation controls keep their own capabilities.
+        capability: Capability.PLAN_READ,
       },
       {
         route: '/approval',
@@ -241,6 +249,13 @@ export const APP_NAV_GROUPS: NavGroup[] = [
     label: 'Reporting & Proof',
     items: [
       {
+        route: '/reports/founder-review',
+        en: 'Founder report review',
+        hi: 'संस्थापक रिपोर्ट समीक्षा',
+        phase: 'P2',
+        capability: Capability.WORKBENCH_ACCESS,
+      },
+      {
         route: '/reports',
         en: 'Working Reports & Registers',
         agentRole: 'Prativedan · Clerical Drafter',
@@ -328,6 +343,7 @@ export function visibleNavGroups(
   capabilities: readonly string[],
   groups: NavGroup[] = APP_NAV_GROUPS,
   canViewClosureDossiers = false,
+  canReviewFounderReports = false,
 ): NavGroup[] {
   const held = new Set(capabilities);
   return groups
@@ -335,7 +351,9 @@ export function visibleNavGroups(
       ...group,
       items: group.items.filter(
         (i) =>
-          held.has(i.capability) && (i.route !== '/reports?tab=pramaan' || canViewClosureDossiers),
+          held.has(i.capability) &&
+          (i.route !== '/reports?tab=pramaan' || canViewClosureDossiers) &&
+          (i.route !== '/reports/founder-review' || canReviewFounderReports),
       ),
     }))
     .filter((group) => group.items.length > 0);
@@ -345,10 +363,14 @@ export function visibleNavGroups(
 export function visibleRoutes(
   capabilities: readonly string[],
   canViewClosureDossiers = false,
+  canReviewFounderReports = false,
 ): string[] {
-  return visibleNavGroups(capabilities, APP_NAV_GROUPS, canViewClosureDossiers).flatMap((g) =>
-    g.items.map((i) => i.route),
-  );
+  return visibleNavGroups(
+    capabilities,
+    APP_NAV_GROUPS,
+    canViewClosureDossiers,
+    canReviewFounderReports,
+  ).flatMap((g) => g.items.map((i) => i.route));
 }
 
 /**

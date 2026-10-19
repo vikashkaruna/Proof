@@ -7,6 +7,7 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { Capability } from '@axiom/types';
 import { createStatutoryProofWriter, createSupabaseAdmin } from '@axiom/supabase';
+import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
@@ -36,6 +37,7 @@ export function pramaanClosureRoutes(
   dependencies: { db?: EvidenceDatabase; service?: PramaanClosureService } = {},
 ) {
   const app = new Hono<{ Variables: Variables }>();
+  app.use('/dossiers/*', boundedJsonBody(8192));
   const service = () =>
     dependencies.service ??
     new PramaanClosureService(
@@ -169,6 +171,81 @@ export function pramaanClosureRoutes(
           id,
           parsed.data.operationKey,
           signal,
+        ),
+      );
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+
+  app.get('/dossiers/:id/archive/preview', async (c) => {
+    c.header('Cache-Control', 'private, no-store');
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
+    if (denied) return denied;
+    const id = z.uuid().safeParse(c.req.param('id'));
+    if (!id.success) return invalid(c);
+    try {
+      const result = await service().previewFullDossier(
+        c.get('tenantId'),
+        c.get('user').id,
+        id.data,
+        AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]),
+      );
+      c.header('Content-Type', 'application/zip');
+      c.header('X-Content-SHA256', result.sha256);
+      c.header('Content-Disposition', `attachment; filename="pramaan-review-${id.data}.zip"`);
+      return c.body(new Uint8Array(result.body));
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+  app.post('/dossiers/:id/review', async (c) => {
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
+    if (denied) return denied;
+    const id = z.uuid().safeParse(c.req.param('id'));
+    const body = z
+      .object({
+        expectedArchiveSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        expectedVersionId: z.string().min(1).max(1024),
+        note: z.string().trim().min(1).max(2000),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!id.success || !body.success) return invalid(c);
+    try {
+      return c.json(
+        await service().reviewFullDossier(
+          c.get('tenantId'),
+          c.get('user').id,
+          id.data,
+          body.data,
+          AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]),
+        ),
+      );
+    } catch (cause) {
+      return failure(c, cause);
+    }
+  });
+  app.post('/dossiers/:id/release', async (c) => {
+    const denied = requireCapability(c, Capability.REPORT_RELEASE);
+    if (denied) return denied;
+    const id = z.uuid().safeParse(c.req.param('id'));
+    const body = z
+      .object({
+        expectedArchiveSha256: z.string().regex(/^[a-f0-9]{64}$/),
+        expectedVersionId: z.string().min(1).max(1024),
+      })
+      .strict()
+      .safeParse(await c.req.json().catch(() => null));
+    if (!id.success || !body.success) return invalid(c);
+    try {
+      return c.json(
+        await service().releaseFullDossier(
+          c.get('tenantId'),
+          c.get('user').id,
+          id.data,
+          body.data,
+          AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(30_000)]),
         ),
       );
     } catch (cause) {

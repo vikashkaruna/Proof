@@ -12,6 +12,7 @@ const forms = vi.hoisted(
       path: string;
       method: string;
       body: (form: FormData) => Record<string, unknown>;
+      validateResult?: (result: unknown) => boolean;
     }[],
 );
 vi.mock('../../estate/estate-client', () => ({
@@ -195,4 +196,33 @@ it("shows each approver's scopes and offers an audited change, never for the vie
   expect(scopeForms[0]!.body(form)).toEqual({ approvalScopes: ['execute', 'rollback'] });
   form.set('scopes', '');
   expect(scopeForms[0]!.body(form)).toEqual({ approvalScopes: [] });
+});
+
+it('validates the member-scope API response by its member identity', () => {
+  render(
+    <MembersClient
+      {...base}
+      members={[
+        {
+          userId: 'member-2',
+          email: 'scope@example.invalid',
+          role: 'approver',
+          approvalScopes: [],
+          acceptedAt: null,
+        },
+      ]}
+    />,
+  );
+  const form = forms.find((entry) => entry.path.includes('/approval-scopes'))!;
+  expect(
+    form.validateResult?.({
+      data: { userId: 'member-2', approvalScopes: ['policy'], changed: true },
+    }),
+  ).toBe(true);
+  expect(
+    form.validateResult?.({
+      data: { userId: 'another-member', approvalScopes: ['policy'], changed: true },
+    }),
+  ).toBe(false);
+  expect(form.validateResult?.({ ok: true })).toBe(false);
 });

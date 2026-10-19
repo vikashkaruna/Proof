@@ -135,9 +135,62 @@ def plan(root: Path = ROOT) -> dict:
         "catalogue_registry159_suite_required",
     )
     need(
+        versions[-1] < 162 or "catalogue-current-version.test.sql" in files,
+        "catalogue_current162_suite_required",
+    )
+    need(
+        versions[-1] < 161 or "catalogue-founder-approval.test.sql" in files,
+        "catalogue_founder161_suite_required",
+    )
+    need(
         versions[-1] < 160 or "catalogue-dispatch-downstream.test.sql" in files,
         "catalogue_dispatch160_suite_required",
     )
+    for minimum, suites, code in (
+        (163, {"postgresql-sandbox-discovery.test.sql"}, "sandbox163_suite_required"),
+        (
+            164,
+            {"full-closure-lifecycle.test.sql", "full-closure-source-graph.test.sql"},
+            "closure164_suites_required",
+        ),
+        (
+            165,
+            {"postgresql-discovery-requests.test.sql"},
+            "discovery165_suite_required",
+        ),
+        (166, {"owned-postgres-target.test.sql"}, "owned_target166_suite_required"),
+        (167, {"owned-human-plans.test.sql"}, "owned_human167_suite_required"),
+        (
+            168,
+            {"owned-execution-binding.test.sql"},
+            "owned_execution168_suite_required",
+        ),
+        (
+            169,
+            {
+                "owned-deployment.test.sql",
+                "owned-deployment-enrollment.test.sql",
+                "owned-deployment-revocation.test.sql",
+            },
+            "owned_deployment169_suites_required",
+        ),
+        (173, {"standing-approval-coordinator.test.sql"}, "standing173_suite_required"),
+        (174,{"explicit-data-flow-declarations.test.sql"},"data_flow174_suite_required"),
+        (175, {"scheduled-coverage-reassessment.test.sql"}, "scheduled_coverage175_suite_required"),
+        (176, {"founder-onboarding-authority.test.sql"}, "founder_onboarding176_suite_required"),
+        (170, {"owned-effect-observations.test.sql"}, "owned_effect170_suite_required"),
+        (
+            171,
+            {"scheduled-postgresql-reads.test.sql"},
+            "scheduled_read171_suite_required",
+        ),
+        (
+            172,
+            {"prativedan-accounted-terminal.test.sql"},
+            "prativedan172_suite_required",
+        ),
+    ):
+        need(versions[-1] < minimum or suites <= set(files), code)
     return {
         "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),

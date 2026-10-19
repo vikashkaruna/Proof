@@ -25,6 +25,7 @@ from .assessment_jobs import TASK_QUEUE as ASSESSMENT_QUEUE
 from .assessment_jobs import AssessmentJobWorkflow
 from .assessment_outbox import AssessmentOutboxPump
 from .assessment_remote import RemoteAssessmentControllerActivity
+from .monitoring_reads import MonitoringReadPump
 from .workflows import TASK_QUEUE, ComplianceEngagementWorkflow
 
 log = logging.getLogger(__name__)
@@ -121,8 +122,9 @@ async def run_worker_loop(
     | RemoteAssessmentControllerActivity
     | None = None,
     outbox_pump: bool = False,
+    monitoring_reads: bool = False,
 ) -> None:
-    if outbox_pump and controller is None:
+    if (outbox_pump or monitoring_reads) and controller is None:
         raise ValueError("Outbox pickup requires private controller configuration")
     backoff = 2
     while True:
@@ -146,6 +148,8 @@ async def run_worker_loop(
                 tasks.append(
                     asyncio.create_task(AssessmentOutboxPump(client, controller).run())
                 )
+            if monitoring_reads:
+                tasks.append(asyncio.create_task(MonitoringReadPump(controller).run()))
             try:
                 await asyncio.gather(*tasks)
             finally:
@@ -168,7 +172,10 @@ def assessment_options(argv: list[str] | None = None):
     mode.add_argument("--assessment-controller-origin")
     parser.add_argument("--assessment-controller-uid", type=int)
     parser.add_argument("--assessment-outbox-pump", action="store_true")
+    parser.add_argument("--monitoring-read-pump", action="store_true")
     args = parser.parse_args(argv)
+    if args.monitoring_read_pump and not args.assessment_controller_socket:
+        parser.error("Scheduled reads require the reviewed private local controller")
     if args.assessment_outbox_pump and not (
         args.assessment_controller_socket or args.assessment_controller_origin
     ):
@@ -189,6 +196,14 @@ def assessment_options(argv: list[str] | None = None):
         else None
     )
     return controller, args.assessment_outbox_pump
+
+
+def monitoring_read_options(argv: list[str] | None = None) -> bool:
+    # Main assessment_options already rejects unknown or incompatible arguments.
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--monitoring-read-pump", action="store_true")
+    options, _remaining = parser.parse_known_args(argv)
+    return options.monitoring_read_pump
 
 
 async def main():
@@ -252,6 +267,7 @@ async def main():
             tls_config,
             controller,
             outbox_pump,
+            monitoring_read_options(),
         )
     )
 

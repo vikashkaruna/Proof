@@ -33,6 +33,39 @@ function dossierKind(type: string): string {
         : type.replace(/_/g, ' ');
 }
 
+const fullClosureErrors: Record<string, string> = {
+  released_board_source_required: 'Choose a released board report from a finalized assessment.',
+  sealed_assessment_sources_required:
+    'Seal the board and auditor dossiers from the same finalized assessment before preparing full closure.',
+  all_recorded_findings_must_be_closed:
+    'Review and close every recorded finding before preparing full closure.',
+  gap_finding_action_link_required:
+    'A closed gap has no linked remediation action. Review the finding and its completed plan before preparing full closure.',
+  closing_finding_scope_mismatch:
+    'A plan links a finding outside this engagement. Correct its scope through the approved plan workflow.',
+  retained_finding_evidence_required:
+    'Link actual retained evidence to every finding. An uploaded file name or storage address alone is insufficient.',
+  completed_plans_required:
+    'Finish all active remediation plans and their verification before preparing full closure.',
+  successful_verified_actions_required:
+    'Every plan action needs a successful execution and recorded passing verification.',
+  sealed_completed_plan_report_required:
+    'Release and seal a technical dossier for each completed plan using its current version.',
+  released_approval_proof_required:
+    'Review and release the approval proof for every execution batch before preparing full closure.',
+  reconciliation_proof_changed:
+    'The signed reconciliation or approval proof no longer matches current recorded facts. Review the execution proof before continuing.',
+  independent_founder_review_required:
+    'A different internal founder must review a pack prepared by a founder. An owner or reporting manager can prepare the pack for founder review.',
+  closure_source_changed:
+    'The engagement sources changed. Prepare a new full closure archive and review its exact version.',
+  full_closure_release_required:
+    'The founder must review, seal and release this exact full closure archive before download.',
+};
+function closureError(cause: unknown, fallback: string) {
+  return cause instanceof Error ? (fullClosureErrors[cause.message] ?? cause.message) : fallback;
+}
+
 type Build = {
   dossierId: string;
   reportId: string;
@@ -62,6 +95,7 @@ export function ClosureDossiersTab({
   const [reportOffset, setReportOffset] = useState(0);
   const [hasMoreReports, setHasMoreReports] = useState(false);
   const [reportId, setReportId] = useState('');
+  const [fullClosure, setFullClosure] = useState(false);
   const [title, setTitle] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -183,7 +217,9 @@ export function ClosureDossiersTab({
                   ? 'technical_register'
                   : report.kind === 'dpb'
                     ? 'dpb_statutory'
-                    : 'board_executive',
+                    : fullClosure
+                      ? 'full_closure'
+                      : 'board_executive',
             reportId,
             title: title.trim(),
             operationKey: prepareReportOperationKey(),
@@ -193,9 +229,7 @@ export function ClosureDossiersTab({
       refresh();
     } catch (cause) {
       setActionError(
-        cause instanceof Error
-          ? cause.message
-          : 'Dossier outcome is uncertain; refresh the recorded state.',
+        closureError(cause, 'Dossier outcome is uncertain; refresh the recorded state.'),
       );
       refresh();
     } finally {
@@ -268,13 +302,37 @@ export function ClosureDossiersTab({
     }
   }
 
-  async function download(dossier: PramaanDossier) {
+  async function fullAction(dossier: PramaanDossier, action: 'review' | 'release', note?: string) {
+    if (!dossier.archiveHash || !dossier.archiveVersionId) return;
+    setBusy(true);
+    setActionError('');
+    try {
+      await reportRequest(tenantId, `/dossiers/${dossier.id}/${action}`, {
+        body: {
+          expectedArchiveSha256: dossier.archiveHash,
+          expectedVersionId: dossier.archiveVersionId,
+          ...(action === 'review' ? { note } : {}),
+        },
+      });
+      await open(dossier.id);
+      refresh();
+    } catch (cause) {
+      setActionError(closureError(cause, 'Recorded archive action was not confirmed.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function download(dossier: PramaanDossier, preview = false) {
     if (!dossier.archiveHash || !dossier.archiveBytes) return;
     setBusy(true);
     setActionError('');
     try {
       requireArchiveVerification();
-      const response = await reportRequest(tenantId, `/dossiers/${dossier.id}/archive`);
+      const response = await reportRequest(
+        tenantId,
+        `/dossiers/${dossier.id}/archive${preview ? '/preview' : ''}`,
+      );
       const blob = await readReleasedArchive(response, dossier.archiveBytes, dossier.archiveHash);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -303,7 +361,8 @@ export function ClosureDossiersTab({
           Compliance-locked archive. Auditor dossiers do not assert independent audit or evidence
           certification. Technical dossiers repeat recorded plan claims without independently
           certifying execution or closure. DPB dossiers repeat a recorded breach and notification;
-          they do not verify regulator receipt. Full-closure dossiers remain unavailable.
+          they do not verify regulator receipt. Full closure binds completed remediation and
+          released source packs, then requires separate founder review, sealing and release.
         </p>
       </div>
       {canGenerate && (
@@ -321,6 +380,7 @@ export function ClosureDossiersTab({
             value={reportId}
             onChange={(event) => {
               setReportId(event.target.value);
+              setFullClosure(false);
               const report = reports.find((item) => item.id === event.target.value);
               if (report) setTitle(`${report.title} — closure dossier`);
             }}
@@ -340,6 +400,22 @@ export function ClosureDossiersTab({
               </option>
             ))}
           </select>
+          {reports.find((report) => report.id === reportId)?.kind === 'board' && (
+            <label className="block rounded border border-slate-200 p-3 text-sm">
+              <input
+                type="checkbox"
+                checked={fullClosure}
+                onChange={(event) => setFullClosure(event.target.checked)}
+              />{' '}
+              Prepare full closure for this engagement
+              <span className="mt-2 block text-slate-600">
+                Requires closed findings with retained evidence, completed and verified plans,
+                released approval proofs for every execution batch, and sealed board, auditor and
+                technical dossiers. Board and auditor sources must use the same assessment.
+                Preparation refuses missing or changed sources.
+              </span>
+            </label>
+          )}
           {hasMoreReports && (
             <button
               type="button"
@@ -398,7 +474,22 @@ export function ClosureDossiersTab({
             {error}
           </p>
         ) : dossiers.length === 0 && builds.length === 0 && sealed.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-600">No dossier records are visible.</p>
+          <div className="mt-4 space-y-2 text-sm text-slate-600">
+            <p>No dossier records are visible.</p>
+            <p>
+              {canGenerate
+                ? 'First request a working report from a finalized assessment, then have the internal founder review and release its retained PDF. Select that released report above to prepare a dossier archive.'
+                : canRelease
+                  ? 'A reporting manager must first prepare a dossier from a released working report. Review the archive and its retention verification before sealing.'
+                  : 'Only sealed dossiers are available to your role. Ask the assessment owner and internal founder to complete report release, archive verification and sealing.'}
+            </p>
+            <a
+              href="/reports"
+              className="inline-block font-medium text-teal-800 underline underline-offset-4"
+            >
+              Open working reports and registers
+            </a>
+          </div>
         ) : (
           <ul className="mt-4 divide-y divide-slate-100">
             {sealed.map((dossier) => (
@@ -476,10 +567,14 @@ export function ClosureDossiersTab({
         )}
       </div>
       <DossierViewerModal
+        key={selectedDossier?.id ?? 'closed'}
         dossier={selectedDossier}
         isOpen={Boolean(selectedDossier)}
         canRelease={canRelease}
         busy={busy}
+        onPreview={(dossier) => void download(dossier, true)}
+        onReview={(dossier, note) => void fullAction(dossier, 'review', note)}
+        onRelease={(dossier) => void fullAction(dossier, 'release')}
         onSeal={(dossier) => void seal(dossier)}
         onDownload={(dossier) => void download(dossier)}
         onReconcile={(dossier) => void pendingAction(dossier, false)}

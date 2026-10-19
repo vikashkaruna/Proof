@@ -136,7 +136,11 @@ beforeEach(() => {
 describe('trusted human assessment producer composition', () => {
   it('constructs a real production wrapping adapter and only exposes the request facade', async () => {
     const p = await producer();
-    expect(Object.keys(p)).toEqual(['configurationForTenant', 'request']);
+    expect(Object.keys(p)).toEqual([
+      'configurationForTenant',
+      'sourceRequirementForTenant',
+      'request',
+    ]);
     expect(p.configurationForTenant?.(T)).toBe(true);
     expect(p.configurationForTenant?.(A)).toBe(false);
     const receipt = await p.request(T.toUpperCase(), A.toUpperCase(), parsed());
@@ -714,6 +718,13 @@ describe('local custody producer', () => {
     await expect(p.request(T, A, parsed())).rejects.toThrow();
     expect(w.wrap).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+    expect(p.sourceRequirementForTenant?.(T)).toBe('public_control_review_required');
+    await expect(p.request(T, A, parsed())).rejects.toMatchObject({
+      code: 'assessment_public_control_review_required',
+    });
+    recovery.mockReturnValue({ job_id: J, run_id: R, expires_at: '2026-10-05T20:00:00Z' });
+    expect(await p.request(T, A, parsed())).toMatchObject({ job_id: J, run_id: R });
+    expect(w.wrap).not.toHaveBeenCalled();
   });
   it('refuses a local tenant whose Parikshan registration is not active', async () => {
     fake.rows('workload_identities')[0]!.status = 'revoked';

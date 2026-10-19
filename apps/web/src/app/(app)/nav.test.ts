@@ -67,6 +67,7 @@ const MENUS: Record<string, string[]> = {
     '/discovery',
     '/classification',
     '/datamap',
+    '/datamap/flows',
     '/assessment',
     '/engagements',
     '/controls',
@@ -89,6 +90,7 @@ const MENUS: Record<string, string[]> = {
     '/discovery',
     '/classification',
     '/datamap',
+    '/datamap/flows',
     '/assessment',
     '/engagements',
     '/controls',
@@ -109,10 +111,29 @@ const MENUS: Record<string, string[]> = {
     '/policies',
     '/settings',
   ],
-  [UserRole.VIEWER]: ['/dashboard', '/evidence', '/ledger', '/reports', '/portal', '/settings'],
-  [UserRole.PARTNER]: ['/dashboard', '/evidence', '/reports', '/portal', '/partner', '/settings'],
+  [UserRole.VIEWER]: [
+    '/dashboard',
+    '/datamap/flows',
+    '/plans',
+    '/evidence',
+    '/ledger',
+    '/reports',
+    '/portal',
+    '/settings',
+  ],
+  [UserRole.PARTNER]: [
+    '/dashboard',
+    '/datamap/flows',
+    '/plans',
+    '/evidence',
+    '/reports',
+    '/portal',
+    '/partner',
+    '/settings',
+  ],
   [UserRole.APPROVER]: [
     '/dashboard',
+    '/datamap/flows',
     '/plans',
     '/approval',
     '/evidence',
@@ -128,6 +149,7 @@ const MENUS: Record<string, string[]> = {
     '/discovery',
     '/classification',
     '/datamap',
+    '/datamap/flows',
     '/assessment',
     '/engagements',
     '/controls',
@@ -173,7 +195,7 @@ describe('the viewer persona', () => {
   });
 
   it('can still read evidence, the ledger, reports and their own settings', () => {
-    for (const route of ['/evidence', '/ledger', '/reports', '/settings']) {
+    for (const route of ['/plans', '/evidence', '/ledger', '/reports', '/settings']) {
       expect(routes, `viewer should see ${route}`).toContain(route);
     }
   });
@@ -381,5 +403,40 @@ describe('page guards match the menu', () => {
   it('resolves every declared route and refuses an undeclared one', () => {
     for (const route of pageRoutes) expect(routeCapability(route)).toBeTruthy();
     expect(() => routeCapability('/nowhere')).toThrow();
+  });
+});
+
+describe('declared data flow history navigation', () => {
+  it('offers the independently guarded read page without exposing legacy map access', () => {
+    for (const role of [UserRole.VIEWER, UserRole.REVIEWER])
+      expect(routesFor(role)).toContain('/datamap/flows');
+    expect(routesFor(UserRole.VIEWER)).not.toContain('/datamap');
+    expect(routesFor(UserRole.VIEWER)).not.toContain('/estate');
+    expect(routesFor(UserRole.AGENT)).not.toContain('/datamap/flows');
+    expect(visibleRoutes([])).not.toContain('/datamap/flows');
+    expect(routeCapability('/datamap/flows')).toBe(Capability.POSTURE_READ);
+    expect(
+      APP_NAV_GROUPS.find((group) => group.label === 'Discover & Classify')?.items.find(
+        (item) => item.route === '/datamap/flows',
+      )?.en,
+    ).toBe('Declared data flows');
+  });
+});
+
+describe('live-founder report workspace navigation', () => {
+  it('does not infer live designation from a founder label or any other role', () => {
+    for (const role of Object.values(UserRole)) {
+      expect(visibleRoutes(capabilitiesFor(role), true)).not.toContain('/reports/founder-review');
+    }
+    expect(visibleRoutes(capabilitiesFor(UserRole.OWNER), true, true)).not.toContain(
+      '/reports/founder-review',
+    );
+    expect(visibleRoutes([], true, true)).not.toContain('/reports/founder-review');
+  });
+  it('offers the workspace only with founder capabilities plus the separately server-verified live designation', () => {
+    expect(visibleRoutes(capabilitiesFor(UserRole.FOUNDER), true, true)).toContain(
+      '/reports/founder-review',
+    );
+    expect(routeCapability('/reports/founder-review')).toBe(Capability.WORKBENCH_ACCESS);
   });
 });

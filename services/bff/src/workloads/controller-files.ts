@@ -87,7 +87,7 @@ export async function controllerBackendCredentials(
   filename: string,
   env: NodeJS.ProcessEnv,
   tenantId: string,
-  options: { localHttp?: boolean } = {},
+  options: { localHttp?: boolean; role?: 'axiom_prativedan_controller' } = {},
 ) {
   let bytes: Buffer | undefined;
   try {
@@ -105,7 +105,7 @@ export async function controllerBackendCredentials(
           const local =
             options.localHttp === true &&
             u.protocol === 'http:' &&
-            (['127.0.0.1', 'localhost'].includes(u.hostname) ||
+            (['127.0.0.1', 'localhost', 'host.docker.internal'].includes(u.hostname) ||
               /^[a-z0-9][a-z0-9_-]{0,62}$/.test(u.hostname));
           return (
             (u.protocol === 'https:' || local) && !u.username && !u.password && !u.search && !u.hash
@@ -128,7 +128,7 @@ export async function controllerBackendCredentials(
     if (decodeJwt(credential.apiKey).role !== 'anon') throw new Error();
     const claims = z
       .object({
-        role: z.literal('axiom_assessment_controller'),
+        role: z.literal(options.role ?? 'axiom_assessment_controller'),
         sub: z.uuid(),
         tenant_id: z.literal(z.uuid().parse(tenantId).toLowerCase()),
         iat: z.number().int().nonnegative(),

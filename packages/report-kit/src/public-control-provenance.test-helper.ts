@@ -2,8 +2,8 @@
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '@axiom/ledger';
 import {
-  buildLibrarySeed,
-  PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT,
+  buildLibrarySeedForVersion,
+  publicControlCatalogueManifestText,
   publicControlCatalogueV2Manifest,
 } from '@axiom/control-library';
 import {
@@ -24,9 +24,13 @@ export const ids = {
   check: '99999999-9999-4999-8999-999999999999',
   report: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 };
-export function publicReportFixture(kind: 'board' | 'auditor' = 'board') {
-  const seed = buildLibrarySeed(),
-    manifest = publicControlCatalogueV2Manifest();
+export function publicReportFixture(
+  kind: 'board' | 'auditor' = 'board',
+  libraryVersion: '0.1.1' | '0.2.0' = '0.1.1',
+) {
+  const seed = buildLibrarySeedForVersion(libraryVersion),
+    manifest = publicControlCatalogueV2Manifest(libraryVersion),
+    manifestText = publicControlCatalogueManifestText(libraryVersion);
   const date = '2026-10-16T00:00:00Z';
   const payload = {
     version: 2,
@@ -96,9 +100,9 @@ export function publicReportFixture(kind: 'board' | 'auditor' = 'board') {
     expectedPreviousReviewId: null,
     expectedSource: {
       payloadSha256: sha(payloadText),
-      catalogueManifestSha256: sha(PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT),
+      catalogueManifestSha256: sha(manifestText),
       mappingVersion: 'public-evidence-1',
-      libraryVersion: '0.1.1',
+      libraryVersion,
       questionnaireDigest: sha(canonicalJson(questionnaire)),
     },
     answers,
@@ -136,7 +140,7 @@ export function publicReportFixture(kind: 'board' | 'auditor' = 'board') {
     snapshotText = canonicalJson(snapshot),
     controlsText = JSON.stringify(seed.controls);
   const result = {
-    library_version: '0.1.1',
+    library_version: libraryVersion,
     posture_score: 30,
     estimated_exposure_inr: 12345,
     findings: seed.controls.map((c) => ({
@@ -147,7 +151,7 @@ export function publicReportFixture(kind: 'board' | 'auditor' = 'board') {
     })),
     questionnaire_provenance: {
       version: 1,
-      source_library_version: '0.1.1',
+      source_library_version: libraryVersion,
       source_library_digest: sha(controlsText),
       estimates: 'provisional',
       review_required: true,
@@ -175,7 +179,7 @@ export function publicReportFixture(kind: 'board' | 'auditor' = 'board') {
   const inputText = canonicalJson({
     tenant_id: ids.tenant,
     engagement_id: ids.engagement,
-    library_version: '0.1.1',
+    library_version: libraryVersion,
     answers: normalizedAnswers,
     sdf_self_attested: null,
     processes_children: null,
@@ -245,11 +249,11 @@ export function publicReportFixture(kind: 'board' | 'auditor' = 'board') {
       capture_receipt: { id: '11', entry_hash: 'a'.repeat(64) },
     },
     catalogue: {
-      library_version: '0.1.1',
+      library_version: libraryVersion,
       questionnaire_digest: request.expectedSource.questionnaireDigest,
       mapping_version: 'public-evidence-1',
-      manifest_text: PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT,
-      manifest_sha256: sha(PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT),
+      manifest_text: manifestText,
+      manifest_sha256: sha(manifestText),
     },
     declarations_verified: false,
     evidence_verified: false,
@@ -264,7 +268,7 @@ export function publicReportFixture(kind: 'board' | 'auditor' = 'board') {
     tenant_id: ids.tenant,
     engagement_id: ids.engagement,
     assessment_run_id: ids.run,
-    library_version: '0.1.1',
+    library_version: libraryVersion,
     controls_text: controlsText,
     controls_sha256: sha(controlsText),
     result_text: resultText,
@@ -286,7 +290,7 @@ export function publicReportFixture(kind: 'board' | 'auditor' = 'board') {
       tenantId: ids.tenant,
       engagementId: ids.engagement,
       assessmentRunId: ids.run,
-      libraryVersion: '0.1.1',
+      libraryVersion,
       controlsText,
       resultText,
     },

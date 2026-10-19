@@ -56,7 +56,7 @@ describe('Supabase deployed-client boundaries', () => {
     expect(mocks.createClient).not.toHaveBeenCalled();
   });
 
-  it('passes the validated session-cookie name to the SSR client', async () => {
+  it('keeps the configured SDK namespace despite another project session cookie', async () => {
     const set = vi.fn();
     const cookies = [{ name: 'sb-project-auth-token.0', value: 'part-one' }];
     mocks.cookies.mockResolvedValue({ getAll: () => cookies, get: () => undefined, set });
@@ -64,13 +64,13 @@ describe('Supabase deployed-client boundaries', () => {
     expect(await createSupabaseServerClient()).toMatchObject({ marker: 'real-session' });
     const [url, key, options] = mocks.createServerClient.mock.calls[0]!;
     expect([url, key]).toEqual(['http://supabase.local', 'public-key']);
-    expect(options.cookieOptions).toEqual({ name: 'sb-project-auth-token' });
+    expect(options.cookieOptions).toBeUndefined();
     expect(options.cookies.getAll()).toEqual(cookies);
     options.cookies.setAll([{ name: 'new-session', value: 'new', options: { httpOnly: true } }]);
     expect(set).toHaveBeenCalledWith('new-session', 'new', { httpOnly: true });
   });
 
-  it('ignores signup flow verifiers when selecting the real session cookie', async () => {
+  it('does not let signup flow verifiers or foreign sessions select the auth namespace', async () => {
     const cookies = [
       { name: 'sb-project-auth-token-flow-abc-code-verifier', value: 'verifier' },
       { name: 'sb-project-auth-token-code-verifier', value: 'verifier' },
@@ -79,9 +79,7 @@ describe('Supabase deployed-client boundaries', () => {
     mocks.cookies.mockResolvedValue({ getAll: () => cookies, get: () => undefined, set: vi.fn() });
     const { createSupabaseServerClient } = await import('./server');
     await createSupabaseServerClient();
-    expect(mocks.createServerClient.mock.calls[0]![2].cookieOptions).toEqual({
-      name: 'sb-project-auth-token',
-    });
+    expect(mocks.createServerClient.mock.calls[0]![2].cookieOptions).toBeUndefined();
   });
 
   it('does not use the fixture after an explicit local logout and tolerates read-only cookies', async () => {

@@ -195,3 +195,12 @@ describe('frozen public review report provenance', () => {
     expect(appendix).toEqual(original);
   });
 });
+
+it('verifies corrected-version source rows and manifest without legacy substitution', () => {
+  const { human, scope } = publicReportFixture('board', '0.2.0');
+  expect(() => verifyFrozenHumanControlReview(human, scope)).not.toThrow();
+  expect(human.catalogue.library_version).toBe('0.2.0');
+  expect(human.catalogue.manifest_sha256).toBe(
+    '3bfc2044ceaab0275caf528c932a2a0a5f314fab776c03b51037a78ca812437e',
+  );
+});

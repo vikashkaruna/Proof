@@ -4,11 +4,17 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import ClientPortalPage from './page';
 
 const state = vi.hoisted(() => ({
+  basis: 'recorded_assessment' as 'recorded_assessment' | 'scheduled_coverage' | 'unavailable',
   requestedTenant: '' as string | undefined,
   calls: [] as Array<[string, string, unknown]>,
   data: {} as Record<string, unknown>,
   errors: {} as Record<string, Error | null>,
   snapshot: null as unknown,
+}));
+vi.mock('@/lib/assessment-basis', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/assessment-basis')>()),
+  readAssessmentBases: async (_db: unknown, _tenant: string, ids: string[]) =>
+    new Map([...ids, ''].map((id) => [id, state.basis])),
 }));
 vi.mock('@/lib/tenant-context', () => ({
   requireTenantContext: async (requested?: string) => {
@@ -48,6 +54,7 @@ vi.mock('./portal-client', () => ({
   PortalClient: (props: unknown) => <pre>{JSON.stringify(props)}</pre>,
 }));
 beforeEach(() => {
+  state.basis = 'recorded_assessment';
   state.requestedTenant = '';
   state.calls = [];
   state.data = {};
@@ -117,4 +124,32 @@ it('reads the exact saved engagement within the tenant and preserves its source 
   expect(view).toContain('&quot;postureScore&quot;:0.7');
   expect(view).toContain('&quot;estimatedExposureInr&quot;:0');
   expect(view).toContain('&quot;assessmentUnavailable&quot;:false');
+});
+
+for (const basis of ['scheduled_coverage', 'unavailable'] as const) {
+  it(`withholds both portal metrics for ${basis} server provenance`, async () => {
+    state.basis = basis;
+    state.snapshot = {
+      engagement: { id: 'eng-1', title: 'Technical assessment', estimatedExposureInr: 1234567 },
+      summary: { pass: 0, partial: 0, fail: 0, unassessed: 1 },
+      controls: [],
+    };
+    state.data.engagements = { posture_score: 0.93, started_at: '2026-10-01' };
+    const view = renderToStaticMarkup(await ClientPortalPage());
+    expect(view).toContain('&quot;postureScore&quot;:null');
+    expect(view).toContain('&quot;estimatedExposureInr&quot;:null');
+    expect(view).not.toContain('1234567');
+  });
+}
+it('keeps trusted scheduled snapshot redacted even if auxiliary provenance says ordinary', async () => {
+  state.snapshot = {
+    engagement: { id: 'eng-1', title: 'Technical assessment', estimatedExposureInr: 1234567 },
+    scheduledCoverage: { basis: 'technical_provenance_only' },
+    summary: { pass: 0, partial: 0, fail: 0, unassessed: 1 },
+    controls: [],
+  };
+  state.data.engagements = { posture_score: 0.93 };
+  const view = renderToStaticMarkup(await ClientPortalPage());
+  expect(view).toContain('&quot;postureScore&quot;:null');
+  expect(view).toContain('&quot;estimatedExposureInr&quot;:null');
 });

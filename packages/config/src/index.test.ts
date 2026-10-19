@@ -476,3 +476,109 @@ it.each(['APPROVAL_SIGNING_KEY', 'MODEL_GATEWAY_API_KEY'])(
     ).toThrow(/AXIOM_PLANNING_SOURCE_SIGNING_KEY/);
   },
 );
+
+describe('standing coordinator deployment admission', () => {
+  const base = {
+    NODE_ENV: 'test',
+    SUPABASE_URL: 'http://localhost:54321',
+    SUPABASE_ANON_KEY: 'a'.repeat(40),
+    SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+  };
+  it('is unavailable by default', () => {
+    resetEnvCache();
+    expect(loadEnv(base).AXIOM_STANDING_POLICY_COORDINATOR_ENABLED).toBe('false');
+  });
+  it.each(['local', 'test'])('requires explicit strict %s setting', (ENVIRONMENT) => {
+    resetEnvCache();
+    expect(
+      loadEnv({
+        ...base,
+        ENVIRONMENT,
+        AXIOM_AUTH_MODE: 'strict',
+        AXIOM_STANDING_POLICY_COORDINATOR_ENABLED: 'true',
+      }).AXIOM_STANDING_POLICY_COORDINATOR_ENABLED,
+    ).toBe('true');
+  });
+  it.each(['production', 'preprod', 'staging', 'onprem', 'development'])(
+    'refuses enabled outside explicit local/test: %s',
+    (ENVIRONMENT) => {
+      resetEnvCache();
+      expect(() =>
+        loadEnv({ ...base, ENVIRONMENT, AXIOM_STANDING_POLICY_COORDINATOR_ENABLED: 'true' }),
+      ).toThrow(/AXIOM_STANDING_POLICY_COORDINATOR_ENABLED/);
+    },
+  );
+  it('refuses auth bypass even on a local deployment', () => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({
+        ...base,
+        ENVIRONMENT: 'local',
+        AXIOM_AUTH_MODE: 'e2e-bypass',
+        AXIOM_STANDING_POLICY_COORDINATOR_ENABLED: 'true',
+      }),
+    ).toThrow(/AXIOM_STANDING_POLICY_COORDINATOR_ENABLED/);
+  });
+});
+
+it('keeps explicit data-flow declarations off until trusted server configuration', () => {
+  const base = {
+    NODE_ENV: 'test',
+    SUPABASE_URL: 'http://localhost:54321',
+    SUPABASE_ANON_KEY: 'a'.repeat(40),
+    SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+  };
+  resetEnvCache();
+  expect(loadEnv(base).AXIOM_DATA_FLOW_DECLARATIONS_ENABLED).toBe('false');
+  resetEnvCache();
+  expect(
+    loadEnv({ ...base, AXIOM_DATA_FLOW_DECLARATIONS_ENABLED: 'true' })
+      .AXIOM_DATA_FLOW_DECLARATIONS_ENABLED,
+  ).toBe('true');
+  resetEnvCache();
+  expect(() => loadEnv({ ...base, AXIOM_DATA_FLOW_DECLARATIONS_ENABLED: 'yes' })).toThrow();
+});
+
+describe('scheduled coverage deployment admission', () => {
+  const base = {
+    NODE_ENV: 'test',
+    SUPABASE_URL: 'http://localhost:54321',
+    SUPABASE_ANON_KEY: 'a'.repeat(40),
+    SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+  };
+  it('is unavailable by default', () => {
+    resetEnvCache();
+    expect(loadEnv(base).AXIOM_SCHEDULED_COVERAGE_ENABLED).toBe('false');
+  });
+  it.each(['local', 'test'])('requires explicit strict %s setting', (ENVIRONMENT) => {
+    resetEnvCache();
+    expect(
+      loadEnv({
+        ...base,
+        ENVIRONMENT,
+        AXIOM_AUTH_MODE: 'strict',
+        AXIOM_SCHEDULED_COVERAGE_ENABLED: 'true',
+      }).AXIOM_SCHEDULED_COVERAGE_ENABLED,
+    ).toBe('true');
+  });
+  it.each(['production', 'preprod', 'staging', 'onprem', 'development'])(
+    'refuses enabled outside explicit local/test: %s',
+    (ENVIRONMENT) => {
+      resetEnvCache();
+      expect(() =>
+        loadEnv({ ...base, ENVIRONMENT, AXIOM_SCHEDULED_COVERAGE_ENABLED: 'true' }),
+      ).toThrow(/AXIOM_SCHEDULED_COVERAGE_ENABLED/);
+    },
+  );
+  it('refuses auth bypass even on a local deployment', () => {
+    resetEnvCache();
+    expect(() =>
+      loadEnv({
+        ...base,
+        ENVIRONMENT: 'local',
+        AXIOM_AUTH_MODE: 'e2e-bypass',
+        AXIOM_SCHEDULED_COVERAGE_ENABLED: 'true',
+      }),
+    ).toThrow(/AXIOM_SCHEDULED_COVERAGE_ENABLED/);
+  });
+});

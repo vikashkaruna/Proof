@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { AgentName } from './enums';
 import { sudhaarInputSchema, sudhaarProposalSchema } from './sudhaar-proposal';
 
+/** Running/queued rows older than one hour are stale, rather than proof of live activity. */
+export const ACTIVE_RUN_STALE_MS = 60 * 60_000;
+
 /**
  * Per-agent contracts. Each agent declares:
  *   - Its inputs (typed)

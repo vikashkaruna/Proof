@@ -6,10 +6,9 @@
  * unknown version is refused, never substituted.
  *
  * DEFAULT_LIBRARY_VERSION is the version NEW assessments use. It stays 0.1.1:
- * the public-evidence manifest, its SQL validators (migrations 0134–0147) and the
- * report-kit verifiers are pinned to 0.1.1 bytes, so switching the default
- * before those paths dispatch by version would refuse every new public-source
- * assessment. 0.2.0 is a loadable, unpublished candidate.
+ * startup never changes it. Explicit operator publication and recorded founder
+ * approval are required before 0.2.0 can be used. Runtime dispatch resolves the
+ * version retained by the assessment and the immutable database approval registry.
  */
 import type { Control } from './types';
 import {

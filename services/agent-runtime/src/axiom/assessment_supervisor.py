@@ -97,10 +97,15 @@ def cleanup(child: subprocess.Popen[bytes], seconds: float = 3) -> bool:
 
 
 def supervise(
-    command: Sequence[str] = WORKER, seconds: float = MAX_SECONDS
+    command: Sequence[str] = WORKER, seconds: float = MAX_SECONDS, *, worker_uid: int = WORKER_UID
 ) -> tuple[int, SupervisorReport]:
     """The command override is for trusted process-tree tests, never CLI input."""
-    if sys.platform != "linux" or os.geteuid() != 0 or not 0 < seconds <= MAX_SECONDS:
+    if (
+        sys.platform != "linux"
+        or os.geteuid() != 0
+        or not 0 < seconds <= MAX_SECONDS
+        or worker_uid not in (20003, 20004, 20005, 20006, 20107)
+    ):
         raise RuntimeError("Supervisor confinement unavailable")
     if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:  # CHILD_SUBREAPER
         raise RuntimeError("Supervisor confinement unavailable")
@@ -120,8 +125,8 @@ def supervise(
             cwd="/worker",
             close_fds=True,
             start_new_session=True,
-            user=WORKER_UID,
-            group=WORKER_UID,
+            user=worker_uid,
+            group=worker_uid,
             extra_groups=[],
             umask=0o077,
             env={
@@ -133,7 +138,7 @@ def supervise(
         )
         try:
             code = child.wait(timeout=seconds)
-        except (subprocess.TimeoutExpired, InterruptedError):
+        except subprocess.TimeoutExpired, InterruptedError:
             timed_out = True
     finally:
         for sig in previous:
@@ -145,7 +150,11 @@ def supervise(
                 cleaned = False
         for sig, handler in previous.items():
             signal.signal(sig, handler)
-    result: SupervisorReport = {"worker_exit": code, "timed_out": timed_out, "cleanup_confirmed": cleaned}
+    result: SupervisorReport = {
+        "worker_exit": code,
+        "timed_out": timed_out,
+        "cleanup_confirmed": cleaned,
+    }
     return (70 if not cleaned else 124 if timed_out else 0 if code == 0 else 1), result
 
 

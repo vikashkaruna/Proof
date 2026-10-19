@@ -4,6 +4,7 @@ import { UserRole } from '@axiom/types';
 import { randomUUID } from 'node:crypto';
 import { pramaanClosureRoutes } from './pramaan-closure.js';
 import { packFixture } from '../test/evidence-pack-fixture.js';
+import { abortableResult } from '../test/abortable-result.js';
 import { tenant } from '../test/evidence-fixture.js';
 import type { Variables } from '../types.js';
 
@@ -83,7 +84,7 @@ describe('Pramaan closure fail-closed HTTP routes', () => {
     expect(viewer.status).toBe(403);
   });
 
-  it('denies a viewer and refuses unsupported dossier types before any mutating RPC', async () => {
+  it('denies a viewer and refuses missing authoritative closure sources before mutation', async () => {
     const engagementId = randomUUID();
     const body = JSON.stringify({
       dossierType: 'full_closure',
@@ -91,8 +92,14 @@ describe('Pramaan closure fail-closed HTTP routes', () => {
       reportId: randomUUID(),
       operationKey: randomUUID(),
     });
-    fixture.db.rpc = (() => {
-      throw new Error('unsupported synthesis tried a mutating RPC');
+    fixture.db.rpc = ((fn: string) => {
+      expect(fn).toBe('read_full_closure_source');
+      return abortableResult(
+        Promise.resolve({
+          data: null,
+          error: { code: '23514', message: 'released_board_source_required' },
+        }),
+      );
     }) as never;
     const viewer = await app(fixture.viewer, UserRole.VIEWER).request(
       `/v1/engagements/${engagementId}/closure/pramaan`,
@@ -106,8 +113,9 @@ describe('Pramaan closure fail-closed HTTP routes', () => {
     });
     expect(manager.status).toBe(409);
     expect(((await manager.json()) as { error: { code: string } }).error.code).toBe(
-      'source_bound_dossier_required',
+      'released_board_source_required',
     );
+    expect(fixture.base.rows('pramaan_full_builds')).toHaveLength(0);
   });
 
   it('refuses founder sealing without source and vault receipts before any RPC', async () => {
@@ -169,7 +177,21 @@ describe('Pramaan closure fail-closed HTTP routes', () => {
   });
 
   it('lists only sealed dossiers, read-only and without sealer identity, to a member viewer', async () => {
-    const sealed = historicalDossier();
+    const hiddenFull = historicalDossier();
+    const sealed = randomUUID();
+    fixture.base.rows('pramaan_dossiers').push({
+      ...fixture.base.rows('pramaan_dossiers')[0]!,
+      id: sealed,
+      dossier_type: 'board_executive',
+    });
+    fixture.db.rpc = ((fn: string) => {
+      expect(fn).toBe('read_sealed_dossier_summaries');
+      const rows = fixture.base
+        .rows('pramaan_dossiers')
+        .filter((row) => row.status === 'sealed' && row.id !== hiddenFull)
+        .map((row) => ({ ...row, sealed_at: null }));
+      return abortableResult(Promise.resolve({ data: { rows, total: rows.length }, error: null }));
+    }) as never;
     fixture.base.rows('pramaan_dossiers').push({
       id: randomUUID(),
       tenant_id: tenant,
@@ -205,5 +227,57 @@ describe('Pramaan closure fail-closed HTTP routes', () => {
     historicalDossier();
     const outsider = await app(randomUUID(), UserRole.VIEWER).request('/v1/dossiers/sealed');
     expect(outsider.status).toBe(403);
+  });
+});
+
+describe('full closure review and release HTTP boundary', () => {
+  it.each(['review', 'release'])(
+    'requires founder authority and strict exact-version payload for %s',
+    async (action) => {
+      const id = randomUUID(),
+        body = {
+          expectedArchiveSha256: 'a'.repeat(64),
+          expectedVersionId: 'exact-version',
+          ...(action === 'review' ? { note: 'Reviewed exact archive' } : {}),
+        };
+      for (const [user, role] of [
+        [fixture.owner, UserRole.OWNER],
+        [fixture.viewer, UserRole.VIEWER],
+      ] as const) {
+        const denied = await app(user, role).request(`/v1/dossiers/${id}/${action}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        expect(denied.status).toBe(403);
+      }
+      const invalid = await app(fixture.founder, UserRole.FOUNDER).request(
+        `/v1/dossiers/${id}/${action}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...body, arbitrary: true }),
+        },
+      );
+      expect(invalid.status).toBe(400);
+      const missing = await app(fixture.founder, UserRole.FOUNDER).request(
+        `/v1/dossiers/${id}/${action}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      );
+      expect(missing.status).toBe(409);
+      expect(fixture.base.rows('pramaan_full_reviews')).toHaveLength(0);
+      expect(fixture.base.rows('pramaan_full_releases')).toHaveLength(0);
+    },
+  );
+  it('refuses review archive previews to viewers and missing retained archives to founders', async () => {
+    const path = `/v1/dossiers/${randomUUID()}/archive/preview`;
+    expect((await app(fixture.viewer, UserRole.VIEWER).request(path)).status).toBe(403);
+    const absent = await app(fixture.founder, UserRole.FOUNDER).request(path);
+    expect(absent.status).toBe(409);
+    expect(absent.headers.get('cache-control')).toBe('private, no-store');
   });
 });

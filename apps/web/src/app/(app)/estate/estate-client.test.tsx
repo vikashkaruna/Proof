@@ -1046,3 +1046,34 @@ it('falls back safely when a refused response contains a non-string error messag
   expect(fetcher).toHaveBeenCalledOnce();
   expect(onSuccess).not.toHaveBeenCalled();
 });
+
+it('accepts an explicitly validated operation result without an estate record id', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ data: { userId: 'member-1', approvalScopes: ['policy'] } }),
+      ),
+  );
+  render(
+    <MutationForm
+      tenantId="tenant-1"
+      path="/tenant/members/member-1/approval-scopes"
+      method="PATCH"
+      body={() => ({ approvalScopes: ['policy'] })}
+      label="Save member"
+      validateResult={(result) =>
+        typeof result === 'object' &&
+        result !== null &&
+        'data' in result &&
+        JSON.stringify(result.data).includes('member-1')
+      }
+    >
+      <span>Scope</span>
+    </MutationForm>,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Save member' }));
+  await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+  expect(screen.getByText('Saved.')).toBeTruthy();
+});

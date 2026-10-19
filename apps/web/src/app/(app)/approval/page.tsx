@@ -29,6 +29,8 @@ export default async function ApprovalPage() {
     .eq('approval_status', 'awaiting_approval')
     .order('sequence', { ascending: true });
 
+  const visibleActions = actions?.filter((action) => !scoped || inScope(action.action_type));
+
   return (
     <section className="w-full min-w-0 space-y-4" aria-label="Approval queue">
       <PageHeader
@@ -36,15 +38,25 @@ export default async function ApprovalPage() {
         title="Approval Queue"
         description="Recorded actions awaiting human review. Open the source plan to inspect the dry-run, rollback, scope, and approval authority before taking action."
       />
+      {['owner', 'admin', 'approver', 'founder'].includes(role) && (
+        <Link href="/approvals/standing" className="text-sm font-medium text-teal-700 underline">
+          Review standing approval delegations
+        </Link>
+      )}
+      <p className="text-sm text-slate-600">
+        Select an action, inspect its recorded dry-run and rollback details, then approve the
+        eligible actions in the source plan with your authenticator. Approval records your decision;
+        execution is a separate authorised step. Completed decisions leave this queue.
+      </p>
       {error || !actions ? (
         <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">
           Approval actions are unavailable. No approval status can be inferred.
         </p>
-      ) : actions.length === 0 ? (
-        <DataPlaceholder title="No recorded actions await approval." />
+      ) : visibleActions?.length === 0 ? (
+        <DataPlaceholder title="No recorded actions await approval within your scope." />
       ) : (
         <ul className="space-y-3">
-          {actions.map((action) => (
+          {visibleActions?.map((action) => (
             <li key={action.id} className="rounded-lg border border-slate-200 bg-white p-4">
               <h2 className="font-medium text-[#1E2A4A]">
                 {action.description || action.action_type || action.id}
@@ -69,7 +81,7 @@ export default async function ApprovalPage() {
                 href={`/plans/${action.plan_id}`}
                 className="mt-3 inline-block rounded-md bg-[#1E2A4A] px-3 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-teal-500"
               >
-                Inspect source plan
+                Review and approve in source plan
               </Link>
             </li>
           ))}

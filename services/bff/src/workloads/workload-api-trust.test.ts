@@ -204,3 +204,126 @@ it.each(['spiffe://local.test/agent/parikshan\n', 'spiffe://local.test\n/agent/p
     expect(() => parseWorkloadSpiffeId(value)).toThrow();
   },
 );
+
+function permutations<T>(values: T[]): T[][] {
+  return values.length === 0
+    ? [[]]
+    : values.flatMap((value, index) =>
+        permutations(values.filter((_, selected) => selected !== index)).map((rest) => [
+          value,
+          ...rest,
+        ]),
+      );
+}
+const fourKeys = [
+  { ...keys.keys[0]!, alg: 'ES256', key_ops: ['verify'] },
+  ...Array.from({ length: 3 }, (_, index) => ({
+    ...generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).publicKey.export({ format: 'jwk' }),
+    kid: `additional-${index}`,
+    use: 'jwt-svid',
+    alg: 'ES256',
+    key_ops: ['verify'],
+  })),
+];
+const fourOrders = permutations(fourKeys);
+const permutedBundle = (index: number): BundleResponse => ({
+  bundles: {
+    [`spiffe://${domain}`]: Buffer.from(
+      JSON.stringify(
+        {
+          keys: fourOrders[index % fourOrders.length]!.map((key) =>
+            index % 2 ? Object.fromEntries(Object.entries(key).reverse()) : key,
+          ),
+        },
+        null,
+        index % 3,
+      ),
+    ),
+  },
+});
+it('keeps all 24 permutations of the same four complete public keys current across field order and whitespace', async () => {
+  const f = await fixture();
+  f.change(permutedBundle(0));
+  const initial = await f.source.load(domain);
+  expect(initial).not.toBeNull();
+  for (let index = 1; index <= fourOrders.length; index++) {
+    f.change(permutedBundle(index));
+    expect(await f.source.stillCurrent(domain, initial!.revision)).toBe(true);
+  }
+});
+it('verifies actual signatures while SPIRE changes bundle serialization on every fetch', async () => {
+  let reads = 0;
+  const f = await fixture((call) => call.write(permutedBundle(reads++)));
+  const token = await new SignJWT({})
+    .setProtectedHeader({ alg: 'ES256', kid: 'one', typ: 'JWT' })
+    .setSubject(`spiffe://${domain}/controller/assessment`)
+    .setAudience('axiom-controller-startup')
+    .setIssuedAt()
+    .setExpirationTime('1m')
+    .sign(pair.privateKey);
+  const verifier = new JwtSvidVerifier(
+    { audience: 'axiom-controller-startup', trustDomains: [domain], maxLifetimeSeconds: 300 },
+    f.source,
+  );
+  for (let index = 0; index < 12; index++)
+    expect((await verifier.verify(token)).spiffeId).toBe(
+      `spiffe://${domain}/controller/assessment`,
+    );
+  expect(reads).toBe(24);
+});
+it.each([
+  ['removed key', fourKeys.slice(1)],
+  ['new key', [...fourKeys, { ...fourKeys[0]!, kid: 'new-key' }]],
+  ['changed material', fourKeys.map((key, index) => (index ? key : { ...key, x: fourKeys[1]!.x }))],
+  ['changed kid', fourKeys.map((key, index) => (index ? key : { ...key, kid: 'changed' }))],
+  ['changed use', fourKeys.map((key, index) => (index ? key : { ...key, use: 'sig' }))],
+  ['changed algorithm', fourKeys.map((key, index) => (index ? key : { ...key, alg: 'ES384' }))],
+  [
+    'removed metadata',
+    fourKeys.map((key, index) =>
+      index
+        ? key
+        : Object.fromEntries(Object.entries(key).filter(([field]) => field !== 'key_ops')),
+    ),
+  ],
+  ['identical duplicate multiplicity', [...fourKeys, fourKeys[0]!]],
+])('invalidates %s despite otherwise equivalent serialization', async (_label, changed) => {
+  const f = await fixture();
+  f.change(permutedBundle(0));
+  const original = await f.source.load(domain);
+  f.change({ bundles: { [`spiffe://${domain}`]: encode({ keys: changed }) } });
+  const current = await f.source.load(domain);
+  expect(current).not.toBeNull();
+  expect(current!.revision).not.toBe(original!.revision);
+  expect(await f.source.stillCurrent(domain, original!.revision)).toBe(false);
+});
+it('preserves identical duplicate entries without deduplicating or changing their count', async () => {
+  const f = await fixture();
+  const duplicate = [fourKeys[0]!, fourKeys[0]!, fourKeys[1]!];
+  f.change({ bundles: { [`spiffe://${domain}`]: encode({ keys: duplicate }) } });
+  const initial = await f.source.load(domain);
+  expect(initial?.jwks).toEqual({ keys: duplicate });
+  f.change({ bundles: { [`spiffe://${domain}`]: encode({ keys: [...duplicate].reverse() }) } });
+  expect(await f.source.stillCurrent(domain, initial!.revision)).toBe(true);
+});
+it.each([
+  { ...fourKeys[1]!, kid: 'one' },
+  { ...fourKeys[0]!, use: 'sig' },
+  { ...fourKeys[0]!, alg: 'ES384' },
+])(
+  'refuses conflicting duplicate kid metadata or material without trusting a partial set',
+  async (conflict) => {
+    const f = await fixture();
+    f.change({ bundles: { [`spiffe://${domain}`]: encode({ keys: [fourKeys[0]!, conflict] }) } });
+    expect(await f.source.load(domain)).toBeNull();
+  },
+);
+it.each([
+  { keys: fourKeys, issuer: 'unexpected metadata' },
+  { keys: [{ ...fourKeys[0]!, unknown: true }] },
+  { keys: [{ ...fourKeys[0]!, key_ops: ['sign'] }] },
+])('retains strict rejection of unsupported top-level and public-key metadata', async (value) => {
+  const f = await fixture();
+  f.change({ bundles: { [`spiffe://${domain}`]: encode(value) } });
+  expect(await f.source.load(domain)).toBeNull();
+});

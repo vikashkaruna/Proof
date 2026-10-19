@@ -66,7 +66,7 @@ beforeEach(() => {
 it('shows empty approval and plan lists without demo actions or validated rollback claims', async () => {
   const approval = renderToStaticMarkup(await ApprovalPage());
   const plans = renderToStaticMarkup(await PlansPage());
-  expect(approval).toContain('No recorded actions await approval.');
+  expect(approval).toContain('No recorded actions await approval within your scope.');
   expect(plans).toContain('No remediation plans recorded for this tenant.');
   for (const fiction of [
     '1,840',
@@ -119,7 +119,7 @@ it('renders the shared module context line with the approval module id', async (
   expect(view).not.toMatch(/<h1[^>]*>[^<]*अनुमोदन/);
 });
 
-it('admits a scoped approver and marks each action in or out of scope', async () => {
+it('admits a scoped approver and offers only actions within their scope', async () => {
   state.scopes = ['identity.deprovision'];
   state.actions = {
     data: [
@@ -142,7 +142,8 @@ it('admits a scoped approver and marks each action in or out of scope', async ()
   };
   const html = renderToStaticMarkup(await ApprovalPage());
   expect(html).toContain('Within your approval scope (identity.deprovision)');
-  expect(html).toContain('Outside your approval scope (data-deletion) — view only');
+  expect(html).not.toContain('Delete records');
+  expect(html).not.toContain('Outside your approval scope');
 });
 
 it('shows no scope labels to an unscoped approver', async () => {

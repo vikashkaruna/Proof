@@ -354,7 +354,31 @@ function TenantReportsClient(access: Access) {
               <>
                 <p className="text-sm text-slate-600">{total} visible reports</p>
                 {reports.length === 0 ? (
-                  <DataPlaceholder title="No reports recorded for this view." />
+                  <div className="space-y-3">
+                    <DataPlaceholder title="No reports recorded for this view." />
+                    {status || offset > 0 ? (
+                      <button
+                        type="button"
+                        className={button}
+                        onClick={() => {
+                          setStatus('');
+                          setOffset(0);
+                          refresh();
+                        }}
+                      >
+                        Show all reports from the beginning
+                      </button>
+                    ) : (
+                      <p className="text-sm text-slate-600">
+                        {access.canRequestBoard
+                          ? 'Use the board or auditor workflow above to request a draft from a finalized assessment. An internal founder then reviews and releases the retained report.'
+                          : canPrepare
+                            ? 'Use Prepare evidence pack above to select recorded evidence and prepare a pack for review.'
+                            : 'Ask an assessment owner to prepare a report and the internal founder to review and release it. Released reports will appear here.'}{' '}
+                        Demo records do not automatically create reviewed reports or sealed proof.
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <ul className="space-y-2">
                     {reports.map((report) => (
@@ -412,13 +436,16 @@ function TenantReportsClient(access: Access) {
   );
 }
 
-function ReportInspector({
+export function ReportInspector({
   reportId,
   onChanged,
+  onRead,
   ...access
 }: Access & {
   reportId: string;
   onChanged: () => void;
+  /** Optional coordinator refresh after an authoritative exact-report read. */
+  onRead?: () => void;
 }) {
   const [report, setReport] = useState<ReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -446,8 +473,10 @@ function ReportInspector({
     void reportRequest(access.tenantId, `/reports/${reportId}`, { signal: controller.signal })
       .then((response) => response.json())
       .then((value) => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
           setReport(z.object({ data: detailSchema }).parse(value).data);
+          onRead?.();
+        }
       })
       .catch((err: unknown) => {
         if (!controller.signal.aborted) setReadError(failure(err));
@@ -456,7 +485,7 @@ function ReportInspector({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [access.tenantId, reportId, revision]);
+  }, [access.tenantId, reportId, revision, onRead]);
   async function act(path: string, body: unknown | (() => unknown)) {
     setBusy(true);
     setError('');

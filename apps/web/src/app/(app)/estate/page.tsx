@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { DataFlowAvailability } from '../datamap/flows/flow-availability';
 import { Capability, can } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { requireCapabilityContext } from '@/lib/tenant-context';
@@ -38,6 +39,7 @@ export default async function EstatePage() {
         description="Declare the systems in each assessment boundary. Inventory declarations do not establish connectivity or authorize agent execution."
       />
       <div className="flex flex-wrap gap-4">
+        <DataFlowAvailability tenantId={ctx.tenantId} actorId={ctx.userId} />
         <Link href="/estate/setup" className="text-teal-700 underline">
           Onboarding setup
         </Link>

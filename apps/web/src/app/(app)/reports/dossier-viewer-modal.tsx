@@ -1,7 +1,7 @@
 'use client';
 
 import { formatDateTime } from '@/lib/display-time';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { PramaanDossier } from '@axiom/types';
 
 export interface DossierViewerModalProps {
@@ -10,6 +10,9 @@ export interface DossierViewerModalProps {
   onClose: () => void;
   canRelease: boolean;
   busy: boolean;
+  onPreview?: (dossier: PramaanDossier) => void;
+  onReview?: (dossier: PramaanDossier, note: string) => void;
+  onRelease?: (dossier: PramaanDossier) => void;
   onSeal: (dossier: PramaanDossier) => void;
   onDownload: (dossier: PramaanDossier) => void;
   onReconcile: (dossier: PramaanDossier) => void;
@@ -24,11 +27,15 @@ export function DossierViewerModal({
   onClose,
   canRelease,
   busy,
+  onPreview,
+  onReview,
+  onRelease,
   onSeal,
   onDownload,
   onReconcile,
   onRetryMissing,
 }: DossierViewerModalProps) {
+  const [reviewNote, setReviewNote] = useState('');
   const closeButton = useRef<HTMLButtonElement>(null);
   const dialog = useRef<HTMLElement>(null);
 
@@ -40,7 +47,9 @@ export function DossierViewerModal({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
       if (event.key !== 'Tab') return;
-      const buttons = dialog.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)');
+      const buttons = dialog.current?.querySelectorAll<HTMLButtonElement>(
+        'button:not(:disabled), textarea:not(:disabled)',
+      );
       if (!buttons?.length) return;
       const first = buttons[0];
       const last = buttons[buttons.length - 1];
@@ -98,13 +107,15 @@ export function DossierViewerModal({
           >
             {dossier.sourceBound
               ? dossier.archiveStatus === 'settled'
-                ? dossier.dossierType === 'auditor_assurance'
-                  ? 'This assessment-derived auditor dossier has an exact retained archive version. It is not an independent audit, auditor attestation, or evidence certification. Confirm the source and digest before founder sealing.'
-                  : dossier.dossierType === 'dpb_statutory'
-                    ? 'This tenant-level dossier repeats a recorded breach and reviewed notification. It does not verify regulator receipt, acceptance, or statutory filing. Confirm the source and digest before founder sealing.'
-                    : dossier.dossierType === 'technical_register'
-                      ? 'This dossier repeats recorded plan and action claims. It does not independently certify execution, rollback, verification, or closure. Confirm the source and digest before founder sealing.'
-                      : 'The dossier archive has an exact provider version and a Compliance retention readback. Confirm its source and digest before founder sealing.'
+                ? dossier.dossierType === 'full_closure'
+                  ? 'This full closure pack binds released source dossiers, retained evidence, approval and execution proofs, reconciliations and a verified ledger prefix. A different internal founder must review the exact archive before sealing and release. It does not assert independent audit or legal certification.'
+                  : dossier.dossierType === 'auditor_assurance'
+                    ? 'This assessment-derived auditor dossier has an exact retained archive version. It is not an independent audit, auditor attestation, or evidence certification. Confirm the source and digest before founder sealing.'
+                    : dossier.dossierType === 'dpb_statutory'
+                      ? 'This tenant-level dossier repeats a recorded breach and reviewed notification. It does not verify regulator receipt, acceptance, or statutory filing. Confirm the source and digest before founder sealing.'
+                      : dossier.dossierType === 'technical_register'
+                        ? 'This dossier repeats recorded plan and action claims. It does not independently certify execution, rollback, verification, or closure. Confirm the source and digest before founder sealing.'
+                        : 'The dossier archive has an exact provider version and a Compliance retention readback. Confirm its source and digest before founder sealing.'
                 : 'The archive outcome is pending. Reconcile the exact provider version before founder sealing or download.'
               : 'This historical record does not establish a verified source, retained closure pack, or Object Lock receipt. It is unavailable for sealing, download, or dispatch.'}
           </p>
@@ -160,6 +171,36 @@ export function DossierViewerModal({
               </>
             )}
           </dl>
+          {dossier.dossierType === 'full_closure' && dossier.sourceBound && (
+            <p className="rounded border border-slate-200 p-3">
+              Release: {dossier.releaseStatus ?? 'withheld'}. Review the archive, record the review,
+              seal, then release. Download becomes available after release.
+            </p>
+          )}
+          {canRelease &&
+            dossier.dossierType === 'full_closure' &&
+            dossier.archiveStatus === 'settled' &&
+            dossier.status === 'draft' && (
+              <label className="block space-y-2 font-medium">
+                Founder review note
+                <textarea
+                  aria-label="Founder review note"
+                  value={reviewNote}
+                  onChange={(event) => setReviewNote(event.target.value)}
+                  maxLength={2000}
+                  disabled={busy}
+                  className="block w-full rounded border border-slate-300 p-2"
+                />
+                <button
+                  type="button"
+                  disabled={busy || !reviewNote.trim()}
+                  onClick={() => onReview?.(dossier, reviewNote.trim())}
+                  className="rounded border border-teal-600 px-3 py-2"
+                >
+                  Record review of this archive
+                </button>
+              </label>
+            )}
         </div>
         <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-slate-50 p-4">
           {dossier.sourceBound && dossier.archiveStatus === 'pending' && dossier.operationKey && (
@@ -186,15 +227,41 @@ export function DossierViewerModal({
           )}
           {dossier.sourceBound && dossier.archiveStatus === 'settled' && canRelease && (
             <>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onDownload(dossier)}
-                className="rounded-md border border-teal-600 bg-white px-4 py-2 text-sm font-medium text-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 disabled:opacity-50"
-              >
-                Download verified archive
-              </button>
-              {dossier.status === 'draft' && (
+              {dossier.dossierType === 'full_closure' && dossier.releaseStatus !== 'released' && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onPreview?.(dossier)}
+                  className="rounded-md border border-teal-600 px-4 py-2"
+                >
+                  Download archive for review
+                </button>
+              )}
+              {(dossier.dossierType !== 'full_closure' || dossier.releaseStatus === 'released') && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onDownload(dossier)}
+                  className="rounded-md border border-teal-600 bg-white px-4 py-2 text-sm font-medium text-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 disabled:opacity-50"
+                >
+                  Download verified archive
+                </button>
+              )}
+              {dossier.dossierType === 'full_closure' &&
+                dossier.status === 'sealed' &&
+                dossier.releaseStatus !== 'released' && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onRelease?.(dossier)}
+                    className="rounded-md bg-[#1E2A4A] px-4 py-2 text-white"
+                  >
+                    Release exact archive
+                  </button>
+                )}
+              {(dossier.dossierType === 'full_closure'
+                ? dossier.status === 'approved'
+                : dossier.status === 'draft') && (
                 <button
                   type="button"
                   disabled={busy}

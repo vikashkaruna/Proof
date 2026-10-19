@@ -1,3 +1,7 @@
+import {
+  ScheduledCoverageProducer,
+  type CoverageProducerBinding,
+} from './scheduled-coverage-producer.js';
 import { canonicalJson } from '@axiom/ledger';
 import { resolvePublicControlAssessmentSource } from './public-control-assessment-source.js';
 import { canonicalAssessmentInput } from './assessment-input.js';
@@ -10,6 +14,7 @@ import {
   ASSESSMENT_REQUEST_MAX_BYTES,
   type AssessmentRequest,
   type TenantId,
+  type AssessmentSourceRequirement,
 } from '@axiom/types';
 import { z } from 'zod';
 import { readControllerFile, controllerFilePath } from './controller-files.js';
@@ -33,7 +38,12 @@ export class AssessmentQuestionnaireRefused extends Error {
   }
 }
 export class AssessmentContextRefused extends Error {
-  constructor(readonly code: 'assessment_engagement_not_found' | 'assessment_already_recorded') {
+  constructor(
+    readonly code:
+      | 'assessment_engagement_not_found'
+      | 'assessment_already_recorded'
+      | 'assessment_public_control_review_required',
+  ) {
     super('Assessment context refused');
   }
 }
@@ -42,6 +52,7 @@ const uuid = z.uuid().transform((value) => value.toLowerCase());
 export const assessmentProducerConfiguration = z
   .object({
     schemaVersion: z.literal(1),
+    scheduledCoverageEnabled: z.boolean().default(false),
     tenants: z
       .array(
         z
@@ -82,7 +93,15 @@ const controlSchema = z.object({
     .max(5000),
 });
 export interface AssessmentRequestProducer {
+  coverageAvailableForTenant?(tenantId: string): boolean | Promise<boolean>;
+  scheduledCoverage?: Pick<
+    ScheduledCoverageProducer,
+    'run' | 'health' | 'request' | 'reserve' | 'reconcile'
+  >;
   configurationForTenant?(tenantId: string): boolean;
+  sourceRequirementForTenant?(
+    tenantId: string,
+  ): AssessmentSourceRequirement | Promise<AssessmentSourceRequirement>;
   request(
     tenantId: string,
     actorId: string,
@@ -122,6 +141,7 @@ export async function composeAssessmentProducer(
     awsKms?: DispatchAwsKmsPort;
     gcpKms?: DispatchGcpKmsPort;
     writer?: () => SupabaseClient;
+    agentWriter?: () => SupabaseClient;
     localWrapper?: typeof localDispatchKeyWrapper;
   } = {},
 ): Promise<AssessmentRequestProducer> {
@@ -132,11 +152,14 @@ export async function composeAssessmentProducer(
       { workloadId: string; dispatch: Pick<AssessmentDispatch, 'enqueue' | 'recover'> }
     >();
     const ownedKeys = new Set<string>();
+    const localTenants = new Set<string>();
+    const coverageBindings: CoverageProducerBinding[] = [];
     for (const tenant of config.tenants) {
       if (registry.has(tenant.tenantId)) throw new DispatchRefused();
       const id = tenant.tenantId as TenantId;
       const keys = tenant.keys;
       if (keys.provider === 'local') {
+        localTenants.add(id);
         await requireParikshanRegistration(db, id, tenant.workloadId, tenant.trustDomain);
         // Wrap only: this facade never unwraps, claims or launches. Local mode
         // admits only reviewed public-control work (enqueueLocal).
@@ -158,6 +181,12 @@ export async function composeAssessmentProducer(
           ports.writer ?? createHumanActionWriter,
           keys.custody,
         );
+        coverageBindings.push({
+          tenantId: id,
+          workloadId: tenant.workloadId,
+          custody: keys.custody,
+          wrapper: wrapOnly,
+        });
         registry.set(id, {
           workloadId: tenant.workloadId,
           dispatch: {
@@ -202,8 +231,30 @@ export async function composeAssessmentProducer(
         },
       });
     }
+    if (
+      config.scheduledCoverageEnabled &&
+      (!ports.agentWriter || coverageBindings.length !== config.tenants.length)
+    )
+      throw new DispatchRefused();
+    const scheduledCoverage = config.scheduledCoverageEnabled
+      ? new ScheduledCoverageProducer(ports.agentWriter!(), coverageBindings)
+      : undefined;
     return Object.freeze({
+      ...(scheduledCoverage
+        ? {
+            scheduledCoverage,
+            coverageAvailableForTenant: (tenantId: string) => registry.has(uuid.parse(tenantId)),
+          }
+        : {}),
       configurationForTenant: (tenantId: string) => registry.has(uuid.parse(tenantId)),
+      sourceRequirementForTenant: (tenantId: string) => {
+        const id = uuid.parse(tenantId);
+        return !registry.has(id)
+          ? 'unknown'
+          : localTenants.has(id)
+            ? 'public_control_review_required'
+            : 'questionnaire_or_public_review';
+      },
       async request(tenantValue: string, actorValue: string, value: AssessmentRequest) {
         const tenantId = uuid.parse(tenantValue),
           actorId = uuid.parse(actorValue),
@@ -324,6 +375,10 @@ export async function composeAssessmentProducer(
         };
         const recovered = await configured.dispatch.recover(context, input.expectedQuestionnaire);
         if (recovered) return recovered;
+        // A positive recovery always wins. Only a missing exact operation and
+        // the configured local-only admission rule establish definite refusal.
+        if (localTenants.has(tenantId))
+          throw new AssessmentContextRefused('assessment_public_control_review_required');
         const hasDeclarations =
           Object.values(input.answers).some((row) =>
             Object.values(row).some((answer) => answer !== null),

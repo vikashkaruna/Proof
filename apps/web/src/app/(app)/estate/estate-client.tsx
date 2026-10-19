@@ -80,6 +80,8 @@ export function MutationForm({
   label,
   onSuccess,
   schema,
+  validateResult,
+  successMessage = 'Saved.',
 }: {
   tenantId: string;
   path: string | ((form: FormData) => string);
@@ -89,6 +91,8 @@ export function MutationForm({
   label: string;
   onSuccess?: () => void;
   schema?: z.ZodType;
+  validateResult?: (result: unknown) => boolean;
+  successMessage?: string;
 }) {
   const router = useRouter();
   const pending = useRef<{
@@ -201,7 +205,11 @@ export function MutationForm({
         }
         return;
       }
-      if (!result?.data || typeof result.data.id !== 'string' || !result.data.id) {
+      if (
+        !(validateResult
+          ? validateResult(result)
+          : Boolean(result?.data && typeof result.data.id === 'string' && result.data.id))
+      ) {
         attempt.outcomeUnknown = true;
         setUncertain(true);
         setMessage(
@@ -219,7 +227,7 @@ export function MutationForm({
         );
         return;
       }
-      setMessage('Saved.');
+      setMessage(successMessage);
       try {
         formRef.current?.reset();
         onSuccess?.();

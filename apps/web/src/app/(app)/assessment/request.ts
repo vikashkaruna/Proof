@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { canonicalJson } from '@axiom/ledger';
 import {
   AssessmentRequestSchema,
+  AssessmentSourceRefusalSchema,
+  type AssessmentSourceRefusal,
   assessmentSourceOperationSchema,
   cancelAssessmentSourceIntentSchema,
   type AssessmentSourceOperation,
@@ -10,6 +12,28 @@ import {
 } from '@axiom/types';
 
 export class AssessmentRequestError extends Error {}
+export class AssessmentSourceRequiredError extends AssessmentRequestError {
+  constructor(readonly refusal: AssessmentSourceRefusal) {
+    super(
+      'This deployment requires a saved public-control human review. No assessment job was recorded for this request. Open Discovery, complete source review, and use its exact assessment link.',
+    );
+  }
+}
+function matchSourceRefusal(value: RetainedAssessment, raw: unknown) {
+  const refusal = AssessmentSourceRefusalSchema.parse(raw);
+  if (
+    value.request.reviewRef ||
+    refusal.requestText !== canonicalJson(value.request) ||
+    refusal.tenantId !== value.tenantId ||
+    refusal.actorId !== value.actorId ||
+    refusal.operationKey !== value.request.operationKey ||
+    refusal.engagementId !== value.request.engagementId
+  )
+    throw new AssessmentRequestError(
+      'The refusal does not match the retained request. Keep its browser reference.',
+    );
+  return refusal;
+}
 export const ASSESSMENT_JOURNAL_CHANGED = 'axiom:assessment-request-changed';
 const uuid = z.uuid();
 export const retainedAssessmentSchema = z
@@ -141,6 +165,17 @@ export async function submitAssessmentRequest(value: RetainedAssessment) {
   } catch {
     throw new AssessmentRequestError(
       'The response was interrupted. Check the retained request; do not start another.',
+    );
+  }
+  if (response.status === 409) {
+    const body: unknown = await response.json().catch(() => null);
+    const refusal = AssessmentSourceRefusalSchema.safeParse(
+      (body as { error?: unknown } | null)?.error,
+    );
+    if (refusal.success)
+      throw new AssessmentSourceRequiredError(matchSourceRefusal(retained, refusal.data));
+    throw new AssessmentRequestError(
+      'The request could not be confirmed. Keep its browser reference and check recorded status.',
     );
   }
   const parsed = AssessmentRequestReceiptSchema.safeParse(await responseBody(response));
@@ -403,5 +438,59 @@ export function clearCancelledAssessmentSourceJournal(
   if (!old || JSON.stringify(old) !== JSON.stringify(value))
     throw new AssessmentRequestError('Retained request changed. Reload before continuing.');
   storage.removeItem(assessmentJournalKey(value.tenantId, value.actorId));
+  window.dispatchEvent(new Event(ASSESSMENT_JOURNAL_CHANGED));
+}
+
+/** Archiving requires BOTH a matching definite pre-dispatch server refusal and
+ * a fresh authenticated exact-job 404. Network failure or absence alone cannot
+ * discard an ambiguous/in-flight request. Preserve the rejection receipt first. */
+export async function archiveRejectedAssessmentJournal(
+  storage: Storage,
+  value: RetainedAssessment,
+  raw: unknown,
+) {
+  const retained = retainedAssessmentSchema.parse(value),
+    refusal = matchSourceRefusal(retained, raw);
+  const check = () => {
+    if (
+      JSON.stringify(readAssessmentJournal(storage, retained.tenantId, retained.actorId)) !==
+      JSON.stringify(retained)
+    )
+      throw new AssessmentRequestError('Retained request changed. Reload before continuing.');
+  };
+  check();
+  const response = await fetch(`/api/bff/v1/assessment/jobs/${retained.request.operationKey}`, {
+    method: 'GET',
+    cache: 'no-store',
+    signal: AbortSignal.timeout(15000),
+    headers: { 'X-Tenant-Id': retained.tenantId, 'X-Expected-Actor-Id': retained.actorId },
+  });
+  const missing = z
+    .object({ error: z.object({ code: z.literal('assessment_job_not_found') }).strict() })
+    .strict()
+    .safeParse(await response.json().catch(() => null));
+  if (response.status !== 404 || !missing.success)
+    throw new AssessmentRequestError(
+      'The exact job absence could not be confirmed. Keep the retained browser reference.',
+    );
+  check();
+  const archiveKey =
+    assessmentJournalKey(retained.tenantId, retained.actorId) +
+    ':rejected:' +
+    retained.request.operationKey;
+  const archived = JSON.stringify({
+    schemaVersion: 1,
+    retained,
+    refusal,
+    checkedJobState: 'not_found',
+  });
+  const old = storage.getItem(archiveKey);
+  if (old !== null && old !== archived)
+    throw new AssessmentRequestError(
+      'An archived rejection conflicts with this request. Keep the active reference.',
+    );
+  storage.setItem(archiveKey, archived);
+  check();
+  storage.removeItem(assessmentJournalKey(retained.tenantId, retained.actorId));
   window.dispatchEvent(new Event(ASSESSMENT_JOURNAL_CHANGED));
 }

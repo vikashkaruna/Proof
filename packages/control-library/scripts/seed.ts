@@ -1,10 +1,12 @@
 #!/usr/bin/env tsx
 /** Seed immutable catalogue publications. Existing bootstrap order is preserved. */
 import { z } from 'zod';
+import { publicControlCatalogueManifestText } from '../src/public-evidence-mapping-v2';
 import { createClient } from '@supabase/supabase-js';
 import {
   CataloguePublicationError,
   publishCatalogue,
+  publishCatalogueCandidate,
   bootstrapCatalogueReferences,
   type CatalogueTransport,
 } from '../src/catalogue-publication';
@@ -49,6 +51,16 @@ async function main(): Promise<void> {
     },
   };
   const args = process.argv.slice(2);
+  if (args.length === 2 && args[0] === '--publish-candidate' && args[1] === '0.2.0') {
+    const verified = await publishCatalogueCandidate(transport, args[1]);
+    const staged = await client.rpc('publish_catalogue_manifest', {
+      p_library_version: args[1],
+      p_manifest_text: publicControlCatalogueManifestText(args[1]),
+    });
+    if (staged.error) throw new Error('candidate_manifest_publication_refused');
+    console.log('Candidate rows and manifest verified; founder approval still required:', verified);
+    return;
+  }
   if (args.length && (args.length !== 1 || args[0] !== '--bootstrap-reference-prerequisites'))
     throw new Error('Unknown catalogue bootstrap option');
   if (args[0] === '--bootstrap-reference-prerequisites') {

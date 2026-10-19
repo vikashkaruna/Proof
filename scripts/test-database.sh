@@ -18,11 +18,18 @@ fi
 test_log=$(mktemp)
 phase_dir=$(mktemp -d "${TMPDIR:-/tmp}/axiom-report-policy.XXXXXXXX")
 phase_dir=$(cd "$phase_dir" && pwd -P)
-cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; rm -f "$test_log"; rm -rf "$phase_dir"; }
+container_id=""
+cleanup() {
+  # Only a successful create response establishes ownership. A name collision
+  # or uncertain create outcome must never remove somebody else's container.
+  if [ -n "$container_id" ]; then docker rm -f "$container_id" >/dev/null 2>&1 || true; fi
+  rm -f "$test_log"
+  rm -rf "$phase_dir"
+}
 trap cleanup EXIT
 python3 tests/database/lib/report-policy-phases.py prepare --directory "$phase_dir"
 pnpm exec tsx scripts/lib/coverage-first-report-sql-fixtures.ts "$phase_dir"
-docker run --rm -d --name "$container" --label com.axiom.fixture=database-policy-test --label com.axiom.fixture.project=axiom-db-tests --label "com.axiom.owner-worktree=$(pwd)" -e POSTGRES_HOST_AUTH_METHOD=trust "$image" >/dev/null
+container_id=$(docker run --rm -d --name "$container" --label com.axiom.fixture=database-policy-test --label com.axiom.fixture.project=axiom-db-tests --label "com.axiom.owner-worktree=$(pwd)" -e POSTGRES_HOST_AUTH_METHOD=trust "$image")
 for attempt in $(seq 1 60); do
   if docker exec "$container" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
@@ -61,13 +68,32 @@ for version in 2 3; do
 done
 python3 scripts/migrate-database.py --container "$container" --user postgres --database axiom_policy_test
 bash tests/database/migration-runner.sh "$container"
+python3 tests/database/lib/owned-postgres-role-fixture.py "$container" "$image"
 current_version=$(python3 tests/database/lib/report-policy-phases.py current-version --directory "$phase_dir")
 while IFS= read -r suite; do
   echo "Testing $suite (current$current_version)"
-  if [[ "$suite" = controller-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance-demo.test.sql || "$suite" = local-custody-credential-identity.test.sql ]]; then
+  if [[ "$suite" = scheduled-coverage-reassessment.test.sql ]]; then
+    { python3 tests/database/lib/postgresql-discovery-fixture.py; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; python3 tests/database/lib/scheduled-coverage-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [[ "$suite" = standing-approval-coordinator.test.sql ]]; then
+    { python3 tests/database/lib/standing-approval-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [[ "$suite" = owned-deployment.test.sql || "$suite" = owned-deployment-enrollment.test.sql || "$suite" = owned-deployment-revocation.test.sql ]]; then
+    { python3 tests/database/lib/postgresql-discovery-fixture.py; if [[ "$suite" = owned-deployment-enrollment.test.sql ]]; then python3 tests/database/lib/owned-enrollment-fixture.py; elif [[ "$suite" = owned-deployment-revocation.test.sql ]]; then python3 tests/database/lib/owned-enrollment-fixture.py --active; fi; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [[ "$suite" = owned-effect-observations.test.sql ]]; then
+    { python3 tests/database/lib/postgresql-discovery-fixture.py; python3 tests/database/lib/owned-human-canonical-fixture.py; python3 tests/database/lib/owned-execution-fixture.py; python3 tests/database/lib/owned-effect-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [[ "$suite" = owned-execution-binding.test.sql ]]; then
+    { python3 tests/database/lib/postgresql-discovery-fixture.py; python3 tests/database/lib/owned-human-canonical-fixture.py; python3 tests/database/lib/owned-execution-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [[ "$suite" = postgresql-discovery-requests.test.sql || "$suite" = owned-postgres-target.test.sql || "$suite" = owned-human-plans.test.sql || "$suite" = scheduled-postgresql-reads.test.sql ]]; then
+    { python3 tests/database/lib/postgresql-discovery-fixture.py; if [[ "$suite" = owned-human-plans.test.sql || "$suite" = scheduled-postgresql-reads.test.sql ]]; then python3 tests/database/lib/owned-human-canonical-fixture.py; fi; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [[ "$suite" = explicit-data-flow-declarations.test.sql || "$suite" = prativedan-accounted-terminal.test.sql || "$suite" = postgresql-sandbox-discovery.test.sql || "$suite" = controller-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance-demo.test.sql || "$suite" = local-custody-credential-identity.test.sql ]]; then
     # The production migration deliberately grants no issuer membership to
     # postgres. Only this disposable test session assumes the private role.
     docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "tests/database/$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [ "$suite" = catalogue-current-version.test.sql ]; then
+    { echo "begin;"; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; sed '/^rollback;$/d' tests/database/catalogue-founder-approval.test.sql; cat "tests/database/$suite"; } | sql
+  elif [ "$suite" = catalogue-founder-approval.test.sql ]; then
+    { echo "begin;"; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; cat "tests/database/$suite"; } | sql
+  elif [ "$suite" = full-closure-source-graph.test.sql ]; then
+    { python3 tests/database/lib/full-closure-source-graph.py; cat "tests/database/$suite"; } | sql
   elif [ "$suite" = coverage-first-public-reports.test.sql ]; then
     python3 tests/database/lib/report-policy-phases.py current-program --directory "$phase_dir" | sql
   elif [ "$suite" = local-public-control-assessment-dispatch.test.sql ]; then
@@ -80,6 +106,12 @@ while IFS= read -r suite; do
   printf '%s|%s\n' "$current_version" "$suite" >> "$phase_dir/executed-suites.txt"
 done < <(python3 tests/database/lib/report-policy-phases.py current-list --directory "$phase_dir")
 python3 tests/database/lib/report-policy-phases.py verify --directory "$phase_dir"
+standing173_race_image=$(docker image inspect --format '{{.Id}}' "$image")
+python3 tests/database/lib/standing-approval-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
+python3 tests/database/lib/explicit-data-flow-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
+python3 tests/database/lib/scheduled-coverage-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
+python3 tests/database/lib/founder-onboarding-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
+python3 tests/database/lib/founder-membership-upgrade.py --container "$container_id" --image "$standing173_race_image"
 python3 tests/database/sudhaar-review-adoption-fixture.py | sql
 bash tests/database/operator-workflows-public-source.sh "$container"
 bash tests/database/concurrent-operator-workflows.sh "$container"

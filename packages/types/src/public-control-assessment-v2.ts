@@ -241,14 +241,20 @@ export const publicControlAssessmentV2Schema = z
     catalogue: z
       .object({
         libraryVersion: ApprovedLibraryVersionSchema,
-        baseline: z.literal('IN-DPDP@2026-09-20'),
+        baseline: z.enum(['IN-DPDP@2026-09-20', 'IN-DPDP@2026-10-17']),
         manifestSha256: digest,
         mappingVersion: z.literal('public-evidence-1'),
         defaultEffectiveFrom: z.literal('2027-05-13'),
         perControlEffectiveDates: z.literal('not_present_in_source'),
         effectiveStatus: z.literal('requires_assessment_date_and_legal_review'),
       })
-      .strict(),
+      .strict()
+      .refine(
+        (value) =>
+          value.baseline ===
+          (value.libraryVersion === '0.2.0' ? 'IN-DPDP@2026-10-17' : 'IN-DPDP@2026-09-20'),
+        'Catalogue baseline must match the retained library version',
+      ),
     controls: z
       .array(
         z

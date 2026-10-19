@@ -19,14 +19,14 @@ test('source-free dossier and outbound dispatch refuse after real sign-in', asyn
       headers,
       data: {
         dossierType: 'full_closure',
-        title: 'Unsupported proof claim',
+        title: 'Source-free full closure claim',
         reportId: crypto.randomUUID(),
         operationKey: crypto.randomUUID(),
       },
     },
   );
   expect(synthesize.status()).toBe(409);
-  expect(await synthesize.json()).toEqual({ error: { code: 'source_bound_dossier_required' } });
+  expect(await synthesize.json()).toEqual({ error: { code: 'released_board_source_required' } });
 
   for (const target of [{ reportId: crypto.randomUUID() }, { dossierId: crypto.randomUUID() }]) {
     const dispatch = await page.request.post('/api/bff/v1/reports/email/dispatch', {

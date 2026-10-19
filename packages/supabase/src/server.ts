@@ -11,13 +11,6 @@ export async function createSupabaseServerClient() {
   const env = loadWebEnv();
   const cookieStore = await cookies();
 
-  const authCookie = cookieStore
-    .getAll()
-    // Signup also stores `sb-...-auth-token-flow-...-code-verifier` cookies.
-    // Selecting one of those as the session name makes a valid new session
-    // disappear on the following server render.
-    .find((c) => /^sb-.+-auth-token(?:\.\d+)?$/.test(c.name) && c.value.length > 0);
-
   const isLoggedOut = cookieStore.get('axiom_e2e_logged_out')?.value === 'true';
   const userEmail = cookieStore.get('axiom_user_email')?.value || 'founder@axiomminds.ai';
 
@@ -33,10 +26,10 @@ export async function createSupabaseServerClient() {
     return createE2ESupabaseClient(userEmail);
   }
 
-  const cookieName = authCookie ? authCookie.name.replace(/\.\d+$/, '') : undefined;
-
   return createServerClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-    cookieOptions: cookieName ? { name: cookieName } : undefined,
+    // Use the SDK namespace derived from this configured auth URL, exactly as
+    // middleware does. A cookie from another local stack/project must never
+    // redirect new sign-ins into a namespace middleware cannot read.
     cookies: {
       getAll() {
         return cookieStore.getAll();

@@ -61,6 +61,7 @@ export function ApprovalActions({
   readinessAvailable = true,
 }: Props) {
   const router = useRouter();
+  const [settled, setSettled] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set(eligible.map((a) => a.id)));
   const [reason, setReason] = useState('');
   const [concurrency, setConcurrency] = useState(1);
@@ -92,6 +93,31 @@ export function ApprovalActions({
   const [stepUp, setStepUp] = useState<{ challengeId: string; expiresAt: string } | null>(null);
   const [stepUpCode, setStepUpCode] = useState('');
   const [needsEnrolment, setNeedsEnrolment] = useState(false);
+
+  // Refresh server authority/readiness without remounting the confirmed result.
+  // A changed snapshot invalidates the selection/challenge and execution token;
+  // notices survive so a successful operation does not disappear on refresh.
+  const serverSnapshot = JSON.stringify([
+    planStatus,
+    actions.map((action) => [action.id, action.approval_status]),
+    eligible.map((action) => action.id),
+    initialApprovalToken,
+    initialApprovedActionIds,
+    readinessAvailable,
+    canApprove,
+    canReject,
+    canExecute,
+  ]);
+  const [previousSnapshot, setPreviousSnapshot] = useState(serverSnapshot);
+  if (previousSnapshot !== serverSnapshot) {
+    setPreviousSnapshot(serverSnapshot);
+    setSettled(false);
+    setSelected(new Set(eligible.map((action) => action.id)));
+    setStepUp(null);
+    setStepUpCode('');
+    setApprovalToken(initialApprovalToken);
+    setApprovedActionIds(initialApprovedActionIds);
+  }
 
   function changeSelection(next: Set<string>) {
     setSelected(next);
@@ -277,6 +303,8 @@ export function ApprovalActions({
       router.refresh();
       return;
     }
+    setSettled(true);
+    setSelected(new Set());
     setApprovalToken(JSON.stringify(token));
     setApprovedActionIds(spec.actionIds);
     setStepUp(null);
@@ -368,6 +396,9 @@ export function ApprovalActions({
         router.refresh();
         return;
       }
+      setSettled(true);
+      setSelected(new Set());
+      setApprovalToken(null);
       setSuccess('Plan rejected. Actions have been marked as skipped.');
       router.refresh();
     } catch (e) {
@@ -389,7 +420,8 @@ export function ApprovalActions({
   // Approval is only offered when the server would accept it. Starting a
   // step-up for a plan whose status rules approval out spent the approver's
   // codes on a refusal (owner finding, 2026-10-17).
-  const approvalOffered = canApprove && readinessAvailable && !planBlocker;
+  const approvalOffered =
+    canApprove && eligible.length > 0 && readinessAvailable && !planBlocker && !settled;
 
   return (
     <div className="flex flex-col gap-4">
@@ -399,13 +431,17 @@ export function ApprovalActions({
           className="rounded-md border border-slate-300 bg-slate-50 p-3 text-sm text-slate-700"
         >
           <strong>Not open for approval.</strong> {planBlocker}
+          <p className="mt-1">
+            No authenticator code is needed. Review the recorded action details and execution
+            history below to understand the outcome.
+          </p>
         </div>
       )}
 
       {planStatus === 'cancelled' && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          This remediation plan is currently marked as cancelled/rejected. You may still re-approve
-          eligible actions below to reinstate and approve them.
+          This remediation plan is cancelled or rejected. If remediation is still required, an
+          authorised approver can reinstate it by approving eligible actions below.
         </div>
       )}
 
@@ -487,10 +523,16 @@ export function ApprovalActions({
           variant="primary"
           onClick={() => changeSelection(new Set(eligible.map((a) => a.id)))}
           size="sm"
+          disabled={!approvalOffered || submitting}
         >
           Select all eligible
         </Button>
-        <Button variant="ghost" onClick={() => changeSelection(new Set())} size="sm">
+        <Button
+          variant="ghost"
+          onClick={() => changeSelection(new Set())}
+          size="sm"
+          disabled={!approvalOffered || submitting}
+        >
           Clear
         </Button>
         <span className="text-sm text-slate-500">
@@ -510,7 +552,7 @@ export function ApprovalActions({
               <input
                 type="checkbox"
                 checked={canSelect && selected.has(action.id)}
-                disabled={!canSelect || Boolean(stepUp)}
+                disabled={!approvalOffered || !canSelect || Boolean(stepUp) || submitting}
                 onChange={() => toggle(action.id)}
                 className="mt-1 h-4 w-4"
               />
@@ -519,6 +561,12 @@ export function ApprovalActions({
                 <span className="text-slate-600">
                   {action.action_type} · {action.risk_class} risk
                 </span>
+                <a
+                  href={`/plans/${planId}/actions/${action.id}`}
+                  className="block text-teal-700 underline"
+                >
+                  View dry-run &amp; rollback details
+                </a>
                 {!canSelect &&
                   (blockerReasons[action.id]?.length ? (
                     blockerReasons[action.id]!.map((reason) => (
@@ -657,7 +705,7 @@ export function ApprovalActions({
         <Button variant="ghost" size="lg" onClick={() => router.refresh()}>
           Refresh
         </Button>
-        {canReject && (
+        {canReject && !settled && !planBlocker && (
           <Button
             variant="danger"
             size="lg"

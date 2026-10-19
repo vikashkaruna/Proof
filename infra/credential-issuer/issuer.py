@@ -328,6 +328,17 @@ def revoke(review: Path,expected: str,config: Path,target: Path,resume=False,db=
 
 
 def main():
+    global PHASE
+    if len(sys.argv)==6 and sys.argv[1]=='--owned-target':
+        PHASE='owned-target'
+        if not sys.flags.isolated or sys.platform not in ('linux','darwin'):raise ValueError('isolated owned issuer required')
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('axiom_owned_target_issuer',Path(__file__).with_name('owned_target.py'))
+        if spec is None or spec.loader is None:raise ValueError('owned issuer source refused')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        module.main(sys.modules[__name__])
+        print('Approved owned credential operation verified; protected output retained.')
+        return
     if not sys.flags.isolated or sys.platform not in ('linux','darwin') or len(sys.argv)!=6 or sys.argv[1] not in ('--issue','--resume-issue','--revoke','--resume-revoke'):raise ValueError('explicit issuer command required')
     os.umask(0o077)
     mode,review,expected,config,target=sys.argv[1:]

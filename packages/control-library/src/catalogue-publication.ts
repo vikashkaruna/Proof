@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { buildLibrarySeed } from './seed';
+import { buildLibrarySeedForVersion } from './library-versions';
 import {
   ALL_CONTROL_MAPPINGS,
   ALL_FRAMEWORK_CONTROLS,
@@ -142,6 +143,7 @@ export async function publishCatalogue(transport: CatalogueTransport): Promise<P
 async function publishCatalogueMode(
   transport: CatalogueTransport,
   prerequisitesOnly: boolean,
+  candidateVersion?: string,
 ): Promise<PublicationSummary> {
   const summary: PublicationSummary = {
     libraryVerified: false,
@@ -178,7 +180,9 @@ async function publishCatalogueMode(
     z.strictObject({ error: z.literal(code) }).safeParse(value).success;
   try {
     if (!validateLibrary().ok || validateSectorPacks().length) refuse();
-    const seed = buildLibrarySeed();
+    const seed = candidateVersion
+      ? buildLibrarySeedForVersion(candidateVersion)
+      : buildLibrarySeed();
     const library = {
       version: seed.version,
       published_at: seed.publishedAt,
@@ -237,6 +241,11 @@ async function publishCatalogueMode(
       [...savedControls].sort((a, b) => String(a.id).localeCompare(String(b.id))),
       [...seed.controls].sort((a, b) => a.id.localeCompare(b.id)),
     );
+    if (candidateVersion) {
+      // Explicit operator publication stops before activation or overlay adoption.
+      summary.libraryVerified = true;
+      return summary;
+    }
     phase = 'current_lookup';
     const current = await read('control_libraries', 'version', { is_current: true });
     if (current.length > 1 || (current[0] && !same(current[0], { version: seed.version })))
@@ -486,4 +495,13 @@ async function publishCatalogueMode(
     if (error instanceof CataloguePublicationError) throw error;
     return refuse();
   }
+}
+
+/** Explicit reviewed candidate publication; never makes a library current or approved. */
+export async function publishCatalogueCandidate(
+  transport: CatalogueTransport,
+  version: string,
+): Promise<PublicationSummary> {
+  if (version !== '0.2.0') throw new Error('candidate_version_refused');
+  return publishCatalogueMode(transport, false, version);
 }

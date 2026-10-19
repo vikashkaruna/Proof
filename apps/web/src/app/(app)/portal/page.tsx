@@ -1,3 +1,4 @@
+import { readAssessmentBases, assessmentMetrics } from '@/lib/assessment-basis';
 import { requireTenantContext } from '@/lib/tenant-context';
 import { loadAssessmentSnapshot } from '@/lib/assessment-snapshot';
 import { canAccessClosureDossiers } from '@/lib/closure-dossier-access';
@@ -90,13 +91,19 @@ export default async function ClientPortalPage() {
       .eq('id', snapshot.engagement.id)
       .maybeSingle();
     if (detail.error || !detail.data) loadError = true;
-    const posture = detail.data?.posture_score;
+    const bases = await readAssessmentBases(supabase, tenantId, [snapshot.engagement.id]);
+    const metrics = assessmentMetrics(
+      snapshot.scheduledCoverage ? 'scheduled_coverage' : bases.get(snapshot.engagement.id),
+      detail.data?.posture_score,
+      snapshot.exposureInr,
+    );
+    const posture = metrics.score;
     engagement = {
       id: snapshot.engagement.id,
       title: snapshot.engagement.title,
       status: snapshot.engagement.status,
       postureScore: posture === null || posture === undefined ? null : Number(posture),
-      estimatedExposureInr: snapshot.exposureInr,
+      estimatedExposureInr: metrics.exposureInr,
       startedAt: detail.data?.started_at ?? undefined,
       summary: snapshot.summary,
       totalControls: snapshot.controls.length,

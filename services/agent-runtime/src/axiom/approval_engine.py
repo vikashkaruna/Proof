@@ -178,6 +178,16 @@ class ApprovalEngine:
         if not hmac.compare_digest(expected, signature):
             return ValidationResult(valid=False, reason="signature_mismatch")
 
+        # A signed approval for enrollment is not remediation authority, even
+        # when UUIDs collide. Absent purpose preserves existing execution tokens.
+        purpose = (spec.conditions or {}).get("purpose")
+        if (
+            spec.conditions is not None
+            and "purpose" in spec.conditions
+            and purpose != "remediation_execution_v1"
+        ):
+            return ValidationResult(valid=False, reason="purpose_mismatch")
+
         # Expiry
         try:
             exp = datetime.fromisoformat(spec.expires_at.replace("Z", "+00:00"))

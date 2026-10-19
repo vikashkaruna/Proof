@@ -181,7 +181,7 @@ function validateRow(
     )
       throw Error('Human review asset provenance differs from its saved association.');
   }
-  const manifest = publicControlCatalogueV2Manifest();
+  const manifest = publicControlCatalogueV2Manifest(request.expectedSource.libraryVersion);
   for (const [controlId, questions] of Object.entries(request.answers)) {
     const control = manifest.controls.find((row) => row.control.id === controlId)?.control;
     if (
@@ -199,7 +199,7 @@ export async function loadHumanControlReview(
   signal?: AbortSignal,
 ) {
   source = publicControlAssessmentV2Schema.parse(source);
-  if (!publicEvidenceCatalogueRowsMatchV2(source.controls))
+  if (!publicEvidenceCatalogueRowsMatchV2(source.controls, source.catalogue.libraryVersion))
     throw new Error('Human review controls do not match the reviewed catalogue.');
   const scope = source.source;
   const response = await fetch(

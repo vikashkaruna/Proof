@@ -1,3 +1,4 @@
+import { canonicalJson } from '@axiom/ledger';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import {
@@ -6,6 +7,8 @@ import {
   AssessmentRequestReceiptSchema,
   ASSESSMENT_REQUEST_MAX_BYTES,
   Capability,
+  AssessmentSourceRefusalSchema,
+  AssessmentSourceRequirementSchema,
 } from '@axiom/types';
 import type { Variables } from '../types.js';
 import { assessmentSourceOperationRoutes } from './assessment-source-operation.js';
@@ -23,7 +26,7 @@ export function assessmentRequestRoutes(producer?: AssessmentRequestProducer) {
   const app = new Hono<{ Variables: Variables }>();
   app.route('/', assessmentCancellationRoutes());
   app.route('/', assessmentSourceOperationRoutes());
-  app.get('/assessment/configuration', (c) => {
+  app.get('/assessment/configuration', async (c) => {
     c.header('Cache-Control', 'private, no-store');
     const denied = requireCapability(c, Capability.POSTURE_READ);
     if (denied) return denied;
@@ -41,11 +44,21 @@ export function assessmentRequestRoutes(producer?: AssessmentRequestProducer) {
     } catch {
       configuration = 'unknown';
     }
+    let sourceRequirement:
+      'public_control_review_required' | 'questionnaire_or_public_review' | 'unknown' = 'unknown';
+    try {
+      sourceRequirement = AssessmentSourceRequirementSchema.parse(
+        (await producer?.sourceRequirementForTenant?.(tenantId)) ?? 'unknown',
+      );
+    } catch {
+      /* Unverified producer requirement stays unknown. */
+    }
     return c.json(
       AssessmentConfigurationSchema.parse({
         tenantId,
         configuration,
         executionReadiness: 'not_verified',
+        sourceRequirement,
       }),
     );
   });
@@ -95,6 +108,25 @@ export function assessmentRequestRoutes(producer?: AssessmentRequestProducer) {
     } catch (error) {
       if (error instanceof AssessmentQuestionnaireRefused)
         return c.json({ error: { code: 'assessment_questionnaire_mismatch' } }, 400);
+      if (
+        error instanceof AssessmentContextRefused &&
+        error.code === 'assessment_public_control_review_required'
+      )
+        return c.json(
+          {
+            error: AssessmentSourceRefusalSchema.parse({
+              code: error.code,
+              tenantId: c.get('tenantId').toLowerCase(),
+              actorId,
+              engagementId: parsed.data.engagementId,
+              operationKey: parsed.data.operationKey,
+              requestText: canonicalJson(parsed.data),
+              dispatchState: 'not_recorded',
+              sourceRequirement: 'public_control_review_required',
+            }),
+          },
+          409,
+        );
       if (error instanceof AssessmentContextRefused)
         return c.json(
           { error: { code: error.code } },
