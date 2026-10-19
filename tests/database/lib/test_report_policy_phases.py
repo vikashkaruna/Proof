@@ -97,6 +97,15 @@ class PolicyPhases(unittest.TestCase):
             ("owned-postgres-target.test.sql", "owned_target166_suite_required"),
             ("owned-human-plans.test.sql", "owned_human167_suite_required"),
             ("owned-execution-binding.test.sql", "owned_execution168_suite_required"),
+            ("owned-deployment.test.sql", "owned_deployment169_suites_required"),
+            (
+                "owned-deployment-enrollment.test.sql",
+                "owned_deployment169_suites_required",
+            ),
+            (
+                "owned-deployment-revocation.test.sql",
+                "owned_deployment169_suites_required",
+            ),
             ("owned-effect-observations.test.sql", "owned_effect170_suite_required"),
             ("scheduled-postgresql-reads.test.sql", "scheduled_read171_suite_required"),
             ("prativedan-accounted-terminal.test.sql", "prativedan172_suite_required"),

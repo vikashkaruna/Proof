@@ -110,9 +110,17 @@ it.each([
   'plans/owned-synthetic/outcome',
   'plans/owned-synthetic/observe-effect',
   'owned-deployments',
-  ...['preflight', 'challenge', 'verify', 'approve', 'install', 'fence-intent'].map(
-    (phase) => `owned-deployments/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/${phase}`,
-  ),
+  ...[
+    'preflight',
+    'challenge',
+    'verify',
+    'approve',
+    'install',
+    'fence-intent',
+    'revoke-challenge',
+    'revoke-verify',
+    'revoke',
+  ].map((phase) => `owned-deployments/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/${phase}`),
 ])('bounds owned workflow stream %s before arrayBuffer or upstream dispatch', async (route) => {
   const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
   vi.stubGlobal('fetch', fetchMock);
