@@ -337,6 +337,74 @@ class OwnedPollerTests(unittest.TestCase):
                 MODULE.publish_credential(self.config, scope, file), {"filePublished": True}
             )
 
+    def renewal_installation(self, expiry):
+        task = self.task("89110000-0000-4000-8000-000000000004")
+        installation = {
+            "state": "completed",
+            "task": task,
+            "steps": {
+                "verify_installed_scope": {"confirmed": True},
+                "publish_scoped_credential": {
+                    "authorization": {"reservation": {"expiresAt": expiry}}
+                },
+            },
+        }
+        MODULE.write_private(self.state / (task["claimId"] + ".json"), installation, exclusive=True)
+        return task
+
+    def test_due_renewal_requires_exact_recorded_pins_and_retains_new_once_receipt(self):
+        task = self.renewal_installation("2030-01-01T00:01:00+00:00")
+        now = MODULE.datetime.fromisoformat("2030-01-01T00:00:00+00:00").timestamp()
+
+        def api(config, path, body):
+            self.assertEqual(path, "credentials/renew")
+            return {
+                "reservation": {
+                    "expiresAt": "2030-01-01T00:15:00+00:00",
+                    "credentialId": body["credentialId"],
+                },
+                "reviewedHost": task["reviewedHost"],
+            }
+
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call", side_effect=api) as call,
+            patch.object(MODULE, "same_reviewed_host") as pins,
+            patch.object(MODULE, "fixed_effect", return_value={"filePublished": True}),
+        ):
+            self.assertEqual(
+                MODULE.renew_due(self.configuration_file, now=now), {"renewed": 1, "expired": 0}
+            )
+            self.assertEqual(pins.call_count, 2)
+            self.assertEqual(
+                MODULE.renew_due(self.configuration_file, now=now), {"renewed": 0, "expired": 0}
+            )
+            self.assertEqual(call.call_count, 1)
+        self.assertEqual(
+            len(list(self.state.glob("renewal-????????-????-????-????-????????????.json"))), 1
+        )
+
+    def test_expired_and_uncertain_renewals_never_automatically_issue_again(self):
+        self.renewal_installation("2030-01-01T00:01:00+00:00")
+        now = MODULE.datetime.fromisoformat("2030-01-01T00:00:00+00:00").timestamp()
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call") as call,
+            patch.object(MODULE, "same_reviewed_host"),
+        ):
+            self.assertEqual(
+                MODULE.renew_due(self.configuration_file, now=now + 61),
+                {"renewed": 0, "expired": 1},
+            )
+            call.assert_not_called()
+            call.side_effect = ValueError("lost reservation reply")
+            with self.assertRaises(ValueError):
+                MODULE.renew_due(self.configuration_file, now=now)
+            self.assertEqual(call.call_count, 1)
+            with self.assertRaisesRegex(ValueError, "exact readback"):
+                MODULE.renew_due(self.configuration_file, now=now)
+            self.assertEqual(call.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

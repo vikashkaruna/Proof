@@ -21,6 +21,7 @@ import stat
 import subprocess  # nosec B404 - fixed argv, no shell and no credential argv
 import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -432,7 +433,7 @@ process.stdout.write(JSON.stringify({credentialId:x.credentialId,credentialSha25
 BFF_ROOT = r"""
 import fs from 'node:fs';
 const path='/var/lib/axiom/owned-target-credentials';const st=fs.lstatSync(path);
-if(!st.isDirectory()||st.isSymbolicLink()||st.uid!==0||(st.mode&0o777)!==0o700)throw Error('refused');
+if(process.getuid()!==0||!st.isDirectory()||st.isSymbolicLink()||st.uid!==process.getuid()||(st.mode&0o777)!==0o700)throw Error('refused');
 process.stdout.write(JSON.stringify({path,ownerUid:0,mode:'0700',storage:'container_layer'}));
 """
 BFF_SOCKET = r"""
@@ -833,21 +834,7 @@ def once(configuration_file: Path) -> str:
                 state.update(state="authorization_pending", step=step)
                 write_private(journal, state)
                 try:
-                    fresh_host = readonly_host_preflight(manifest, configuration)
-                    reviewed = task.get("reviewedHost")
-                    if not isinstance(reviewed, dict) or any(
-                        fresh_host.get(key) != reviewed.get(key)
-                        for key in (
-                            "hostInstallerSha256",
-                            "images",
-                            "bffContainerId",
-                            "runtime",
-                            "credentialRoot",
-                            "nodeId",
-                            "workloadApiVolume",
-                        )
-                    ):
-                        raise ValueError("Founder-reviewed host/runtime pins changed")
+                    same_reviewed_host(manifest, configuration, task.get("reviewedHost"))
                     authorization = call(
                         configuration, "tasks/" + task["requestId"] + "/authorize", body
                     )
@@ -892,9 +879,109 @@ def once(configuration_file: Path) -> str:
         return "completed"
 
 
+def same_reviewed_host(manifest: dict, configuration: dict, reviewed: object) -> None:
+    fresh = readonly_host_preflight(manifest, configuration)
+    if not isinstance(reviewed, dict) or any(
+        fresh.get(key) != reviewed.get(key)
+        for key in (
+            "hostInstallerSha256",
+            "images",
+            "bffContainerId",
+            "runtime",
+            "credentialRoot",
+            "nodeId",
+            "workloadApiVolume",
+        )
+    ):
+        raise ValueError("Founder-reviewed host/runtime pins changed")
+
+
+def renew_due(configuration_file: Path, *, now: float | None = None) -> dict:
+    configuration = load_configuration(configuration_file)
+    directory = Path(configuration["stateDirectory"])
+    outcome = {"renewed": 0, "expired": 0}
+    with journal_lock(directory):
+        for archive in sorted(directory.glob("*.json")):
+            if archive.name in ("owner.json", "current.json") or not re.fullmatch(
+                r"[a-f0-9-]{36}\.json", archive.name
+            ):
+                continue
+            installation = parse_json(protected_bytes(archive))
+            if (
+                not isinstance(installation, dict)
+                or installation.get("state") != "completed"
+                or not installation.get("steps", {})
+                .get("verify_installed_scope", {})
+                .get("confirmed")
+            ):
+                continue
+            task = installation["task"]
+            request_id = identifier(task["requestId"])
+            head_file = directory / ("renewal-head-" + request_id + ".json")
+            pending_file = directory / ("renewal-pending-" + request_id + ".json")
+            if pending_file.exists():
+                raise ValueError("Retained renewal outcome requires exact readback")
+            if head_file.exists():
+                previous = parse_json(protected_bytes(head_file))
+                scope = previous["reservation"]
+            else:
+                scope = installation["steps"]["publish_scoped_credential"]["authorization"][
+                    "reservation"
+                ]
+            deadline = datetime.fromisoformat(scope["expiresAt"])
+            if deadline.tzinfo is None:
+                raise ValueError("Retained renewal expiry refused")
+            remaining = deadline.timestamp() - (time.time() if now is None else now)
+            if remaining > 300:
+                continue
+            if remaining <= 0:
+                outcome["expired"] += 1
+                # Expired tokens do not bootstrap new authority. A fresh human
+                # enrollment/review is needed if the approved lifecycle lapses.
+                continue
+            same_reviewed_host(task["manifest"], configuration, task.get("reviewedHost"))
+            intent = {
+                "tenantId": task["tenantId"],
+                "enrollmentId": request_id,
+                "credentialId": str(uuid.uuid4()),
+            }
+            state = {
+                "state": "reservation_pending",
+                "intent": intent,
+                "configurationSha256": hashlib.sha256(
+                    protected_bytes(configuration_file)
+                ).hexdigest(),
+            }
+            write_private(pending_file, state, exclusive=True)
+            reserved = call(configuration, "credentials/renew", intent)
+            if not isinstance(reserved, dict) or reserved.get("reviewedHost") != task.get(
+                "reviewedHost"
+            ):
+                raise ValueError("Reviewed renewal source changed")
+            same_reviewed_host(task["manifest"], configuration, reserved["reviewedHost"])
+            state.update(state="effect_pending", reservation=reserved["reservation"])
+            write_private(pending_file, state)
+            readback = fixed_effect(
+                configuration,
+                configuration_file,
+                directory,
+                task,
+                "publish_scoped_credential",
+                reserved,
+                {},
+            )
+            state.update(state="completed", readback=readback)
+            write_private(pending_file, state)
+            receipt = directory / ("renewal-" + identifier(intent["credentialId"]) + ".json")
+            os.rename(pending_file, receipt)
+            write_private(head_file, state)
+            outcome["renewed"] += 1
+    return outcome
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init-state", "once", "serve", "status"))
+    parser.add_argument("command", choices=("init-state", "once", "serve", "status", "renew-due"))
     parser.add_argument("configuration", type=Path)
     parser.add_argument("--interval", type=int, default=15)
     args = parser.parse_args()
@@ -904,6 +991,8 @@ def main() -> None:
         directory = Path(configuration["stateDirectory"])
         if args.command == "init-state":
             owned_directory(directory, create=True)
+        elif args.command == "renew-due":
+            print(json.dumps(renew_due(args.configuration)))
         elif args.command == "status":
             owned_directory(directory)
             retained = directory / "current.json"
@@ -913,8 +1002,10 @@ def main() -> None:
             if not 5 <= args.interval <= 300:
                 raise ValueError("Polling bound refused")
             while True:
+                # Renew first so a busy queue cannot consume the final lifetime.
+                renewal = renew_due(args.configuration)
                 outcome = once(args.configuration)
-                print(json.dumps({"state": outcome}), flush=True)
+                print(json.dumps({"state": outcome, "renewal": renewal}), flush=True)
                 if args.command == "once":
                     break
                 time.sleep(args.interval)

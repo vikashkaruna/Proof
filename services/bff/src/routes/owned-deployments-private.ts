@@ -17,6 +17,7 @@ export interface OwnedDeploymentPrivateDeps {
     | 'unconfirmed'
     | 'issuerAuthorize'
     | 'issuerComplete'
+    | 'renew'
   >;
 }
 export function ownedDeploymentPrivateRoutes(deps: OwnedDeploymentPrivateDeps | null = null) {
@@ -68,6 +69,13 @@ export function ownedDeploymentPrivateRoutes(deps: OwnedDeploymentPrivateDeps | 
       }
     });
   }
+  app.post('/credentials/renew', async (c) => {
+    try {
+      return c.json({ data: await deps!.installer.renew(await raw(c.req)) });
+    } catch {
+      return c.json({ error: 'owned_deployment_renewal_unconfirmed' }, 503);
+    }
+  });
   app.post('/credentials/authorize', async (c) => {
     try {
       return c.json({ data: await deps!.installer.issuerAuthorize(await raw(c.req)) });

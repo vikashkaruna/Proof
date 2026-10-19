@@ -17,6 +17,7 @@ function fixture() {
       unconfirmed: vi.fn(),
       issuerAuthorize: vi.fn(),
       issuerComplete: vi.fn(),
+      renew: vi.fn(),
     },
   };
   const router = ownedDeploymentPrivateRoutes(deps);
@@ -88,4 +89,15 @@ it('sanitizes uncertain provider replies and missing Node socket context', async
       })
     ).status,
   ).toBe(403);
+});
+
+it('keeps renewal on the same private authenticated fixed channel with sanitized expiry failures', async () => {
+  const f = fixture();
+  vi.mocked(f.deps.installer.renew).mockRejectedValueOnce(Error('expired-private-candidate'));
+  const response = await f.request('127.0.0.1', {}, '{}', '/credentials/renew');
+  expect(response.status).toBe(503);
+  expect(await response.text()).not.toContain('expired-private-candidate');
+  expect(f.deps.auth.authenticate).toHaveBeenCalledOnce();
+  expect((await f.request('203.0.113.1', {}, '{}', '/credentials/renew')).status).toBe(403);
+  expect(f.deps.installer.renew).toHaveBeenCalledTimes(1);
 });

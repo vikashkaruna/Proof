@@ -221,6 +221,60 @@ export class OwnedDeploymentInstaller {
     );
     return { authorization: result, reservation: scope };
   }
+  async renew(raw: unknown) {
+    const body = z
+      .object({ tenantId: uuid, enrollmentId: uuid, credentialId: uuid })
+      .strict()
+      .parse(raw);
+    const current = await this.source(
+      body.tenantId,
+      body.enrollmentId,
+      'publish_scoped_credential',
+    );
+    if (current.source.summary.state !== 'active')
+      throw Error('Owned renewal active scope required');
+    const bindingId = current.source.manifest.bindingId;
+    const existing = z
+      .object({ scope: ownedTargetScope, credentialSha256: sha })
+      .strict()
+      .parse(
+        await this.ports.serviceRpc('read_owned_deployment_credential_scope', {
+          p_tenant_id: body.tenantId,
+          p_binding_id: bindingId,
+        }),
+      );
+    if (
+      existing.scope.tenantId !== body.tenantId ||
+      existing.scope.bindingId !== bindingId ||
+      existing.scope.enrollmentId !== body.enrollmentId
+    )
+      throw Error('Owned renewal current credential refused');
+    // Actual current protected token and signed HTTP role-switch must still
+    // work. A sleeping/expired issuer cannot silently bootstrap fresh authority.
+    await this.published(body.tenantId, body.enrollmentId, existing.scope.credentialId);
+    await this.source(body.tenantId, body.enrollmentId, 'publish_scoped_credential');
+    const renewed = metadata.parse(
+      await this.ports.serviceRpc('reserve_owned_deployment_credential', {
+        p_tenant_id: body.tenantId,
+        p_request_id: body.enrollmentId,
+        p_credential_id: body.credentialId,
+      }),
+    );
+    if (
+      renewed.tenantId !== body.tenantId ||
+      renewed.enrollmentId !== body.enrollmentId ||
+      renewed.bindingId !== bindingId ||
+      renewed.credentialId !== body.credentialId
+    )
+      throw Error('Owned renewal reservation refused');
+    const reviewedHost = z.record(z.string(), z.unknown()).parse(
+      await this.ports.serviceRpc('read_owned_deployment_reviewed_host', {
+        p_tenant_id: body.tenantId,
+        p_request_id: body.enrollmentId,
+      }),
+    );
+    return { reservation: renewed, reviewedHost };
+  }
   async issuerAuthorize(raw: unknown) {
     const body = issuerBody.parse(raw),
       current = await this.source(body.tenantId, body.enrollmentId, 'publish_scoped_credential');

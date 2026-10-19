@@ -83,7 +83,6 @@ COPY --from=build /app /app
 # These lockfile entries are build-only dependencies of the linter/compiler,
 # not imports in the marketing service's runtime graph.
 RUN rm -rf /app/node_modules/.pnpm/@typescript+typescript-linux-* /app/node_modules/.pnpm/braces@*
-RUN mkdir -p /var/lib/axiom/owned-target-credentials && chmod 700 /var/lib/axiom/owned-target-credentials
 WORKDIR /app/services/bff
 EXPOSE 4000
 USER node
