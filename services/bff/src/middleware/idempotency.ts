@@ -67,7 +67,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   const durableOwnedDeployment =
     c.req.method === 'POST' &&
     (c.req.path === '/v1/owned-deployments' ||
-      /^\/v1\/owned-deployments\/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}\/(?:preflight|challenge|verify|approve|install|fence-intent)$/.test(
+      /^\/v1\/owned-deployments\/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}\/(?:preflight|challenge|verify|approve|install|fence-intent|revoke-challenge|revoke-verify|revoke)$/.test(
         c.req.path,
       ));
   const durableOwnedSynthetic =

@@ -15,6 +15,7 @@ import {
   ownedDeploymentVerified,
   ownedDeploymentFenceResult,
   ownedDeploymentOperationReadback,
+  ownedDeploymentRevocationMfaEnvelope,
 } from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
 import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
@@ -24,7 +25,15 @@ import type { OwnedDeploymentHuman } from '../services/owned-deployment-approval
 const uuid = z.uuid();
 export type OwnedDeploymentRouteController = Pick<
   OwnedDeploymentController,
-  'list' | 'options' | 'request' | 'preflight' | 'fence' | 'readOperation' | 'mfa' | 'install'
+  | 'list'
+  | 'options'
+  | 'request'
+  | 'preflight'
+  | 'fence'
+  | 'readOperation'
+  | 'mfa'
+  | 'install'
+  | 'revoke'
 >;
 export function ownedDeploymentRoutes(controller: OwnedDeploymentRouteController | null = null) {
   const app = new Hono<{ Variables: Variables }>();
@@ -176,6 +185,9 @@ export function ownedDeploymentRoutes(controller: OwnedDeploymentRouteController
     'approve',
     'install',
     'fence-intent',
+    'revoke-challenge',
+    'revoke-verify',
+    'revoke',
   ] as const) {
     app.post(phase === 'request' ? '/' : `/:requestId/${phase}`, async (c) => {
       let body: unknown;
@@ -196,7 +208,9 @@ export function ownedDeploymentRoutes(controller: OwnedDeploymentRouteController
               ? ownedDeploymentInstall
               : phase === 'fence-intent'
                 ? ownedDeploymentFence
-                : ownedDeploymentMfaEnvelope;
+                : phase.startsWith('revoke')
+                  ? ownedDeploymentRevocationMfaEnvelope
+                  : ownedDeploymentMfaEnvelope;
       const parsed = schema.safeParse(body);
       if (!parsed.success)
         return c.json(
@@ -248,6 +262,26 @@ export function ownedDeploymentRoutes(controller: OwnedDeploymentRouteController
               data: await controller!.fence(ctx, requestId, parsed.data),
             }),
           );
+        if (phase === 'revoke-challenge' || phase === 'revoke-verify' || phase === 'revoke') {
+          const result = await controller!.revoke(
+            ctx,
+            requestId,
+            phase === 'revoke-challenge'
+              ? 'revoke_challenge'
+              : phase === 'revoke-verify'
+                ? 'revoke_verify'
+                : 'revoke',
+            parsed.data,
+          );
+          return c.json(
+            (phase === 'revoke-challenge'
+              ? ownedDeploymentChallenge
+              : phase === 'revoke-verify'
+                ? ownedDeploymentVerified
+                : ownedDeploymentResult
+            ).parse(result),
+          );
+        }
         const result = await controller!.mfa(ctx, requestId, phase, parsed.data);
         return c.json(
           (phase === 'challenge'

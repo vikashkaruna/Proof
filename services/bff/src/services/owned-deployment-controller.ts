@@ -14,6 +14,8 @@ import {
   ownedDeploymentOperationCanonicalJSON,
   ownedDeploymentSummary,
   ownedDeploymentOperationPhase,
+  ownedDeploymentRevocationMfaEnvelope,
+  ownedDeploymentRevocation,
 } from '@axiom/types';
 import {
   OwnedDeploymentApprovals,
@@ -31,6 +33,20 @@ export interface OwnedDeploymentControllerPorts {
   approval: Pick<ApprovalEngine, 'issue' | 'sign'>;
 }
 const uuid = z.uuid();
+export function ownedEnrollmentRevocationHash(
+  c: OwnedDeploymentHuman,
+  requestId: string,
+  raw: unknown,
+) {
+  return ownedHash({
+    domain: 'axiom.owned-synthetic.enrollment-revocation.v1',
+    tenantId: c.tenantId,
+    actorId: c.actorId,
+    sessionId: c.sessionId,
+    requestId: uuid.parse(requestId),
+    request: ownedDeploymentRevocation.parse(raw),
+  });
+}
 export class OwnedDeploymentController {
   constructor(private readonly ports: OwnedDeploymentControllerPorts) {}
   private auth(c: OwnedDeploymentHuman) {
@@ -277,6 +293,153 @@ export class OwnedDeploymentController {
             .strict()
             .parse(result);
     return parsed.phase === 'challenge' ? { data: parsed.challenge } : { data: { verified: true } };
+  }
+  async revoke(
+    c: OwnedDeploymentHuman,
+    requestId: string,
+    phase: 'revoke_challenge' | 'revoke_verify' | 'revoke',
+    raw: unknown,
+  ) {
+    this.auth(c);
+    uuid.parse(requestId);
+    const body = ownedDeploymentRevocationMfaEnvelope.parse(raw),
+      request = body.request;
+    if (phase === 'revoke_challenge' && (body.challengeId || body.code))
+      throw Error('Owned stop envelope refused');
+    if (phase !== 'revoke_challenge' && !body.challengeId) throw Error('Owned stop MFA required');
+    if (phase === 'revoke' && body.code) throw Error('Owned stop code must not be retained');
+    const intent =
+      phase === 'revoke_challenge'
+        ? { phase, request }
+        : { phase, request, challengeId: body.challengeId! };
+    const prior = (await this.readOperation(c, requestId, phase, request.operationKey)).data;
+    if (prior.outcome !== 'not_recorded') {
+      const digest = createHash('sha256')
+        .update(
+          ownedDeploymentOperationCanonicalJSON({
+            tenantId: c.tenantId,
+            actorId: c.actorId,
+            requestId,
+            operationKey: request.operationKey,
+            intent,
+          }),
+        )
+        .digest('hex');
+      if (
+        prior.outcome !== 'recorded' ||
+        prior.canonicalRequestHash !== digest ||
+        ownedHash(prior.intent) !== ownedHash(intent)
+      )
+        throw Error('Owned stop outcome unconfirmed');
+      if (phase === 'revoke') {
+        if (
+          !prior.result ||
+          prior.result.state !== 'revoked' ||
+          prior.result.approval?.approvalId !== request.expectedApprovalId
+        )
+          throw Error('Owned stop receipt refused');
+        return { data: prior.result };
+      }
+      if (phase === 'revoke_challenge' && prior.phaseResult?.phase === 'revoke_challenge')
+        return { data: prior.phaseResult.challenge };
+      if (phase === 'revoke_verify' && prior.phaseResult?.phase === 'revoke_verify')
+        return { data: { verified: true } };
+      throw Error('Owned stop phase receipt refused');
+    }
+    const binding = ownedEnrollmentRevocationHash(c, requestId, request);
+    z.object({
+      requestId: z.literal(requestId),
+      operationKey: z.literal(request.operationKey),
+      boundPayloadSha256: z.literal(binding),
+      purpose: z.literal('owned_synthetic_revocation'),
+    })
+      .strict()
+      .parse(
+        await this.rpc(c, 'prepare_owned_deployment_revocation', {
+          p_request_id: requestId,
+          p_request: request,
+        }),
+      );
+    if (phase === 'revoke') {
+      const consumed = await this.ports.mfa.consumeChallenge({
+        userId: c.actorId,
+        tenantId: c.tenantId,
+        sessionId: c.sessionId,
+        purpose: 'owned_synthetic_revocation',
+        challengeId: body.challengeId,
+        boundResourceRef: request.operationKey,
+        boundPayloadSha256: binding,
+        consumedFor: request.operationKey,
+      });
+      if (!consumed.ok) throw Error('Owned stop fresh MFA refused');
+      const result = ownedDeploymentSummary.parse(
+        await this.rpc(c, 'record_owned_deployment_revocation', {
+          p_request_id: requestId,
+          p_request: request,
+          p_challenge_id: body.challengeId,
+        }),
+      );
+      if (result.state !== 'revoked' || result.approval?.approvalId !== request.expectedApprovalId)
+        throw Error('Owned stop outcome unconfirmed');
+      return { data: result };
+    }
+    let challengeId = body.challengeId;
+    if (phase === 'revoke_challenge') {
+      const challenge = await this.ports.mfa.issueChallenge({
+        userId: c.actorId,
+        tenantId: c.tenantId,
+        sessionId: c.sessionId,
+        purpose: 'owned_synthetic_revocation',
+        boundResourceRef: request.operationKey,
+        boundPayloadSha256: binding,
+        ttlMs: 300000,
+      });
+      if (!challenge.ok) throw Error('Owned stop challenge refused');
+      challengeId = challenge.challengeId;
+    } else {
+      if (!body.code) throw Error('Owned stop code required');
+      const verified = await this.ports.mfa.verifyChallenge({
+        userId: c.actorId,
+        tenantId: c.tenantId,
+        sessionId: c.sessionId,
+        challengeId: challengeId!,
+        code: body.code,
+        boundResourceRef: request.operationKey,
+        boundPayloadSha256: binding,
+      });
+      if (
+        !verified.ok ||
+        verified.purpose !== 'owned_synthetic_revocation' ||
+        verified.boundResourceRef !== request.operationKey
+      )
+        throw Error('Owned stop fresh MFA refused');
+    }
+    const result = await this.rpc(c, 'record_owned_deployment_revocation_mfa_phase', {
+      p_request_id: requestId,
+      p_phase: phase,
+      p_request: request,
+      p_challenge_id: challengeId,
+    });
+    if (phase === 'revoke_challenge')
+      return {
+        data: z
+          .object({
+            phase: z.literal('revoke_challenge'),
+            challenge: z
+              .object({
+                challengeId: uuid,
+                expiresAt: z.iso.datetime({ offset: true }),
+                maxAttempts: z.number().int().min(1).max(10),
+              })
+              .strict(),
+          })
+          .strict()
+          .parse(result).challenge,
+      };
+    z.object({ phase: z.literal('revoke_verify'), verified: z.literal(true) })
+      .strict()
+      .parse(result);
+    return { data: { verified: true } };
   }
   async install(c: OwnedDeploymentHuman, requestId: string, raw: unknown) {
     return ownedDeploymentSummary.parse(

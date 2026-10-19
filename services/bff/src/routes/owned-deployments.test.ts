@@ -14,6 +14,7 @@ function fixture(role: Variables['role'] = 'owner', configured = true) {
     readOperation: vi.fn(),
     mfa: vi.fn(),
     install: vi.fn(),
+    revoke: vi.fn(),
   };
   const app = new Hono<{ Variables: Variables }>();
   app.use('*', async (c, next) => {

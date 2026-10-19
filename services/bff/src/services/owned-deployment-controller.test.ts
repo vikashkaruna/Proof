@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { ApprovalEngine } from '@axiom/approval-engine';
 import { ownedDeploymentOperationCanonicalJSON } from '@axiom/types';
 import {
+  ownedEnrollmentRevocationHash,
   OwnedDeploymentController,
   type OwnedDeploymentControllerPorts,
 } from './owned-deployment-controller.js';
@@ -255,4 +256,130 @@ it('does not recover a foreign actor receipt or consume a different MFA purpose'
   expect(g.humanRpc.mock.calls.map(([name]) => name)).not.toContain(
     'record_owned_deployment_mfa_phase',
   );
+});
+
+function stopFixture() {
+  const f = fixture();
+  const request = {
+    operationKey: f.decision.operationKey,
+    expectedManifestSha256: f.digest,
+    expectedApprovalId: id(20),
+    reason: 'Stop only this exact retained synthetic authority',
+    acknowledgeOwnedSynthetic: true as const,
+  };
+  f.humanRpc.mockImplementation(async (name, args) => {
+    if (name === 'read_owned_deployment_operation')
+      return {
+        data: {
+          requestId: id(10),
+          tenantId: f.context.tenantId,
+          actorId: f.context.actorId,
+          operationKey: request.operationKey,
+          phase: args.p_phase,
+          outcome: 'not_recorded',
+          canonicalRequestHash: null,
+          intent: null,
+          receiptId: null,
+          result: null,
+          phaseResult: null,
+        },
+      };
+    if (name === 'prepare_owned_deployment_revocation')
+      return {
+        requestId: id(10),
+        operationKey: request.operationKey,
+        boundPayloadSha256: ownedEnrollmentRevocationHash(f.context, id(10), request),
+        purpose: 'owned_synthetic_revocation',
+      };
+    if (name === 'record_owned_deployment_revocation_mfa_phase')
+      return args.p_phase === 'revoke_challenge'
+        ? {
+            phase: 'revoke_challenge',
+            challenge: {
+              challengeId: id(14),
+              expiresAt: new Date(Date.now() + 60000).toISOString(),
+              maxAttempts: 5,
+            },
+          }
+        : { phase: 'revoke_verify', verified: true };
+    return null;
+  });
+  return { ...f, request };
+}
+it('uses a fresh distinct stop purpose without invoking installation or approval signing', async () => {
+  const f = stopFixture();
+  await f.controller.revoke(f.context, id(10), 'revoke_challenge', { request: f.request });
+  expect(f.ports.mfa.issueChallenge).toHaveBeenCalledWith(
+    expect.objectContaining({
+      purpose: 'owned_synthetic_revocation',
+      sessionId: f.context.sessionId,
+      boundPayloadSha256: ownedEnrollmentRevocationHash(f.context, id(10), f.request),
+    }),
+  );
+  expect(f.humanRpc.mock.calls.map(([name]) => name)).toEqual([
+    'read_owned_deployment_operation',
+    'prepare_owned_deployment_revocation',
+    'record_owned_deployment_revocation_mfa_phase',
+  ]);
+  expect(f.ports.serviceRpc).not.toHaveBeenCalled();
+});
+it('recovers a lost stop verification reply before submitting a code again', async () => {
+  const f = stopFixture();
+  const intent = { phase: 'revoke_verify' as const, request: f.request, challengeId: id(14) };
+  f.humanRpc.mockResolvedValueOnce({
+    data: {
+      requestId: id(10),
+      tenantId: f.context.tenantId,
+      actorId: f.context.actorId,
+      phase: 'revoke_verify',
+      operationKey: f.request.operationKey,
+      outcome: 'recorded',
+      canonicalRequestHash: createHash('sha256')
+        .update(
+          ownedDeploymentOperationCanonicalJSON({
+            tenantId: f.context.tenantId,
+            actorId: f.context.actorId,
+            requestId: id(10),
+            operationKey: f.request.operationKey,
+            intent,
+          }),
+        )
+        .digest('hex'),
+      intent,
+      receiptId: '44',
+      result: f.summary,
+      phaseResult: { phase: 'revoke_verify', verified: true },
+    },
+  });
+  expect(
+    await f.controller.revoke(f.context, id(10), 'revoke_verify', {
+      request: f.request,
+      challengeId: id(14),
+      code: '987654',
+    }),
+  ).toEqual({ data: { verified: true } });
+  expect(f.ports.mfa.verifyChallenge).not.toHaveBeenCalled();
+  expect(f.humanRpc).toHaveBeenCalledTimes(1);
+  expect(JSON.stringify(f.humanRpc.mock.calls)).not.toContain('987654');
+});
+it('refuses using an enrollment factor proof to stop and never retains a stop code in final submission', async () => {
+  const f = stopFixture();
+  await expect(
+    f.controller.revoke(f.context, id(10), 'revoke_verify', {
+      request: f.request,
+      challengeId: id(14),
+      code: '123456',
+    }),
+  ).rejects.toThrow('fresh MFA refused');
+  expect(f.ports.mfa.consumeChallenge).not.toHaveBeenCalled();
+  expect(f.humanRpc.mock.calls.map(([name]) => name)).not.toContain(
+    'record_owned_deployment_revocation_mfa_phase',
+  );
+  await expect(
+    f.controller.revoke(f.context, id(10), 'revoke', {
+      request: f.request,
+      challengeId: id(14),
+      code: '123456',
+    }),
+  ).rejects.toThrow('must not be retained');
 });
