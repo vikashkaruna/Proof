@@ -88,6 +88,7 @@ def test_presidio_analyzer_integration(monkeypatch):
             return [MockResult(0, 4, "PERSON"), MockResult(8, 14, "LOCATION")]
 
     import model_gateway.redaction as red_mod
+
     monkeypatch.setattr(red_mod, "_presidio_analyzer", lambda: MockAnalyzer())
 
     r = redact("John in Mumbai")
@@ -103,10 +104,40 @@ def test_presidio_analyzer_exception(monkeypatch):
             raise RuntimeError("Presidio model failed")
 
     import model_gateway.redaction as red_mod
+
     monkeypatch.setattr(red_mod, "_presidio_analyzer", lambda: FailingAnalyzer())
 
     # Should not raise; fails back to regex pass
     r = redact("Customer PAN is ABCDE1234F")
     assert "ABCDE1234F" not in r.redacted_text
     assert r.redactions.get("PAN") == 1
+    assert r.ner_status == "failed"
 
+
+def test_regex_only_redaction_cannot_qualify_hosted_free_text(monkeypatch):
+    import hashlib
+
+    import model_gateway.redaction as red_mod
+
+    monkeypatch.setattr(red_mod, "_presidio_analyzer", lambda: None)
+    summary = redact("Ravi at 12 Example Road; user@example.com")
+    assert summary.ner_status == "unavailable"
+    assert "Ravi at 12 Example Road" in summary.redacted_text
+    observation = red_mod.hosted_egress_eligibility(summary)
+    assert observation.state == "unqualified"
+    assert observation.input_sha256 == summary.original_hash
+    assert observation.output_sha256 == hashlib.sha256(summary.redacted_text.encode()).hexdigest()
+
+
+def test_successful_english_ner_does_not_invent_language_eligibility(monkeypatch):
+    from types import SimpleNamespace
+
+    import model_gateway.redaction as red_mod
+
+    monkeypatch.setattr(
+        red_mod, "_presidio_analyzer", lambda: SimpleNamespace(analyze=lambda **_kwargs: [])
+    )
+    summary = redact("नाम और पता; unrecognized words")
+    assert summary.ner_status == "completed"
+    # Successful analysis is not evidence of supported language or no PII.
+    assert red_mod.hosted_egress_eligibility(summary).state == "unqualified"

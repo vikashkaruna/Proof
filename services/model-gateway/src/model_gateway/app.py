@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -32,7 +33,13 @@ from .completion_provenance import (
 )
 from .config import Settings, get_settings
 from .model_identity import configured_model_identities, safe_model_identity
-from .redaction import RedactionSummary, redact, redact_variables
+from .redaction import (
+    HostedEgressEligibility,
+    RedactionSummary,
+    hosted_egress_eligibility,
+    redact,
+    redact_variables,
+)
 from .router import RouteDecision, TaskKind, decide_route
 
 # ─── Request / response shapes ───────────────────────────────────────
@@ -176,7 +183,9 @@ async def ready() -> JSONResponse:
         name: value and (not hosted if name == "self_hosted" else hosted)
         for name, value in configured.items()
     }
-    eligible = any(enabled.values())
+    # There is no reviewed trusted language/input policy for hosted free text.
+    # Provider credentials alone must not advertise an executable hosted route.
+    eligible = any(enabled.values()) and not hosted
     return JSONResponse(
         status_code=200 if eligible else 503,
         content={
@@ -193,6 +202,7 @@ async def ready() -> JSONResponse:
                 for name, value in configured.items()
             },
             "redaction_enabled": settings.pii_redaction_enabled,
+            "hosted_egress_eligibility": "unqualified" if hosted else "not_applicable",
         },
     )
 
@@ -403,7 +413,22 @@ def _redact_hosted_prompt(prompt: str, settings: Settings) -> RedactionSummary:
         raise HostedRedactionUnavailable()
     try:
         summary = redact(prompt)
-        if not isinstance(summary, RedactionSummary) or not isinstance(summary.redacted_text, str):
+        if (
+            not isinstance(summary, RedactionSummary)
+            or not isinstance(summary.redacted_text, str)
+            or summary.ner_status != "completed"
+            or summary.original_hash != text_hash(prompt)
+            or summary.redacted_hash != text_hash(summary.redacted_text)
+        ):
+            raise HostedRedactionUnavailable()
+        eligibility = hosted_egress_eligibility(summary)
+        if (
+            not isinstance(eligibility, HostedEgressEligibility)
+            or eligibility.state != "qualified"
+            or eligibility.input_sha256 != text_hash(prompt)
+            or eligibility.output_sha256 != text_hash(summary.redacted_text)
+            or not re.fullmatch(r"[a-f0-9]{64}", eligibility.policy_sha256)
+        ):
             raise HostedRedactionUnavailable()
         return summary
     except Exception:  # noqa: BLE001 - any redactor failure must refuse hosted egress
