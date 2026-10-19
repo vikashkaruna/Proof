@@ -65,6 +65,8 @@ select public.prepare_owned_deployment_install(pg_temp.pg_id(1),pg_temp.id(1),pg
 reset role;
 set local role service_role;
 select public.claim_next_owned_deployment_task(pg_temp.pg_id(381));
+select pg_temp.ok(public.claim_next_owned_deployment_task(pg_temp.pg_id(381))#>>'{task,requestId}'=pg_temp.pg_id(301)::text,'same claim key recovers original installation, never takes another task kind');
+select pg_temp.deployment169_refused('select public.claim_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(381))');
 select pg_temp.ok(public.read_owned_deployment_reviewed_host(pg_temp.pg_id(1),pg_temp.pg_id(301))=(select v from enrollment169_saved where name='host'),'installer reads exactly the host/runtime facts bound into founder-reviewed preflight');
 select public.authorize_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'enroll_synthetic_resource',(select v from enrollment169_saved where name='token'));
 select public.authorize_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'enroll_synthetic_resource',(select v from enrollment169_saved where name='token'));

@@ -661,6 +661,12 @@ declare task owned_synthetic.deployment_preflight_tasks;r owned_synthetic.deploy
  claim owned_synthetic.deployment_preflight_claims;h owned_synthetic.deployment_heads;receipt bigint;
 begin
  if p_task_id is null or p_claim_id is null then raise exception 'owned deployment claim refused' using errcode='22023';end if;
+ -- One claim UUID denotes one original task across BOTH task kinds, even when
+ -- an earlier HTTP request is still committing after its caller timed out.
+ perform pg_advisory_xact_lock(hashtextextended(p_claim_id::text,16901));
+ if exists(select 1 from owned_synthetic.deployment_installation_claims where claim_id=p_claim_id)
+ or exists(select 1 from owned_synthetic.deployment_preflight_claims where claim_id=p_claim_id and task_id<>p_task_id)
+ then raise exception 'owned deployment claim belongs to another task' using errcode='42501';end if;
  select * into strict task from owned_synthetic.deployment_preflight_tasks where id=p_task_id;
  perform pg_advisory_xact_lock_shared(hashtextextended(task.tenant_id::text,47));
  perform owned_synthetic.deployment_unfenced(task.tenant_id,task.actor_id,task.request_id,'preflight',task.id);
@@ -1382,6 +1388,9 @@ create function public.claim_next_owned_deployment_task(p_claim_id uuid) returns
 language plpgsql security definer set search_path='' set lock_timeout='5s' as $$
 declare r owned_synthetic.deployment_requests;task owned_synthetic.deployment_preflight_tasks;existing uuid;answer jsonb;a owned_synthetic.deployment_approvals;receipt bigint;begin
  if current_setting('role',true) is distinct from 'service_role' or p_claim_id is null then raise exception 'owned deployment task transport refused' using errcode='42501';end if;
+ -- Lock precedes tenant/request locks; no tenant-held path acquires this
+ -- independent claim namespace. Exact retries resolve their original task.
+ perform pg_advisory_xact_lock(hashtextextended(p_claim_id::text,16901));
  select task_id into existing from owned_synthetic.deployment_preflight_claims where claim_id=p_claim_id;
  if found then return jsonb_build_object('kind','preflight','task',public.claim_owned_deployment_preflight(existing,p_claim_id));end if;
  select request_id into existing from owned_synthetic.deployment_installation_claims where claim_id=p_claim_id;
