@@ -1,3 +1,4 @@
+import { dataFlowDeclarationRoutes } from './data-flow-declarations.js';
 import type { StandingCoordinator } from '../services/standing-coordinator.js';
 import { standingApprovalRoutes } from './standing-approvals.js';
 import { monitoringReadScopeRoutes } from './monitoring-read-scopes.js';
@@ -245,6 +246,7 @@ interface Deps {
   stagedEvidence?: StagedEvidenceRoutesDeps;
   assessmentRequests?: AssessmentRequestProducer;
   publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
+  dataFlowDeclarationsEnabled?: boolean;
   standingCoordinatorEnabled?: boolean;
   standingCoordinatorStatus?: () => ReturnType<StandingCoordinator['health']>;
   approvalEngine: ApprovalEngine;
@@ -266,6 +268,13 @@ export function v1Routes(deps: Deps) {
     }),
   );
   app.route('/', ownedSyntheticPlanRoutes(deps.ownedSynthetic));
+  app.route(
+    '/',
+    dataFlowDeclarationRoutes({
+      mfa: deps.mfa,
+      enabled: deps.dataFlowDeclarationsEnabled ?? false,
+    }),
+  );
   app.route('/', estateRoutes());
   app.route('/', consentRoutes());
   // Specific staged options must precede the legacy /evidence/:id route.

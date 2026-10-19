@@ -520,3 +520,21 @@ describe('standing coordinator deployment admission', () => {
     ).toThrow(/AXIOM_STANDING_POLICY_COORDINATOR_ENABLED/);
   });
 });
+
+it('keeps explicit data-flow declarations off until trusted server configuration', () => {
+  const base = {
+    NODE_ENV: 'test',
+    SUPABASE_URL: 'http://localhost:54321',
+    SUPABASE_ANON_KEY: 'a'.repeat(40),
+    SUPABASE_SERVICE_KEY: 'b'.repeat(40),
+  };
+  resetEnvCache();
+  expect(loadEnv(base).AXIOM_DATA_FLOW_DECLARATIONS_ENABLED).toBe('false');
+  resetEnvCache();
+  expect(
+    loadEnv({ ...base, AXIOM_DATA_FLOW_DECLARATIONS_ENABLED: 'true' })
+      .AXIOM_DATA_FLOW_DECLARATIONS_ENABLED,
+  ).toBe('true');
+  resetEnvCache();
+  expect(() => loadEnv({ ...base, AXIOM_DATA_FLOW_DECLARATIONS_ENABLED: 'yes' })).toThrow();
+});
