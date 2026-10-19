@@ -405,3 +405,25 @@ test('failed parse is durably private before same error escapes and strict reade
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('report checkpoints remain fixed labels and never relay arbitrary private output', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'report-checkpoint-'));
+  try {
+    const log = join(dir, 'browser.log');
+    for (const stage of [
+      'report-board-content',
+      'report-board-preview',
+      'report-board-retained',
+      'report-board-release',
+      'report-board-dossier',
+      'report-browser-cleanup',
+    ]) {
+      writeFileSync(log, `[registered-website-stage] ${stage}\n`, { mode: 0o600 });
+      assert.equal(readRegisteredBrowserProgress(log), stage);
+    }
+    writeFileSync(log, `[registered-website-stage] ${secret}\n`, { mode: 0o600 });
+    assert.equal(readRegisteredBrowserProgress(log), 'unknown');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -107,6 +107,7 @@ while IFS= read -r suite; do
 done < <(python3 tests/database/lib/report-policy-phases.py current-list --directory "$phase_dir")
 python3 tests/database/lib/report-policy-phases.py verify --directory "$phase_dir"
 standing173_race_image=$(docker image inspect --format '{{.Id}}' "$image")
+python3 tests/database/lib/branded-report-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
 python3 tests/database/lib/standing-approval-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
 python3 tests/database/lib/explicit-data-flow-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
 python3 tests/database/lib/scheduled-coverage-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test

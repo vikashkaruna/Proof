@@ -1,3 +1,5 @@
+import { encodeQuestionnaireEvidenceSource } from '@axiom/report-kit/questionnaire-evidence-report';
+import { encodeBrandedSource, buildBrandedReport } from '@axiom/report-kit/branded-report';
 import { createHash, randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { EvidenceDatabase } from './evidence-ingestion.js';
@@ -243,6 +245,55 @@ function setup() {
 }
 
 describe('board artifact provider boundary', () => {
+  it('pins new branded rendering and preserves exact independently reviewed version bindings', async () => {
+    const { fixture, service, renderPdf } = setup();
+    const source = fixture.rows('board_request_sources')[0]!;
+    if (typeof source.source_text !== 'string') throw Error('Synthetic source missing');
+    const original = source.source_text;
+    const inner = encodeQuestionnaireEvidenceSource('board', original, sha(original));
+    const envelope = encodeBrandedSource('board', inner.text, inner.sha256, 'Synthetic Company');
+    source.source_text = envelope.text;
+    source.source_sha256 = envelope.sha256;
+    const document = buildBrandedReport({
+      requestId,
+      tenantId: tenant,
+      engagementId,
+      assessmentRunId: runId,
+      title,
+      generatedAt: '2026-09-30T12:00:00.000Z',
+      sourceText: envelope.text,
+      sourceSha256: envelope.sha256,
+    });
+    const documentText = JSON.stringify(document);
+    const report = fixture.rows('reports')[0]!;
+    report.content_text = documentText;
+    report.content_sha256 = sha(documentText);
+    report.reviewed_content_hash = sha(documentText);
+    const review = fixture.rows('report_reviews')[0]!;
+    if (typeof review.review_text !== 'string') throw Error('Synthetic review missing');
+    const text = JSON.stringify({
+      ...JSON.parse(review.review_text),
+      content_sha256: sha(documentText),
+    });
+    review.content_sha256 = sha(documentText);
+    review.review_text = text;
+    review.review_sha256 = sha(text);
+    await service.build(tenant, actorId, reportId, operationKey);
+    expect(renderPdf).toHaveBeenCalledWith(
+      expect.stringContaining('Axiom Minds Private Limited'),
+      expect.objectContaining({
+        documentDate: review.reviewed_at,
+        requireChromium: true,
+        brandedPresentation: { revision: 'axiom-report-brand-1', title },
+      }),
+    );
+    expect(JSON.stringify(fixture.rows('board_artifact_builds')[0]!.request)).toContain(
+      'chromium-board-brand-v7',
+    );
+    expect(source.source_text).toBe(envelope.text);
+    expect(report.content_text).toBe(documentText);
+  });
+
   it.each(
     (['rejected', 'archived'] as const).flatMap((status) =>
       (['none', 'pending', 'settled'] as const).map((buildState) => ({ status, buildState })),

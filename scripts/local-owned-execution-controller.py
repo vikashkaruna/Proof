@@ -13,7 +13,7 @@ import json
 import os
 import re
 import secrets
-import subprocess
+import subprocess  # nosec B404  # validated local Docker names, pinned images and dedicated controller argv
 import tempfile
 from pathlib import Path
 
@@ -29,7 +29,7 @@ HELPER = "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97af
 
 
 def run(args: list[str], **kw):
-    return subprocess.run(
+    return subprocess.run(  # nosec B603  # validated local Docker names, pinned images and dedicated controller argv
         args, check=True, capture_output=True, text=True, timeout=120, **kw
     )
 
@@ -46,7 +46,7 @@ def image_id(value: str) -> str:
 
 
 def volume(name: str):
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603, B607  # validated local Docker names, pinned images and dedicated controller argv
         ["docker", "volume", "inspect", name],
         check=False,
         capture_output=True,
@@ -94,7 +94,7 @@ def stage(args):
     if not 0 <= args.docker_gid <= 2147483647:
         raise ValueError("Reviewed daemon GID required")
     if (
-        subprocess.run(
+        subprocess.run(  # nosec B603, B607  # validated local Docker names, pinned images and dedicated controller argv
             ["docker", "inspect", NAME], check=False, capture_output=True
         ).returncode
         == 0

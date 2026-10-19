@@ -17,7 +17,7 @@ import json
 import os
 import re
 import stat
-import subprocess
+import subprocess  # nosec B404  # fixed deployment/Git argv from reviewed resource configuration
 import time
 from datetime import datetime
 from pathlib import Path
@@ -44,13 +44,15 @@ TF_ROOT = ROOT / "infra/terraform/envs/marketing-preprod"
 spec = importlib.util.spec_from_file_location(
     "marketing_preprod_config", ROOT / "scripts/marketing-preprod-config.py"
 )
-assert spec and spec.loader
+if spec is None or spec.loader is None:
+    raise ValueError("Reviewed deployment helper unavailable")
 config_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config_module)
 job_spec = importlib.util.spec_from_file_location(
     "marketing_db_job", ROOT / "scripts/marketing-db-job.py"
 )
-assert job_spec and job_spec.loader
+if job_spec is None or job_spec.loader is None:
+    raise ValueError("Reviewed deployment helper unavailable")
 job_module = importlib.util.module_from_spec(job_spec)
 job_spec.loader.exec_module(job_module)
 
@@ -157,7 +159,7 @@ def protected_env(path: Path) -> dict[str, str]:
 
 
 def clean_revision(root: Path) -> str:
-    sha = subprocess.run(
+    sha = subprocess.run(  # nosec B603, B607  # fixed deployment/Git argv from reviewed resource configuration
         ["git", "rev-parse", "HEAD"],
         cwd=root,
         capture_output=True,
@@ -165,7 +167,7 @@ def clean_revision(root: Path) -> str:
         check=True,
         timeout=10,
     ).stdout.strip()
-    dirty = subprocess.run(
+    dirty = subprocess.run(  # nosec B603, B607  # fixed deployment/Git argv from reviewed resource configuration
         ["git", "status", "--porcelain", "--untracked-files=normal"],
         cwd=root,
         capture_output=True,
@@ -705,8 +707,8 @@ def bootstrap_job_descriptor(
         )
     secret_names = {
         "ADMIN_DB_URL": "MARKETING_ADMIN_DB_URL_SECRET",
-        "GOTRUE_DB_PASSWORD": "MARKETING_AUTH_PASSWORD_SECRET",
-        "REST_DB_PASSWORD": "MARKETING_REST_PASSWORD_SECRET",
+        "GOTRUE_DB_PASSWORD": "MARKETING_AUTH_PASSWORD_SECRET",  # nosec B105  # configuration secret reference/key name or absent optional bearer, never a credential value
+        "REST_DB_PASSWORD": "MARKETING_REST_PASSWORD_SECRET",  # nosec B105  # configuration secret reference/key name or absent optional bearer, never a credential value
     }
     for target, source_key in secret_names.items():
         secret_id = env.get(source_key, "")
@@ -1300,7 +1302,7 @@ def run_command(argv: list[str], *, cwd: Path, stdout: bool = False) -> bytes:
         key: value for key, value in os.environ.items() if not key.startswith("TF_")
     }
     clean_env.update({"TF_IN_AUTOMATION": "1", "TF_INPUT": "0"})
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603  # fixed deployment/Git argv from reviewed resource configuration
         argv, cwd=cwd, env=clean_env, capture_output=True, check=False, timeout=600
     )
     if result.returncode:
@@ -1759,7 +1761,8 @@ def hosting_phase(
     helper_spec = importlib.util.spec_from_file_location(
         "marketing_hosting_acceptance", ROOT / "scripts/marketing-preprod-acceptance.py"
     )
-    assert helper_spec and helper_spec.loader
+    if helper_spec is None or helper_spec.loader is None:
+        raise ValueError("Reviewed deployment helper unavailable")
     helper = importlib.util.module_from_spec(helper_spec)
     helper_spec.loader.exec_module(helper)
     services_file = work / "services.receipt.private.json"
@@ -1807,7 +1810,8 @@ def readback_phase(
     helper_spec = importlib.util.spec_from_file_location(
         "marketing_readback_acceptance", ROOT / "scripts/marketing-preprod-acceptance.py"
     )
-    assert helper_spec and helper_spec.loader
+    if helper_spec is None or helper_spec.loader is None:
+        raise ValueError("Reviewed deployment helper unavailable")
     helper = importlib.util.module_from_spec(helper_spec)
     helper_spec.loader.exec_module(helper)
     database = protected_json(work / "database.private.json")

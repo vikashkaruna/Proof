@@ -733,7 +733,7 @@ class IssuerTests(unittest.TestCase):
         )
 
     def test_cli_failures_sanitize_input_and_require_isolated_python(self):
-        import subprocess
+        import subprocess  # nosec B404  # fixed local Python CLI refusal test, synthetic marker only
         import sys
 
         for isolated in (False, True):
@@ -742,7 +742,7 @@ class IssuerTests(unittest.TestCase):
                 + (["-I"] if isolated else [])
                 + [str(Path(issuer.__file__)), "--issue", "synthetic-secret-marker"]
             )
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603  # current interpreter plus fixed local issuer path; no shell or real credential
                 args, capture_output=True, text=True, check=False, timeout=5
             )
             self.assertEqual(result.returncode, 1)

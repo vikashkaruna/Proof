@@ -13,7 +13,7 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
+import subprocess  # nosec B404  # fixed gcloud secret commands; names/project validated; payload uses stdin
 from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -89,20 +89,20 @@ def materialize(env: dict[str, str], database: dict, dry_run: bool) -> dict:
             versions[secret] = "planned"
             continue
         common = ["--project=" + project, "--billing-project=" + project]
-        read = subprocess.run(["gcloud", "secrets", "describe", secret, *common, "--format=json"], capture_output=True, text=True, timeout=30)
+        read = subprocess.run(["gcloud", "secrets", "describe", secret, *common, "--format=json"], capture_output=True, text=True, timeout=30)  # nosec B603, B607  # fixed gcloud secret commands; names/project validated; payload uses stdin
         if read.returncode:
             if not re.search(r"\bNOT_FOUND\b", read.stderr) or re.search(r"PERMISSION_DENIED|UNAUTHENTICATED|FORBIDDEN", read.stderr):
                 raise ValueError("Secret inventory could not prove absence")
-            create = subprocess.run(["gcloud", "secrets", "create", secret, *common, "--replication-policy=user-managed", "--locations=" + env["GCP_REGION"], "--quiet"], capture_output=True, text=True, timeout=45)
+            create = subprocess.run(["gcloud", "secrets", "create", secret, *common, "--replication-policy=user-managed", "--locations=" + env["GCP_REGION"], "--quiet"], capture_output=True, text=True, timeout=45)  # nosec B603, B607  # fixed gcloud secret commands; names/project validated; payload uses stdin
             if create.returncode:
                 raise ValueError("Secret creation failed")
             # A creation acknowledgement does not prove resource ownership or
             # regional replication; read the actual resulting descriptor.
-            read = subprocess.run(["gcloud", "secrets", "describe", secret, *common, "--format=json"], capture_output=True, text=True, timeout=30)
+            read = subprocess.run(["gcloud", "secrets", "describe", secret, *common, "--format=json"], capture_output=True, text=True, timeout=30)  # nosec B603, B607  # fixed gcloud secret commands; names/project validated; payload uses stdin
             if read.returncode:
                 raise ValueError("Created secret descriptor unavailable")
         verify_secret_descriptor(read.stdout, env, secret)
-        listed = subprocess.run(["gcloud", "secrets", "versions", "list", secret, *common, "--format=json(name,state)"], capture_output=True, text=True, timeout=30)
+        listed = subprocess.run(["gcloud", "secrets", "versions", "list", secret, *common, "--format=json(name,state)"], capture_output=True, text=True, timeout=30)  # nosec B603, B607  # fixed gcloud secret commands; names/project validated; payload uses stdin
         if listed.returncode:
             raise ValueError("Secret version inventory failed")
         existing = json.loads(listed.stdout or "[]")
@@ -122,12 +122,12 @@ def materialize(env: dict[str, str], database: dict, dry_run: bool) -> dict:
             raise ValueError("Inactive historical secret version requires explicit review")
         if existing:
             version = max(ordinal(v) for v in existing)
-            read_payload = subprocess.run(["gcloud", "secrets", "versions", "access", str(version), "--secret=" + secret, *common], capture_output=True, timeout=30)
+            read_payload = subprocess.run(["gcloud", "secrets", "versions", "access", str(version), "--secret=" + secret, *common], capture_output=True, timeout=30)  # nosec B603, B607  # fixed gcloud secret commands; names/project validated; payload uses stdin
             if read_payload.returncode or read_payload.stdout != payload.encode():
                 raise ValueError("Existing secret differs; rotation requires explicit review")
             versions[secret] = str(version)
         else:
-            created = subprocess.run(["gcloud", "secrets", "versions", "add", secret, *common, "--data-file=-", "--format=json(name)"], input=payload.encode(), capture_output=True, timeout=45)
+            created = subprocess.run(["gcloud", "secrets", "versions", "add", secret, *common, "--data-file=-", "--format=json(name)"], input=payload.encode(), capture_output=True, timeout=45)  # nosec B603, B607  # fixed gcloud secret commands; names/project validated; payload uses stdin
             if created.returncode:
                 raise ValueError("Secret version creation failed")
             versions[secret] = str(ordinal(json.loads(created.stdout)))

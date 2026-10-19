@@ -11,12 +11,20 @@ import importlib.util
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404  # fixed gcloud exec argv and validated exact job execution identifier
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+
+def postgres_literal(value: str) -> str:
+    """Encode a PostgreSQL E literal independently of standard_conforming_strings."""
+    if "\x00" in value:
+        raise ValueError("NUL in SQL literal refused")
+    return "E'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
 def load_module(name: str, path: str):
@@ -186,10 +194,10 @@ def validate_expected(expected: dict) -> None:
 def readback_sql(expected: dict) -> str:
     # Identifiers/tables are fixed. Untrusted data is one escaped JSON literal.
     validate_expected(expected)
-    literal = json.dumps(expected, separators=(",", ":")).replace("'", "''")
+    literal = postgres_literal(json.dumps(expected, separators=(",", ":")))
     return f"""begin transaction read only;
 set local statement_timeout='20s';set local lock_timeout='2s';
-with source as(select '{literal}'::jsonb s),
+with source as(select {literal}::jsonb s),
 contacts as(select c.id,c.name,c.email,c.company,c.message,c.delivery_status,c.created_at,
  c.delivery_attempted_at,c.delivery_completed_at,c.provider_message_id,c.delivery_error_code
  from public.contact_inquiries c,source where exists
@@ -209,7 +217,7 @@ select json_build_object('database',current_database(),'role',current_user,
  'gap',(select coalesce(json_agg(gap),'[]') from gap),
  'budgets',(select coalesce(json_agg(budgets),'[]') from budgets));
 rollback;
-"""
+"""  # nosec B608  # allowlisted identifiers/hashes and explicitly escaped PostgreSQL literals
 
 
 def validate_readback(expected: dict, actual: dict) -> dict:
@@ -328,7 +336,7 @@ def main() -> int:
             ):
                 raise ValueError("Explicit source-bound runtime target required")
             pg = job_helper.runtime_environment(env)
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603, B607  # fixed gcloud exec argv and validated exact job execution identifier
                 ["psql", "-X", "-q", "-w", "-v", "ON_ERROR_STOP=1", "-At"],
                 input=readback_sql(expected),
                 env=pg,

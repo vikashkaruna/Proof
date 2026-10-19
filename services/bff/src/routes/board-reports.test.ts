@@ -158,7 +158,7 @@ describe('Board Reports HTTP Routes', () => {
     // Mock RPC request_board_report in fixture
     const reqId = randomUUID();
     fixture.db.rpc = ((name: string, _args: Record<string, unknown>) => {
-      if (name === 'request_board_report') {
+      if (name === 'request_branded_board_report') {
         return abortableResult(
           Promise.resolve({
             data: {

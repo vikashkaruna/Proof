@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { reportPreviewVersion } from './report-preview-version';
 import type { ReportDetail } from './report-contract';
 
 // Display projection of document6 (questionnaire-only requests, 0155). The
@@ -35,7 +36,13 @@ export function QuestionnaireEvidencePreview({ report }: { report: ReportDetail 
   if (!report.contentText || report.contentText.length > 4 * 1024 * 1024) return null;
   let parsed: z.infer<typeof projection>;
   try {
-    parsed = projection.parse(JSON.parse(report.contentText));
+    parsed = projection.parse(
+      reportPreviewVersion(
+        JSON.parse(report.contentText),
+        6,
+        report.assurance === 'digest_bound' && !!report.contentHash,
+      ),
+    );
     if (
       parsed.title !== report.title ||
       parsed.engagement_id !== report.engagementId ||

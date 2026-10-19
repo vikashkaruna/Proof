@@ -7,7 +7,11 @@ import { randomUUID } from 'node:crypto';
 import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { Capability } from '@axiom/types';
-import { createStatutoryProofWriter, createSupabaseAdmin } from '@axiom/supabase';
+import {
+  createHumanActionWriter,
+  createStatutoryProofWriter,
+  createSupabaseAdmin,
+} from '@axiom/supabase';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { EvidenceError, type EvidenceDatabase } from '../services/evidence-ingestion.js';
@@ -45,6 +49,7 @@ export function statutoryReportRoutes(
     new StatutoryReportService(
       dependencies.db ?? createSupabaseAdmin(),
       dependencies.db ?? createStatutoryProofWriter(),
+      dependencies.db ?? createHumanActionWriter(),
     );
   const artifacts = () =>
     dependencies.artifacts ??

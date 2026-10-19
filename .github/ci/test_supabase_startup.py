@@ -5,7 +5,7 @@ import io
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
 import sys
 import tempfile
 import time
@@ -390,7 +390,7 @@ exit 1
                 "ARGUMENT_LOG": str(root / "arguments"),
                 **(extra or {}),
             }
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
                 ["/bin/bash", str(root / "scripts/start-parity-supabase.sh")],
                 env=env,
                 capture_output=True,

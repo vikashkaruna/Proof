@@ -27,6 +27,7 @@ it.each([
     const tenantId = '11111111-1111-4111-8111-111111111111';
     const request = vi.mocked(reportRequest);
     let status: 'draft' | 'approved' = 'draft';
+    let artifactStatus: 'not_started' | 'settled' = 'not_started';
     request.mockImplementation((_tenant, path) => {
       if (path.includes('assessment-options'))
         return Promise.resolve(Response.json({ assessments: [], total: 0, limit: 20, offset: 0 }));
@@ -55,7 +56,7 @@ it.each([
           Response.json({
             reportId: id,
             reportStatus: status,
-            status: 'not_started',
+            status: artifactStatus,
             buildId: null,
             operationKey: null,
             retainUntil: null,
@@ -130,6 +131,16 @@ it.each([
     expect(
       screen.queryByRole('button', { name: 'Build and retain reviewed source and PDF' }),
     ).toBeNull();
+    expect(request.mock.calls.every(([, , options]) => options?.body === undefined)).toBe(true);
+    artifactStatus = 'settled';
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: kind === 'board' ? 'Refresh board state' : 'Refresh auditor packs',
+      }),
+    );
+    await screen.findByText('Retention: Build settled; source or PDF details unavailable');
+    expect(screen.queryByText('Source and PDF retained')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Preview retained PDF' })).toBeNull();
     expect(request.mock.calls.every(([, , options]) => options?.body === undefined)).toBe(true);
   },
 );

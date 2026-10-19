@@ -11,7 +11,7 @@ import argparse
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404  # allowlisted exact-project local Docker inspection argv
 import sys
 from pathlib import Path
 
@@ -247,7 +247,7 @@ def container_facts(project):
         key: value for key, value in os.environ.items() if not key.startswith("DOCKER_")
     }
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603, B607  # allowlisted exact-project local Docker inspection argv
             [
                 "docker",
                 "--host",

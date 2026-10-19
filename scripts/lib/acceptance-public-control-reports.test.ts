@@ -1,3 +1,8 @@
+import {
+  encodeBrandedSource,
+  BRANDED_PRESENTATION_V1,
+  buildBrandedReport,
+} from '../../packages/report-kit/src/branded-report.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
@@ -16,6 +21,7 @@ import {
   validateReportProvider,
   publicReportBrowserHandoffSchema,
   verifyCoverageFirstAcceptanceReport,
+  verifyBrandedAcceptanceReport,
 } from './acceptance-public-control-reports.js';
 
 function fixture() {
@@ -158,8 +164,8 @@ test('browser handoff is strict, bounded and cannot carry authentication materia
   const value = {
     version: 2,
     presentation: {
-      sourceVersion: 4,
-      documentVersion: 5,
+      sourceVersion: 6,
+      documentVersion: 7,
       metrics: 'withheld',
       policySha256: sha(canonicalJson(coverageFirstPolicy())),
     },
@@ -375,6 +381,78 @@ for (const kind of ['board', 'auditor'] as const)
           );
         input.contentSha256 = change === 'document-hash' ? 'f'.repeat(64) : sha(input.contentText);
         assert.throws(() => verifyCoverageFirstAcceptanceReport(input), change);
+      }
+    });
+  }
+
+for (const kind of ['board', 'auditor'] as const)
+  for (const asset of [false, true]) {
+    test(`mounted ${kind} acceptance requires exact branded6/document7 with retained public provenance asset=${asset}`, () => {
+      const f = coverageFixture(kind, asset);
+      const wrapped = encodeBrandedSource(
+        kind,
+        f.input.sourceText,
+        f.input.sourceSha256,
+        'Synthetic company',
+      );
+      const content = buildBrandedReport({
+        requestId: f.input.requestId,
+        tenantId: f.input.tenantId,
+        engagementId: f.input.source.engagementId,
+        assessmentRunId: f.input.source.runId,
+        title: f.input.title,
+        generatedAt: f.document.generated_at,
+        sourceText: wrapped.text,
+        sourceSha256: wrapped.sha256,
+      });
+      const text = JSON.stringify(content);
+      const input = {
+        ...f.input,
+        sourceText: wrapped.text,
+        sourceSha256: wrapped.sha256,
+        contentText: text,
+        contentSha256: sha(text),
+      };
+      const phases: string[] = [];
+      const actual = verifyBrandedAcceptanceReport(input, (stage) => phases.push(stage));
+      assert.deepEqual(phases, [
+        'source-proof',
+        'content-hash',
+        'source-envelope',
+        'document-schema',
+        'document-rebuild',
+        'document-compare',
+        'inner-rebuild',
+        'inner-verify',
+      ]);
+      const refusedPhases: string[] = [];
+      assert.throws(() =>
+        verifyBrandedAcceptanceReport({ ...input, contentSha256: 'f'.repeat(64) }, (stage) =>
+          refusedPhases.push(stage),
+        ),
+      );
+      assert.deepEqual(refusedPhases, ['source-proof', 'content-hash']);
+      assert.equal(actual.content.schema_version, 7);
+      assert.equal(actual.content.underlying_document_version, 5);
+      assert.equal(actual.retainedSourceSha256, f.fixture.input.sourceSha256);
+      assert.equal(actual.content.metrics.state, 'withheld');
+      assert.throws(() => verifyCoverageFirstAcceptanceReport(input));
+      assert.throws(() => verifyBrandedAcceptanceReport(f.input));
+      for (const change of [
+        { ...input, sourceSha256: 'f'.repeat(64) },
+        { ...input, tenantId: randomUUID() },
+        { ...input, kind: kind === 'board' ? ('auditor' as const) : ('board' as const) },
+        { ...input, contentText: JSON.stringify({ ...content, underlying_document_version: 6 }) },
+        {
+          ...input,
+          contentText: JSON.stringify({
+            ...content,
+            presentation: { ...BRANDED_PRESENTATION_V1, company_name: 'Forged' },
+          }),
+        },
+      ]) {
+        const changed = { ...change, contentSha256: sha(change.contentText) };
+        assert.throws(() => verifyBrandedAcceptanceReport(changed));
       }
     });
   }

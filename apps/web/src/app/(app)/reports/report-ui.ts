@@ -1,5 +1,10 @@
 import { z } from 'zod';
-export const button = 'rounded border border-slate-300 px-3 py-2 text-sm disabled:opacity-50';
+const buttonBase =
+  'inline-flex min-h-10 max-w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-center text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
+export const button = `${buttonBase} border-slate-300 bg-white text-slate-700 hover:bg-mist-100`;
+export const primaryButton = `${buttonBase} border-indigo-500 bg-indigo-500 text-white hover:bg-indigo-600`;
+export const approvalButton = `${buttonBase} border-teal-500 bg-teal-500 text-indigo-900 hover:bg-teal-400`;
+export const dangerButton = `${buttonBase} border-ember-600 bg-white text-ember-700 hover:bg-ember-50`;
 export const field = 'w-full min-w-0 rounded border border-slate-300 px-3 py-2 text-sm';
 export const panel = 'min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-5';
 const messages: Record<string, string> = {
