@@ -2,8 +2,10 @@ import { test, expect } from '@playwright/test';
 import { createMfaAccount, signInAs, state } from '../fixtures';
 import { tenantCookie } from '../target';
 
-// C-W0-7: the client portal shows only persisted figures for the verified tenant.
-test('portal shows recorded posture only and never substitutes demo figures', async ({ page }) => {
+// C-W0-7: persisted calculations alone do not establish completed assessment provenance.
+test('portal withholds unsupported posture and never substitutes demo figures', async ({
+  page,
+}) => {
   const account = await createMfaAccount('portal-provenance', { role: 'admin', withFactor: true });
   const tenant = crypto.randomUUID();
   const engagement = crypto.randomUUID();
@@ -87,7 +89,9 @@ test('portal shows recorded posture only and never substitutes demo figures', as
   });
   await page.reload();
   await expect(page.getByText('Portal assessment fixture')).toBeVisible();
-  await expect(page.getByTestId('portal-posture')).toHaveText('42');
+  // Raw fixture rows have no finalized Parikshan run. Preserve the recorded
+  // finding counts below, but never present this unsupported calculation.
+  await expect(page.getByTestId('portal-posture')).toHaveText('—');
   await expect(page.getByTestId('portal-controls-passing')).toHaveText('1');
   await expect(page.getByText('1 of 3 assessed')).toBeVisible();
   await expect(page.getByText('Not recorded')).toBeVisible();
