@@ -108,3 +108,11 @@ it('bounds fair scan clock and per-entry locks, restoring the original timeout o
     reserve.indexOf('receipt:=public.append_ledger'),
   );
 });
+
+it('private readiness helpers inherit the caller scan bound instead of overriding it', () => {
+  for (const name of ['standing173_live', 'standing173_source']) {
+    const start = next.indexOf(`create function controller_security.${name}(`);
+    const header = next.slice(start, next.indexOf('as $$', start));
+    expect(header).not.toContain('lock_timeout');
+  }
+});

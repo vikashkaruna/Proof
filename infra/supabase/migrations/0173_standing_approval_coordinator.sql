@@ -448,7 +448,7 @@ language sql immutable set search_path='' as $$select encode(sha256(convert_to(c
 -- Real same-database measured source only. No caller source/environment flag
 -- can enroll a target, invent a dry-run, or refresh its expiry.
 create function controller_security.standing173_source(t uuid,plan uuid,policy uuid,accepted_token uuid default null) returns jsonb
-language plpgsql volatile security definer set search_path='' set lock_timeout='5s' as $$
+language plpgsql volatile security definer set search_path='' as $$
 declare p public.remediation_plans;pol public.standing_approval_policies;a public.remediation_actions;
  b owned_synthetic.bindings;d owned_synthetic.deployment_requests;approval owned_synthetic.deployment_approvals;
  human owned_synthetic.human_requests;h public.local_custody_policy_heads;v public.local_custody_policy_versions;activation uuid;proof jsonb;
@@ -668,7 +668,7 @@ declare r controller_security.standing173_requests;a controller_security.standin
 end $$;
 
 create function controller_security.standing173_live(t uuid,revision uuid,sealing boolean default false,accepted_token uuid default null)returns jsonb
-language plpgsql volatile security definer set search_path='' set lock_timeout='5s' as $$
+language plpgsql volatile security definer set search_path='' as $$
 declare r controller_security.standing173_requests;a controller_security.standing173_reviews;ch public.mfa_challenges;src jsonb;decision controller_security.standing173_decisions;expected_actor uuid;expected_session uuid;expected_phase text;expected_sha text;expected_challenge uuid;expected_binding text;begin
  perform pg_advisory_xact_lock(hashtextextended(t::text,47));
  select * into strict r from controller_security.standing173_requests where tenant_id=t and id=revision for update;

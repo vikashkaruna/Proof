@@ -76,7 +76,7 @@ def main() -> None:
         return result.stdout.strip()
 
     def psql(database: str) -> list[str]:
-        if not re.fullmatch(r'axiom_proof_local_173_[a-f0-9]{12}_(revoke|claim|queue)', database):
+        if not re.fullmatch(r'axiom_proof_local_173_[a-f0-9]{12}_(revoke|claim|queue|latency)', database):
             raise Refused('Owned database name refused')
         return ['exec', '-i', args.container, 'psql', '-X', '-U', 'supabase_admin', '-d', database, '-v', 'ON_ERROR_STOP=1', '-qAt']
 
@@ -203,6 +203,49 @@ def main() -> None:
             if child.returncode or (name=='contender' and '"state": "unconfirmed"' not in stdout):
                 raise Refused('Concurrent claim relaunched or failed')
         proof.append({'order':'fair_cursor_concurrent_polls_and_claims','actualBlockingObserved':True,'final':queue_final})
+        # Causal real lock-timeout proof:32 separate immutable request rows
+        # blocked in another transaction, then the nested measured-source plan
+        # row blocked. These exercise live() AND source(), not SQL text matching.
+        latency_db='axiom_proof_local_173_'+suffix+'_latency'
+        command(['exec',args.container,'createdb','-U','supabase_admin','--template',args.database,latency_db],'create-latency-database')
+        databases.append(latency_db)
+        query(latency_db,fixture_program(queue=True),'committed-lock-bound-fixture')
+        query(latency_db,"create function standing173_race.timed_poll()returns jsonb language plpgsql as $$declare started timestamptz;result jsonb;elapsed numeric;begin set local role agent_ledger_writer;started:=clock_timestamp();result:=public.reserve_standing_policy_work();elapsed:=extract(epoch from(clock_timestamp()-started))*1000;reset role;return jsonb_build_object('result',result,'elapsedMs',elapsed);end$$;",'install-timed-poll')
+        lock_proof=[]
+        for phase,lock_sql in [
+            ('requests',"select count(*)from(select id from controller_security.standing173_requests for update)locked;"),
+            ('source',"select count(*)from(select id from public.remediation_plans for update)locked;")
+        ]:
+            holder=spawn(latency_db,"begin;"+lock_sql+"\n\\echo READY173")
+            assert holder.stdout is not None
+            for _ in range(4):
+                if holder.stdout.readline().strip()=='READY173':
+                    break
+            else:
+                raise Refused('Required row-lock fixture unavailable')
+            measured=json.loads(query(latency_db,'select standing173_race.timed_poll();','lock-bound-'+phase))
+            if measured['result']!={'work':[]} or not 20<float(measured['elapsedMs'])<3000:
+                raise Refused('Actual nested readiness lock bound failed')
+            # No writer/authority/suspension changes from temporarily locked rows.
+            pristine=query(latency_db,"select not exists(select 1 from controller_security.standing173_work)and not exists(select 1 from controller_security.standing173_suspensions);",'lock-bound-'+phase+'-authority')
+            if pristine!='t':
+                raise Refused('Transient lock changed retained authority')
+            lock_proof.append({'phase':phase,**measured})
+            assert holder.stdin is not None
+            holder.stdin.write('rollback;\n\\q\n');holder.stdin.flush()
+            stdout,stderr=holder.communicate(timeout=10)
+            (evidence/('lock-bound-'+phase+'-holder.log')).write_text(stdout+stderr)
+            if holder.returncode:
+                raise Refused('Required row-lock release failed')
+        progressed=False
+        for attempt in range(2):
+            recovered=json.loads(query(latency_db,'select standing173_race.timed_poll();','lock-bound-recovered-'+str(attempt)))
+            if len(recovered['result']['work'])==1:
+                progressed=True
+                break
+        if not progressed:
+            raise Refused('Temporarily locked source did not recover with fair cursor')
+        proof.append({'order':'actual_required_row_lock_timeouts','measurements':lock_proof,'recovered':True,'authorityChangedDuringLock':False})
         (evidence / 'proof.json').write_text(json.dumps({'races': proof, 'scope': 'owned_disposable_SQL_only'}, indent=2))
         print('173 plan-lock and fair cursor concurrent races passed; evidence ' + str(evidence))
     finally:
