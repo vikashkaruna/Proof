@@ -1,0 +1,45 @@
+"""Offline boundary tests for owned synthetic onboarding race fixture."""
+
+import importlib.util
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+SPEC = importlib.util.spec_from_file_location(
+    "onboarding176_races", HERE / "founder-onboarding-races.py"
+)
+if SPEC is None or SPEC.loader is None:
+    raise RuntimeError("Onboarding race fixture source unavailable")
+RACES = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(RACES)
+
+
+class OnboardingFixture(unittest.TestCase):
+    def test_committed_fixture_has_no_temporary_schema_escape_or_business_assertions(
+        self,
+    ):
+        program = RACES.fixture_program()
+        self.assertEqual(program.count("\nbegin;\n"), 1)
+        self.assertTrue(program.endswith("\ncommit;\n"))
+        self.assertNotIn("pg_temp.", program)
+        self.assertNotIn("create temp", program)
+        self.assertIn("create schema onboarding176_race;", program)
+        self.assertIn("onboarding176_race.onboard", program)
+        self.assertNotIn("ordinary owner onboarding succeeds", program)
+        self.assertNotIn("tenant_quota_exceeded", program)
+        self.assertNotIn("set_config('axiom.platform_founder_sync'", program)
+
+    def test_fixture_source_boundary_change_refuses_without_native_calls(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "tests/database/founder-onboarding-authority.test.sql"
+            target.parent.mkdir(parents=True)
+            target.write_text("begin; select 1; commit;")
+            with self.assertRaisesRegex(ValueError, "boundary"):
+                RACES.fixture_program(root)
+
+
+if __name__ == "__main__":
+    unittest.main()
