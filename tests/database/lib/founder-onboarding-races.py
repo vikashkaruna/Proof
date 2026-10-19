@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def fixture_program(root: Path = ROOT) -> str:
+def fixture_program(root: Path = ROOT, *, omit_other_designation: bool = False) -> str:
     text = (root / "tests/database/founder-onboarding-authority.test.sql").read_text()
     marker = "-- An ordinary customer remains owner"
     if text.count(marker) != 1 or text.count("\nbegin;\n") != 1:
@@ -32,7 +32,16 @@ def fixture_program(root: Path = ROOT) -> str:
         1,
     )
     text = text.replace("pg_temp.", "onboarding176_race.")
-    return text + "\ncommit;\n"
+    if omit_other_designation:
+        designation = "select public.designate_platform_founder(onboarding176_race.u(2),'test','synthetic founder176 two');"
+        if text.count(designation) != 1:
+            raise ValueError("Reviewed other-founder designation fixture changed")
+        text = text.replace(
+            designation, "-- Other founder is designated during the actual race."
+        )
+    return (
+        text + "\ngrant usage on schema onboarding176_race to authenticated;\ncommit;\n"
+    )
 
 
 def main() -> None:
@@ -97,6 +106,11 @@ def main() -> None:
             "onboard": "set local role human_action_writer;select public.onboard_organization(onboarding176_race.u(1),gen_random_uuid()::text,'Synthetic race176','growth',false,false,false,null,null,'[]','onboarding-176',gen_random_uuid());reset role;",
             "revoke": "select public.revoke_platform_founder(onboarding176_race.u(1),'test','synthetic race revoke176');",
             "flag": "update public.users set is_axiom_internal=false where id=onboarding176_race.u(1);",
+            "other_onboard": "set local role human_action_writer;select public.onboard_organization(onboarding176_race.u(3),gen_random_uuid()::text,'Synthetic other-founder race176','growth',false,false,false,null,null,'[]','onboarding-176',gen_random_uuid());reset role;",
+            "revoke_other": "select public.revoke_platform_founder(onboarding176_race.u(2),'test','synthetic other founder revoke176');",
+            "flag_other": "update public.users set is_axiom_internal=false where id=onboarding176_race.u(2);",
+            "restore_other": "update public.users set is_axiom_internal=true where id=onboarding176_race.u(2);",
+            "designate_other": "select public.designate_platform_founder(onboarding176_race.u(2),'test','synthetic concurrent designation176');",
         }
         return (
             f"begin;set local lock_timeout='10s';set local statement_timeout='15s';set local application_name='{label}';"
@@ -111,6 +125,8 @@ def main() -> None:
         ("flag", "onboard"),
         ("onboard", "flag"),
     ]
+    for mutation in ("revoke_other", "flag_other", "restore_other", "designate_other"):
+        cases.extend((("other_onboard", mutation), (mutation, "other_onboard")))
     for index, (first, second) in enumerate(cases):
         database = "axiom_proof_local_onboard176_" + secrets.token_hex(6)
         created = False
@@ -118,7 +134,17 @@ def main() -> None:
         try:
             command(["createdb", "-U", "postgres", "-T", args.database, database])
             created = True
-            sql(database, fixture_program())
+            sql(
+                database,
+                fixture_program(
+                    omit_other_designation="designate_other" in (first, second)
+                ),
+            )
+            if "restore_other" in (first, second):
+                sql(
+                    database,
+                    "update public.users set is_axiom_internal=false where id=onboarding176_race.u(2);",
+                )
             labels = [f"onboard176-first-{index}", f"onboard176-second-{index}"]
             argv = [
                 docker,
@@ -194,20 +220,24 @@ def main() -> None:
             out_b, err_b = b.communicate(timeout=20)
             if a.returncode or b.returncode:
                 raise RuntimeError(out_a + err_a + out_b + err_b)
+            other_case = "other_onboard" in (first, second)
+            creator = 3 if other_case else 1
             observed = json.loads(
                 sql(
                     database,
-                    "select jsonb_build_object('tenants',(select count(*)from public.tenant_onboarding_intakes where submitted_by=onboarding176_race.u(1)),'authority',(select creation_authority from public.tenant_onboarding_intakes where submitted_by=onboarding176_race.u(1)),'actorMembership',(select coalesce(array_agg(role::text),array[]::text[])from public.tenant_users where user_id=onboarding176_race.u(1)),'receipts',(select count(*)from public.audit_ledger where action_type='tenant.created'and actor_id=onboarding176_race.u(1)::text));",
+                    f"select jsonb_build_object('tenants',(select count(*)from public.tenant_onboarding_intakes where submitted_by=onboarding176_race.u({creator})),'authority',(select creation_authority from public.tenant_onboarding_intakes where submitted_by=onboarding176_race.u({creator})),'actorMembership',(select coalesce(array_agg(role::text),array[]::text[])from public.tenant_users where user_id=onboarding176_race.u({creator})),'receipts',(select count(*)from public.audit_ledger where action_type='tenant.created'and actor_id=onboarding176_race.u({creator})::text));",
                 )
             )
             expected_authority = (
-                "owner" if first in ("revoke", "flag") else "platform_founder"
+                "owner"
+                if other_case or first in ("revoke", "flag")
+                else "platform_founder"
             )
             expected_roles = (
-                ["founder"]
+                ["owner"]
+                if other_case or first in ("revoke", "flag")
+                else ["founder"]
                 if first == second == "onboard"
-                else ["owner"]
-                if first in ("revoke", "flag")
                 else []
             )
             if observed != {
@@ -221,6 +251,38 @@ def main() -> None:
                 )
             if first == second == "onboard" and "tenant_quota_exceeded" not in out_b:
                 raise RuntimeError("Concurrent last quota slot was not refused")
+            if other_case:
+                active = "restore_other" in (first, second) or "designate_other" in (
+                    first,
+                    second,
+                )
+                facts = json.loads(
+                    sql(
+                        database,
+                        "select jsonb_build_object('live',public.is_live_platform_founder(onboarding176_race.u(2)),'derivedRows',(select count(*)from public.tenant_users where user_id=onboarding176_race.u(2)and membership_source='platform_founder'),'reportFounderAllowed',(select public.report_founder_allowed(tenant_id,onboarding176_race.u(2))from public.tenant_onboarding_intakes where submitted_by=onboarding176_race.u(3)));",
+                    )
+                )
+                if facts != {
+                    "live": active,
+                    "derivedRows": int(active),
+                    "reportFounderAllowed": active,
+                }:
+                    raise RuntimeError(
+                        "Other founder final designation/membership/report authority disagreed"
+                    )
+                jwt = "select set_config('test.onboarding176.tenant',(select tenant_id::text from public.tenant_onboarding_intakes where submitted_by=onboarding176_race.u(3)),false);select set_config('request.jwt.claims',json_build_object('sub',onboarding176_race.u(2),'role','authenticated')::text,false);set role authenticated;select jsonb_build_object('visibleTenants',(select count(*)from public.tenants),'draftReportVisible',public.report_visible(current_setting('test.onboarding176.tenant')::uuid,onboarding176_race.u(3),'draft'),'publishedReportVisible',public.report_visible(current_setting('test.onboarding176.tenant')::uuid,onboarding176_race.u(3),'published'),'founderRoleResolves',public.has_tenant_role(current_setting('test.onboarding176.tenant')::uuid,array['founder']::public.user_role[]));"
+                rls = json.loads(sql(database, jwt).splitlines()[-1])
+                if rls != {
+                    "visibleTenants": int(active),
+                    "draftReportVisible": active,
+                    "publishedReportVisible": active,
+                    "founderRoleResolves": active,
+                }:
+                    raise RuntimeError(
+                        "Authenticated RLS retained stale/missing other-founder authority"
+                    )
+                observed["otherFounder"] = facts
+                observed["otherFounderAuthenticatedRls"] = rls
             results.append(
                 {
                     "first": first,

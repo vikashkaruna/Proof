@@ -33,6 +33,118 @@ create trigger tenant_onboarding_creation_authority_guard
   for each row execute function public.guard_onboarding_creation_authority();
 revoke all on function public.guard_onboarding_creation_authority() from public,anon,authenticated,service_role;
 
+-- One database-local transaction mutex serializes rare founder authority
+-- changes and tenant creation before any relevant row lock/snapshot. Pinning
+-- only already-live rows misses concurrent designation/internal activation.
+-- Fixed namespace (176,151); no existing application lock uses this pair.
+create function public.lock_platform_founder_membership_authority()
+returns void language sql volatile security definer set search_path='' as $$
+  select pg_catalog.pg_advisory_xact_lock(176,151);
+$$;
+revoke all on function public.lock_platform_founder_membership_authority()
+  from public,anon,authenticated,service_role,human_action_writer;
+
+create function public.lock_platform_founder_membership_statement()
+returns trigger language plpgsql security definer set search_path='' as $$
+begin
+  perform public.lock_platform_founder_membership_authority();
+  return null;
+end $$;
+revoke all on function public.lock_platform_founder_membership_statement()
+  from public,anon,authenticated,service_role,human_action_writer;
+
+-- BEFORE STATEMENT is deliberate: row triggers would acquire the mutex after
+-- UPDATE/DELETE had already locked the very rows another holder needs.
+create trigger tenants_founder_authority_serialization
+  before insert or delete on public.tenants
+  for each statement execute function public.lock_platform_founder_membership_statement();
+create trigger platform_founders_authority_serialization
+  before insert or update on public.platform_founders
+  for each statement execute function public.lock_platform_founder_membership_statement();
+create trigger users_founder_flag_serialization
+  before update of is_axiom_internal on public.users
+  for each statement execute function public.lock_platform_founder_membership_statement();
+create trigger users_founder_delete_serialization
+  before delete on public.users
+  for each statement execute function public.lock_platform_founder_membership_statement();
+create trigger tenant_users_founder_delete_serialization
+  before delete on public.tenant_users
+  for each statement execute function public.lock_platform_founder_membership_statement();
+
+-- Retain all 0151 guards, explicit-row precedence and append/revoke history.
+-- These entry points lock first; triggers/sync reacquire the same transaction
+-- mutex reentrantly. No caller receives new helper EXECUTE or table grants.
+create or replace function public.sync_platform_founder_memberships(
+  p_user_id uuid default null,
+  p_tenant_id uuid default null
+) returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.lock_platform_founder_membership_authority();
+  perform set_config('axiom.platform_founder_sync', 'on', true);
+
+  delete from public.tenant_users m
+  where m.membership_source = 'platform_founder'
+    and (p_user_id is null or m.user_id = p_user_id)
+    and (p_tenant_id is null or m.tenant_id = p_tenant_id)
+    and not public.is_live_platform_founder(m.user_id);
+
+  insert into public.tenant_users(tenant_id, user_id, role, accepted_at, membership_source)
+  select t.id, f.user_id, 'founder', now(), 'platform_founder'
+  from public.platform_founders f
+  join public.users u on u.id = f.user_id and u.is_axiom_internal
+  cross join public.tenants t
+  where f.revoked_at is null
+    and (p_user_id is null or f.user_id = p_user_id)
+    and (p_tenant_id is null or t.id = p_tenant_id)
+  on conflict (tenant_id, user_id) do nothing;
+
+  perform set_config('axiom.platform_founder_sync', 'off', true);
+end;
+$$;
+
+create or replace function public.designate_platform_founder(
+  p_user_id uuid,
+  p_designated_by text,
+  p_reason text
+) returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.lock_platform_founder_membership_authority();
+  if not exists (select 1 from public.users where id = p_user_id and is_axiom_internal) then
+    raise exception 'only an internal user can be designated platform founder' using errcode = '42501';
+  end if;
+  insert into public.platform_founders(user_id, designated_by, designation_reason)
+  values (p_user_id, p_designated_by, p_reason);
+end;
+$$;
+
+create or replace function public.revoke_platform_founder(
+  p_user_id uuid,
+  p_revoked_by text,
+  p_reason text
+) returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.lock_platform_founder_membership_authority();
+  update public.platform_founders
+  set revoked_at = now(), revoked_by = p_revoked_by, revocation_reason = p_reason
+  where user_id = p_user_id and revoked_at is null;
+  if not found then
+    raise exception 'no live platform founder designation' using errcode = 'P0002';
+  end if;
+end;
+$$;
+
 create or replace function public.onboard_organization(
   p_user_id uuid,p_slug text,p_name text,p_tier public.tenant_tier,
   p_is_sdf boolean,p_processes_health_data boolean,p_processes_children_data boolean,
@@ -47,6 +159,7 @@ declare
   actor_founder boolean;
   creation_authority text;
 begin
+  perform public.lock_platform_founder_membership_authority();
   -- Lock the entitlement before counting, so simultaneous requests with
   -- DIFFERENT idempotency keys cannot both consume the last quota slot.
   select * into entitlement from public.onboarding_entitlements where user_id=p_user_id for update;

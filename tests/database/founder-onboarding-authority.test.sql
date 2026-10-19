@@ -131,6 +131,34 @@ do $$ declare before_count bigint;begin
 end $$;
 drop trigger zz_corrupt_founder176 on public.tenants;
 
+-- Reentrant statement serialization preserves explicit-row re-derivation and
+-- parent deletion cascades. Administrative synthetic setup is not client
+-- acceptance and creates no ledger/report/provider proof.
+insert into auth.users(id,email) values(pg_temp.u(9),'delete176@test.invalid'),(pg_temp.u(10),'explicit176@test.invalid');
+insert into public.users(id,email,is_axiom_internal) values(pg_temp.u(9),'delete176@test.invalid',false),(pg_temp.u(10),'explicit176@test.invalid',true);
+do $$ declare t uuid;begin
+ insert into public.tenants(slug,name) values(gen_random_uuid()::text,'Synthetic cascade176') returning id into t;
+ insert into public.tenant_users(tenant_id,user_id,role) values(t,pg_temp.u(9),'viewer'),(t,pg_temp.u(10),'owner');
+ perform public.designate_platform_founder(pg_temp.u(10),'test','explicit membership serialization176');
+ perform pg_temp.assert_true((select role='owner' and membership_source='explicit' from public.tenant_users where tenant_id=t and user_id=pg_temp.u(10)),'designation preserves explicit owner history');
+ delete from public.tenant_users where tenant_id=t and user_id=pg_temp.u(10);
+ perform pg_temp.assert_true((select role='founder' and membership_source='platform_founder' from public.tenant_users where tenant_id=t and user_id=pg_temp.u(10)),'explicit delete re-derives founder reentrantly');
+ delete from public.users where id=pg_temp.u(9);
+ perform pg_temp.assert_true(not exists(select 1 from public.tenant_users where user_id=pg_temp.u(9)),'ordinary user parent deletion cascade completes');
+ delete from public.tenants where id=t;
+ perform pg_temp.assert_true(not exists(select 1 from public.tenant_users where tenant_id=t),'tenant parent deletion cascade completes');
+ begin delete from public.users where id=pg_temp.u(10);raise exception 'designated user deletion unexpectedly succeeded';
+ exception when insufficient_privilege then null;end;
+ perform pg_temp.assert_true(public.is_live_platform_founder(pg_temp.u(10)),'designation retention guard unchanged by delete trigger');
+end $$;
+select pg_temp.assert_true(exists(select 1 from pg_catalog.pg_locks where locktype='advisory' and pid=pg_backend_pid() and classid=176 and objid=151 and objsubid=2 and granted),'fixed transaction advisory mutex is held');
+select pg_temp.assert_true(not has_function_privilege('authenticated','public.lock_platform_founder_membership_authority()','execute')
+ and not has_function_privilege('human_action_writer','public.lock_platform_founder_membership_authority()','execute')
+ and not has_function_privilege('service_role','public.lock_platform_founder_membership_authority()','execute')
+ and not has_function_privilege('authenticated','public.lock_platform_founder_membership_statement()','execute'),'private mutex helpers grant no public transport authority');
+select pg_temp.assert_true((select prosecdef from pg_catalog.pg_proc where oid='public.lock_platform_founder_membership_statement()'::regprocedure),'statement wrapper uses definer authority');
+select pg_temp.assert_true((select array_length(tgattr::smallint[],1)=1 from pg_catalog.pg_trigger where tgrelid='public.users'::regclass and tgname='users_founder_flag_serialization'),'ordinary unrelated profile updates are not statement serialized');
+
 -- Failure of the LAST ledger append rolls back tenant, both derived founders,
 -- intake marker and engagement together. No ledger history is altered.
 create function pg_temp.reject_genesis176() returns trigger language plpgsql as $$

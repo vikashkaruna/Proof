@@ -29,6 +29,14 @@ class OnboardingFixture(unittest.TestCase):
         self.assertNotIn("tenant_quota_exceeded", program)
         self.assertNotIn("set_config('axiom.platform_founder_sync'", program)
 
+    def test_new_designation_race_starts_without_the_other_founder_designation(self):
+        program = RACES.fixture_program(omit_other_designation=True)
+        self.assertIn("designate_platform_founder(onboarding176_race.u(1)", program)
+        self.assertNotIn("designate_platform_founder(onboarding176_race.u(2)", program)
+        self.assertIn(
+            "grant usage on schema onboarding176_race to authenticated", program
+        )
+
     def test_fixture_source_boundary_change_refuses_without_native_calls(self):
         import tempfile
 
