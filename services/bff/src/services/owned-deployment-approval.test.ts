@@ -1,7 +1,15 @@
 import { afterEach, expect, it, vi } from 'vitest';
 afterEach(() => vi.useRealTimers());
-import { createHash } from 'node:crypto';
-import { ownedDeploymentOperationCanonicalJSON } from '@axiom/types';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createServer } from 'node:http';
+import { mkdtemp, mkdir, writeFile, rm, realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ownedDeploymentOperationCanonicalJSON, OWNED_DEPLOYMENT_STEPS } from '@axiom/types';
+import {
+  OwnedDeploymentInstaller,
+  actualOwnedTransportVerifier,
+} from './owned-deployment-installer.js';
 import { ApprovalEngine, type SignedApprovalToken } from '@axiom/approval-engine';
 import type { OwnedDeploymentDecision } from '@axiom/types';
 import { makeOwnedDeploymentManifest } from '../test/owned-deployment-fixture.js';
@@ -299,4 +307,270 @@ it('renews only current installed scope after installer expiry without reauthori
   await expect(
     f.service.verifyCredentialRenewal(f.context.tenantId, f.current.summary.requestId),
   ).rejects.toThrow();
+});
+
+it('allows expired installer history for renewal but never bootstraps from an unavailable current credential', async () => {
+  const f = await fixture();
+  await f.approve();
+  f.current.summary.state = 'active';
+  f.current.summary.installation = {
+    operationKey: id(70),
+    receiptId: '70',
+    steps: OWNED_DEPLOYMENT_STEPS.map((step) => ({
+      step,
+      state: 'confirmed',
+      receiptId: '70',
+      detail: 'Unit fixture only; no actual deployment',
+    })),
+  };
+  const serviceRpc = vi.fn(async (name: string) => {
+    if (name === 'read_owned_deployment_installer_source')
+      return f.ports.loadApprovedInstallerSource(f.context.tenantId, f.current.summary.requestId);
+    if (name === 'read_owned_deployment_credential_scope')
+      throw Error('No current issued credential');
+    throw Error('Unexpected authority call');
+  });
+  const installer = new OwnedDeploymentInstaller({
+    serviceRpc,
+    manifests: async () => new Map([[f.current.summary.manifestSha256, f.current.manifest]]),
+    approval: f.engine,
+    credentialDirectory: '/unused-private-unit-fixture',
+    verifyTransport: vi.fn(),
+  });
+  // The enrollment scope lasts one hour; its original installer token is short.
+  vi.useFakeTimers();
+  vi.setSystemTime(Date.now() + 16 * 60 * 1000);
+  await expect(
+    installer.renew({
+      tenantId: f.context.tenantId,
+      enrollmentId: f.current.summary.requestId,
+      credentialId: id(71),
+    }),
+  ).rejects.toThrow('No current issued credential');
+  expect(serviceRpc.mock.calls.map(([name]) => name)).toContain(
+    'read_owned_deployment_credential_scope',
+  );
+  expect(serviceRpc.mock.calls.map(([name]) => name)).not.toContain(
+    'reserve_owned_deployment_credential',
+  );
+  expect(f.issue).toHaveBeenCalledTimes(1);
+});
+
+it('refuses tampered retained HMAC before accessing any renewal credential or issuing a JTI', async () => {
+  const f = await fixture();
+  await f.approve();
+  f.current.summary.state = 'active';
+  f.current.summary.installation = {
+    operationKey: id(70),
+    receiptId: '70',
+    steps: OWNED_DEPLOYMENT_STEPS.map((step) => ({
+      step,
+      state: 'confirmed',
+      receiptId: '70',
+      detail: 'Explicit unit stand-in',
+    })),
+  };
+  const original = {
+    source: f.current,
+    decision: f.decision,
+    token: f.ports.recordApproved.mock.calls[0]![1].token,
+  };
+  const serviceRpc = vi.fn(async (name: string) => {
+    if (name === 'read_owned_deployment_installer_source')
+      return { ...original, token: { ...original.token, signature: '0'.repeat(64) } };
+    throw Error('Foreign HMAC reached authority');
+  });
+  const installer = new OwnedDeploymentInstaller({
+    serviceRpc,
+    manifests: async () => new Map([[f.current.summary.manifestSha256, f.current.manifest]]),
+    approval: f.engine,
+    credentialDirectory: '/unused-private-unit-fixture',
+    verifyTransport: vi.fn(),
+  });
+  await expect(
+    installer.renew({
+      tenantId: f.context.tenantId,
+      enrollmentId: f.current.summary.requestId,
+      credentialId: id(71),
+    }),
+  ).rejects.toThrow();
+  expect(
+    serviceRpc.mock.calls.every(([name]) => name === 'read_owned_deployment_installer_source'),
+  ).toBe(true);
+  expect(f.issue).toHaveBeenCalledTimes(1);
+});
+
+it('checks retained HMAC, actual protected token and independently authenticated HTTP before reserving a renewal', async () => {
+  // This is an independent HTTP verifier mock, not native PostgREST evidence.
+  const f = await fixture();
+  await f.approve();
+  f.current.summary.state = 'active';
+  f.current.summary.installation = {
+    operationKey: id(70),
+    receiptId: '70',
+    steps: OWNED_DEPLOYMENT_STEPS.map((step) => ({
+      step,
+      state: 'confirmed',
+      receiptId: '70',
+      detail: 'Explicit unit stand-in',
+    })),
+  };
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'axiom-owned-renew-unit-'));
+  const now = Math.floor(Date.now() / 1000),
+    key = randomBytes(32),
+    credentialId = id(71);
+  const manifest = f.current.manifest;
+  const metadata = {
+    tenantId: f.context.tenantId,
+    bindingId: manifest.bindingId,
+    enrollmentId: f.current.summary.requestId,
+    credentialId,
+    custodyEpoch: 1,
+    manifestSha256: f.current.summary.manifestSha256,
+    reservationSha256: createHash('sha256').update('unit-reservation').digest('hex'),
+    issuerConfigurationSha256: manifest.source.issuerConfigurationSha256,
+    issuedAt: now,
+    expiresAtSeconds: now + 600,
+    expiresAt: new Date((now + 600) * 1000).toISOString(),
+    scopeExpiresAtSeconds: Math.floor(Date.parse(manifest.expiresAt) / 1000),
+    hostInstallerSha256: manifest.source.hostInstallerSha256,
+    bffContainerId: manifest.deployment.bffContainerId,
+    bffImage: manifest.deployment.bffImage,
+  };
+  const claims = {
+    role: 'owned_target_controller',
+    owned_target_purpose: 'owned_synthetic_target_v1',
+    tenant_id: metadata.tenantId,
+    binding_id: metadata.bindingId,
+    enrollment_id: metadata.enrollmentId,
+    jti: credentialId,
+    custody_epoch: 1,
+    iat: now,
+    exp: now + 600,
+  };
+  const unsigned = [{ alg: 'HS256', typ: 'JWT' }, claims]
+    .map((v) => Buffer.from(JSON.stringify(v)).toString('base64url'))
+    .join('.');
+  const valid = unsigned + '.' + createHmac('sha256', key).update(unsigned).digest('base64url');
+  const credential = {
+    schemaVersion: 1,
+    tenantId: metadata.tenantId,
+    bindingId: metadata.bindingId,
+    enrollmentId: metadata.enrollmentId,
+    credentialId,
+    custodyEpoch: 1,
+    expiresAt: metadata.expiresAt,
+    accessToken: valid,
+  };
+  const path = join(directory, metadata.bindingId, credentialId, 'backend.key');
+  await mkdir(join(directory, metadata.bindingId), { mode: 0o700 });
+  await mkdir(join(directory, metadata.bindingId, credentialId), { mode: 0o700 });
+  let raw = JSON.stringify(credential) + '\n';
+  await writeFile(path, raw, { mode: 0o600 });
+  let authenticated = 0;
+  const server = createServer(async (req, res) => {
+    const token = req.headers.authorization?.replace(/^Bearer /, '') ?? '',
+      parts = token.split('.');
+    const expected = createHmac('sha256', key).update(parts.slice(0, 2).join('.')).digest();
+    const provided = Buffer.from(parts[2] ?? '', 'base64url');
+    const cryptographic =
+      provided.length === expected.length && timingSafeEqual(provided, expected);
+    if (
+      req.method !== 'POST' ||
+      req.url !== '/rest/v1/rpc/verify_owned_target_transport' ||
+      !cryptographic
+    ) {
+      res
+        .writeHead(403, { 'content-type': 'application/json' })
+        .end(JSON.stringify({ message: 'signature refused' }));
+      return;
+    }
+    authenticated++;
+    res.writeHead(200, { 'content-type': 'application/json' }).end(
+      JSON.stringify({
+        tenantId: metadata.tenantId,
+        bindingId: metadata.bindingId,
+        enrollmentId: metadata.enrollmentId,
+        credentialId: metadata.credentialId,
+        custodyEpoch: 1,
+        reservationSha256: metadata.reservationSha256,
+        transportVerified: true,
+      }),
+    );
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw Error('unit server refused');
+  const serviceRpc = vi.fn(async (name: string) => {
+    if (name === 'read_owned_deployment_installer_source')
+      return f.ports.loadApprovedInstallerSource(f.context.tenantId, f.current.summary.requestId);
+    if (name === 'read_owned_deployment_credential_scope')
+      return {
+        scope: {
+          tenantId: metadata.tenantId,
+          bindingId: metadata.bindingId,
+          enrollmentId: metadata.enrollmentId,
+          credentialId,
+          custodyEpoch: 1,
+          expiresAt: metadata.expiresAt,
+        },
+        credentialSha256: createHash('sha256').update(raw).digest('hex'),
+      };
+    if (name === 'read_owned_deployment_credential_reservation')
+      return { metadata, credentialSha256: createHash('sha256').update(raw).digest('hex') };
+    if (name === 'reserve_owned_deployment_credential')
+      return { ...metadata, credentialId: id(72) };
+    if (name === 'read_owned_deployment_reviewed_host') return { runtime: 'unit fixture' };
+    throw Error('Unexpected renewal authority call');
+  });
+  const installer = new OwnedDeploymentInstaller({
+    serviceRpc,
+    manifests: async () => new Map([[f.current.summary.manifestSha256, manifest]]),
+    approval: f.engine,
+    credentialDirectory: directory,
+    verifyTransport: actualOwnedTransportVerifier(
+      'http://127.0.0.1:' + address.port,
+      'unit-anonymous-transport-key',
+    ),
+  });
+  try {
+    expect(
+      (
+        await installer.renew({
+          tenantId: f.context.tenantId,
+          enrollmentId: metadata.enrollmentId,
+          credentialId: id(72),
+        })
+      ).reservation.credentialId,
+    ).toBe(id(72));
+    expect(authenticated).toBe(1);
+    expect(
+      serviceRpc.mock.calls.filter(([name]) => name === 'reserve_owned_deployment_credential'),
+    ).toHaveLength(1);
+    serviceRpc.mockClear();
+    raw =
+      JSON.stringify({
+        ...credential,
+        accessToken: unsigned + '.' + Buffer.alloc(32).toString('base64url'),
+      }) + '\n';
+    await writeFile(path, raw, { mode: 0o600 });
+    await expect(
+      installer.renew({
+        tenantId: f.context.tenantId,
+        enrollmentId: metadata.enrollmentId,
+        credentialId: id(73),
+      }),
+    ).rejects.toThrow('crypto transport unconfirmed');
+    expect(serviceRpc.mock.calls.map(([name]) => name)).not.toContain(
+      'reserve_owned_deployment_credential',
+    );
+    expect(f.issue).toHaveBeenCalledTimes(1);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+    await rm(directory, { recursive: true, force: true });
+    key.fill(0);
+  }
 });
