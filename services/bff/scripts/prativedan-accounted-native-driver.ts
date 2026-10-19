@@ -55,6 +55,7 @@ const tenantId = identity(11),
   engagementId = identity(21);
 
 class NativePeer {
+  failTerminal = false;
   child: ChildProcessWithoutNullStreams;
   private pending:
     | { lines: string[]; marker: string; done: (value: unknown) => void; fail: () => void }
@@ -147,7 +148,7 @@ class NativePeer {
         abortSignal: async () => {
           const literal = (v: string) => "'" + v.replaceAll("'", "''") + "'";
           const value = await this.query(
-            `begin;do $fixture$ begin perform set_config('request.jwt.claims',p172_fixture.controller_claims(),true);end $fixture$;set local role ${role};select p172_fixture.rpc(${literal(name)},${literal(JSON.stringify(args))}::jsonb);commit;`,
+            `begin;${this.failTerminal ? "set local p172_fixture.fail_terminal='on';" : ''}do $fixture$ begin perform set_config('request.jwt.claims',p172_fixture.controller_claims(),true);end $fixture$;set local role ${role};select p172_fixture.rpc(${literal(name)},${literal(JSON.stringify(args))}::jsonb);commit;`,
           );
           if (value && typeof value === 'object' && 'fixture_error' in value) {
             rpcErrors.push({ name, code: value.fixture_error });
@@ -449,12 +450,46 @@ try {
       modelStarts: 0,
     });
   }
+  // Actual terminal writes and deferred constraints execute before a real
+  // fixture-only PostgreSQL subtransaction rollback. No production injection.
+  const accountingIntent = JSON.stringify({
+    operationKey: randomUUID(),
+    engagementId,
+    assessmentRunId: seed.assessmentRunId,
+    expectedSourceSha256: preview.source_sha256,
+    sourceReviewed: true,
+  });
+  await post('request', { reviewedRequestText: accountingIntent });
+  peer.failTerminal = true;
+  const accountingUncertain = z
+    .object({ outcome: z.literal('invocation_uncertain') })
+    .parse(await post('generate', { reviewedRequestText: accountingIntent }));
+  peer.failTerminal = false;
+  const workersBeforeRecovery = owned.length;
+  const unresolved = await app.request('/reports/accounted-drafts/reconcile', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'X-Expected-Actor-Id': actorId },
+    body: JSON.stringify({ reviewedRequestText: accountingIntent }),
+  });
+  if (
+    unresolved.status !== 409 ||
+    owned.length !== workersBeforeRecovery ||
+    !rpcErrors.some((x) => x.name === 'finish_prativedan_accounted_draft' && x.code === '40001')
+  )
+    throw new Error('real SQL rollback did not preserve unresolved original without recomputation');
+  failureCases.push({
+    kind: 'native_terminal_transaction_40001_rollback',
+    outcome: accountingUncertain.outcome,
+    originalReconcileStatus: unresolved.status,
+    recomputed: false,
+    inferredZero: false,
+  });
   const facts = await peer.query(
     `select jsonb_build_object('opened',(select count(*) from public.model_accounting_runs),'calls',(select count(*) from public.model_accounting_call_starts),'seals',(select count(*) from public.model_accounting_seals),'capsules',(select count(*) from public.prativedan_accounted_capsules),'basis',(select min(summary->>'basis') from public.model_accounting_seals),'reviews',(select count(*) from public.prativedan_draft_reviews),'ledgerVerified',not exists(select 1 from public.verify_ledger('${tenantId}')));`,
   );
   const actual = z
     .object({
-      opened: z.literal(maliciousImage ? 3 : 1),
+      opened: z.literal(maliciousImage ? 4 : 2),
       calls: z.literal(0),
       seals: z.literal(maliciousImage ? 3 : 1),
       capsules: z.literal(maliciousImage ? 3 : 1),

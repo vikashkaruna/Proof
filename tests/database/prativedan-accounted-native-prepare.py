@@ -46,6 +46,9 @@ begin
  end loop;
  execute format('select public.%I(%s)',name,array_to_string(expressions,',')) into value using args;
  set constraints all immediate;
+ if name='finish_prativedan_accounted_draft' and current_setting('p172_fixture.fail_terminal',true)='on' then
+  raise exception 'owned synthetic terminal rollback' using errcode='40001';
+ end if;
  return value;
 exception when others then return jsonb_build_object('fixture_error',sqlstate);
 end $$;
