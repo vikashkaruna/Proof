@@ -123,6 +123,14 @@ export const ownedDeploymentSummary = z
     engagementId: uuid,
     connectorId: uuid,
     state: ownedDeploymentState,
+    currentAuthority: z
+      .object({
+        state: z.enum(['valid_recorded_scope', 'inactive', 'unconfirmed']),
+        detail: z.string().min(1).max(300),
+        credentialExpiresAt: date.nullable(),
+      })
+      .strict()
+      .optional(),
     manifestSha256: hash,
     environment: z.literal('local'),
     label: z.literal('Owned synthetic audit configuration'),

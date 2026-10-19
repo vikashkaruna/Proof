@@ -275,3 +275,28 @@ it('binds recovered fence receipt identity to its outer recorded operation recei
     ownedDeploymentOperationReadback.safeParse({ data: { ...data, receiptId: '9' } }).success,
   ).toBe(false);
 });
+
+it('separates historical installation from current recorded credential scope', () => {
+  for (const state of ['valid_recorded_scope', 'inactive', 'unconfirmed'] as const) {
+    expect(
+      ownedDeploymentSummary.safeParse({
+        ...fixture(),
+        currentAuthority: {
+          state,
+          detail: 'Live transport availability must be checked independently',
+          credentialExpiresAt: state === 'valid_recorded_scope' ? '2026-10-19T00:15:00Z' : null,
+        },
+      }).success,
+    ).toBe(true);
+  }
+  expect(
+    ownedDeploymentSummary.safeParse({
+      ...fixture(),
+      currentAuthority: {
+        state: 'live_worker_running',
+        detail: 'Unsupported claim',
+        credentialExpiresAt: null,
+      },
+    }).success,
+  ).toBe(false);
+});
