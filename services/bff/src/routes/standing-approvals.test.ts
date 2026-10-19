@@ -155,7 +155,7 @@ it('requires actual MFA purpose and exact operation before recording', async () 
   mfa.verifyChallenge.mockResolvedValueOnce({
     ok: true,
     challengeId: challenge,
-    purpose: 'plan_approve',
+    purpose: 'approval_issuance',
     boundResourceRef: op,
     factorId: id(7),
     satisfiedWith: 'totp',

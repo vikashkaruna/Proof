@@ -225,7 +225,7 @@ create table controller_security.standing173_revocations (
 );
 create table controller_security.standing173_decisions (
  operation_key uuid primary key,tenant_id uuid not null references public.tenants(id),actor_id uuid not null references public.users(id),session_id uuid not null,
- binding_sha256 text not null check(binding_sha256~'^[a-f0-9]{64}$'),challenge_id uuid not null unique references public.mfa_challenges(id),created_at timestamptz not null default clock_timestamp()
+ binding_sha256 text not null check(binding_sha256~'^[a-f0-9]{64}$'),challenge_id uuid not null unique references public.mfa_challenges(id),factor_id uuid not null references public.user_mfa_factors(id),challenge_expires_at timestamptz not null,created_at timestamptz not null default clock_timestamp(),check(challenge_expires_at>created_at and challenge_expires_at<=created_at+interval '5 minutes')
 );
 create table controller_security.standing173_fences (
  operation_key uuid primary key,tenant_id uuid not null references public.tenants(id),actor_id uuid not null references public.users(id),session_id uuid not null,
@@ -325,13 +325,13 @@ begin
  if exists(select 1 from controller_security.standing173_fences where operation_key=p_operation_key) then raise exception 'scope request fenced' using errcode='42501';end if;
  select * into d from controller_security.standing173_decisions where operation_key=p_operation_key;
  if d.operation_key is not null then
-  if (d.tenant_id,d.actor_id,d.session_id,d.binding_sha256) is distinct from(p_tenant_id,p_actor_id,p_session_id,p_bound_payload_sha256) then raise exception 'MFA decision conflict' using errcode='23505';end if;
+  if (d.tenant_id,d.actor_id,d.session_id,d.binding_sha256,d.factor_id) is distinct from(p_tenant_id,p_actor_id,p_session_id,p_bound_payload_sha256,p_factor_id) then raise exception 'MFA decision conflict' using errcode='23505';end if;
   select * into c from public.mfa_challenges where id=d.challenge_id;
   return jsonb_build_object('id',c.id,'expires_at',c.expires_at,'max_attempts',c.max_attempts);
  end if;
  insert into public.mfa_challenges(user_id,tenant_id,factor_id,purpose,bound_resource_ref,bound_payload_sha256,created_at,expires_at)
  values(p_actor_id,p_tenant_id,p_factor_id,'standing_policy_revision',p_operation_key::text,p_bound_payload_sha256,now_at,now_at+p_ttl_ms*interval '1 millisecond') returning * into c;
- insert into controller_security.standing173_decisions(operation_key,tenant_id,actor_id,session_id,binding_sha256,challenge_id)values(p_operation_key,p_tenant_id,p_actor_id,p_session_id,p_bound_payload_sha256,c.id);
+ insert into controller_security.standing173_decisions(operation_key,tenant_id,actor_id,session_id,binding_sha256,challenge_id,factor_id,challenge_expires_at,created_at)values(p_operation_key,p_tenant_id,p_actor_id,p_session_id,p_bound_payload_sha256,c.id,p_factor_id,c.expires_at,now_at);
  return jsonb_build_object('id',c.id,'expires_at',c.expires_at,'max_attempts',c.max_attempts);
 end $$;
 create function public.satisfy_standing_policy_mfa_challenge(p_tenant_id uuid,p_actor_id uuid,p_session_id uuid,p_factor_id uuid,p_operation_key uuid,p_bound_payload_sha256 text,p_challenge_id uuid,p_expected_attempts integer,p_satisfied_with text) returns jsonb
@@ -355,7 +355,7 @@ begin
  perform 1 from public.user_mfa_factors where user_id=p_actor_id and factor_type='totp' order by id for update;
  perform pg_advisory_xact_lock(hashtextextended(p_operation_key::text,173));
  if exists(select 1 from controller_security.standing173_fences where operation_key=p_operation_key)
-  or not exists(select 1 from controller_security.standing173_decisions d where d.operation_key=p_operation_key and d.tenant_id=p_tenant_id and d.actor_id=p_actor_id and d.session_id=p_session_id and d.binding_sha256=p_bound_payload_sha256 and d.challenge_id=p_challenge_id)
+  or not exists(select 1 from controller_security.standing173_decisions d where d.operation_key=p_operation_key and d.tenant_id=p_tenant_id and d.actor_id=p_actor_id and d.session_id=p_session_id and d.binding_sha256=p_bound_payload_sha256 and d.challenge_id=p_challenge_id and d.factor_id=p_factor_id)
  then raise exception 'scope decision refused' using errcode='42501';end if;
  select * into c from public.mfa_challenges where id=p_challenge_id for update;
  now_at:=clock_timestamp();
@@ -369,6 +369,7 @@ begin
   or c.factor_id is distinct from p_factor_id or c.purpose::text is distinct from 'standing_policy_revision'
   or c.bound_resource_ref is distinct from p_operation_key::text or c.bound_payload_sha256 is distinct from p_bound_payload_sha256
   or c.attempts is distinct from p_expected_attempts or c.attempts<1 or c.attempts>c.max_attempts
+  or not exists(select 1 from controller_security.standing173_decisions d where d.operation_key=p_operation_key and d.factor_id=c.factor_id and d.created_at=c.created_at and d.challenge_expires_at=c.expires_at)
   or c.created_at>now_at or c.expires_at<=c.created_at or c.expires_at>c.created_at+interval '5 minutes' or c.expires_at<=now_at
   or c.consumed_at is not null
  then raise exception 'standing policy MFA challenge refused' using errcode='42501';end if;
@@ -398,7 +399,7 @@ begin
  perform 1 from public.user_mfa_factors where user_id=p_actor_id and factor_type='totp' order by id for update;
  perform pg_advisory_xact_lock(hashtextextended(p_operation_key::text,173));
  if exists(select 1 from controller_security.standing173_fences where operation_key=p_operation_key)
-  or not exists(select 1 from controller_security.standing173_decisions d where d.operation_key=p_operation_key and d.tenant_id=p_tenant_id and d.actor_id=p_actor_id and d.session_id=p_session_id and d.binding_sha256=p_bound_payload_sha256 and d.challenge_id=p_challenge_id)
+  or not exists(select 1 from controller_security.standing173_decisions d where d.operation_key=p_operation_key and d.tenant_id=p_tenant_id and d.actor_id=p_actor_id and d.session_id=p_session_id and d.binding_sha256=p_bound_payload_sha256 and d.challenge_id=p_challenge_id and d.factor_id=p_factor_id)
  then raise exception 'scope decision refused' using errcode='42501';end if;
  select * into c from public.mfa_challenges where id=p_challenge_id for update;
  now_at:=clock_timestamp();
@@ -412,6 +413,7 @@ begin
   or c.factor_id is distinct from p_factor_id or c.purpose::text is distinct from 'standing_policy_revision'
   or c.bound_resource_ref is distinct from p_operation_key::text or c.bound_payload_sha256 is distinct from p_bound_payload_sha256
   or c.attempts is distinct from p_expected_attempts or c.attempts<1 or c.attempts>c.max_attempts
+  or not exists(select 1 from controller_security.standing173_decisions d where d.operation_key=p_operation_key and d.factor_id=c.factor_id and d.created_at=c.created_at and d.challenge_expires_at=c.expires_at)
   or c.created_at>now_at or c.expires_at<=c.created_at or c.expires_at>c.created_at+interval '5 minutes' or c.expires_at<=now_at
   or c.consumed_at is not null
  then raise exception 'standing policy MFA challenge refused' using errcode='42501';end if;
@@ -603,7 +605,7 @@ begin
  (p_actor_id,p_tenant_id,'standing_policy_revision',op::text,binding,op::text)
  or ch.satisfied_at is null or ch.consumed_at is null or ch.created_at>ch.satisfied_at or ch.satisfied_at>ch.consumed_at or ch.satisfied_at<=now_at-interval '5 minutes' or ch.consumed_at>now_at or ch.expires_at<=now_at or ch.expires_at>ch.created_at+interval '5 minutes'
  or not exists(select 1 from public.user_mfa_factors where id=ch.factor_id and user_id=p_actor_id and factor_type='totp' and status='active' and revoked_at is null)
- or not exists(select 1 from controller_security.standing173_decisions where operation_key=op and(tenant_id,actor_id,session_id,binding_sha256,challenge_id)=(p_tenant_id,p_actor_id,p_session_id,binding,ch.id))
+ or not exists(select 1 from controller_security.standing173_decisions where operation_key=op and(tenant_id,actor_id,session_id,binding_sha256,challenge_id,factor_id,created_at,challenge_expires_at)=(p_tenant_id,p_actor_id,p_session_id,binding,ch.id,ch.factor_id,ch.created_at,ch.expires_at))
  or exists(select 1 from controller_security.standing173_requests where challenge_id=ch.id)
  or exists(select 1 from controller_security.standing173_reviews where challenge_id=ch.id)
  or exists(select 1 from controller_security.standing173_revocations where challenge_id=ch.id)
@@ -659,7 +661,7 @@ end $$;
 
 create function controller_security.standing173_live(t uuid,revision uuid,sealing boolean default false,accepted_token uuid default null)returns jsonb
 language plpgsql volatile security definer set search_path='' set lock_timeout='5s' as $$
-declare r controller_security.standing173_requests;a controller_security.standing173_reviews;ch public.mfa_challenges;src jsonb;begin
+declare r controller_security.standing173_requests;a controller_security.standing173_reviews;ch public.mfa_challenges;src jsonb;decision controller_security.standing173_decisions;expected_actor uuid;expected_session uuid;expected_phase text;expected_sha text;expected_challenge uuid;expected_binding text;begin
  perform pg_advisory_xact_lock(hashtextextended(t::text,47));
  select * into strict r from controller_security.standing173_requests where tenant_id=t and id=revision for update;
  select * into strict a from controller_security.standing173_reviews where tenant_id=t and revision_id=revision;
@@ -667,9 +669,19 @@ declare r controller_security.standing173_requests;a controller_security.standin
  or exists(select 1 from controller_security.standing173_suspensions where revision_id=revision)
  then raise exception 'standing revision is ineligible' using errcode='42501';end if;
  perform 1 from public.user_mfa_factors where user_id in(r.owner_id,r.reviewer_id) and factor_type='totp' order by id for update;
- for ch in select * from public.mfa_challenges where id in(r.challenge_id,a.challenge_id) order by id for share loop
-  if not exists(select 1 from public.user_mfa_factors where id=ch.factor_id and user_id=ch.user_id and factor_type='totp'and status='active'and revoked_at is null)
-  or(sealing and ch.expires_at<=clock_timestamp())then raise exception 'standing delegation factor is not current' using errcode='42501';end if;
+ if(select count(*)from controller_security.standing173_decisions where operation_key in(r.id,a.operation_key))<>2 then raise exception 'two immutable standing MFA decisions required'using errcode='42501';end if;
+ for decision in select *from controller_security.standing173_decisions where operation_key in(r.id,a.operation_key)order by operation_key for share loop
+  if decision.operation_key=r.id then expected_actor:=r.owner_id;expected_session:=r.session_id;expected_phase:='request';expected_sha:=r.request_sha256;expected_challenge:=r.challenge_id;
+  else expected_actor:=r.reviewer_id;expected_session:=a.session_id;expected_phase:='approve';expected_sha:=a.decision_sha256;expected_challenge:=a.challenge_id;end if;
+  expected_binding:=encode(sha256(convert_to(controller_security.canonical_questionnaire_json(jsonb_build_array('axiom.standing-policy.'||expected_phase,1,t::text,expected_actor::text,expected_session::text,expected_sha)),'UTF8')),'hex');
+  select *into strict ch from public.mfa_challenges where id=expected_challenge for share;
+  if(decision.tenant_id,decision.actor_id,decision.session_id,decision.binding_sha256,decision.challenge_id)is distinct from(t,expected_actor,expected_session,expected_binding,expected_challenge)
+  or(ch.user_id,ch.tenant_id,ch.factor_id,ch.purpose::text,ch.bound_resource_ref,ch.bound_payload_sha256,ch.consumed_for,ch.created_at,ch.expires_at)is distinct from
+  (expected_actor,t,decision.factor_id,'standing_policy_revision',decision.operation_key::text,expected_binding,decision.operation_key::text,decision.created_at,decision.challenge_expires_at)
+  or ch.satisfied_at is null or ch.consumed_at is null or ch.satisfied_with is null or ch.satisfied_with not in('totp','recovery_code')
+  or ch.satisfied_at<decision.created_at or ch.satisfied_at>ch.consumed_at or ch.consumed_at>=decision.challenge_expires_at
+  or not exists(select 1 from public.user_mfa_factors where id=decision.factor_id and user_id=expected_actor and factor_type='totp'and status='active'and revoked_at is null)
+  or(sealing and decision.challenge_expires_at<=clock_timestamp())then raise exception 'standing delegation immutable MFA proof is not current' using errcode='42501';end if;
  end loop;
  if not sealing and not exists(select 1 from controller_security.standing173_heads where tenant_id=t and policy_id=r.policy_id and revision_id=r.id)
  then raise exception 'standing revision superseded' using errcode='42501';end if;

@@ -24,11 +24,11 @@ $$;
 insert into standing173_saved values('request',jsonb_build_object('text',pg_temp.standing173_intent('request',902)));
 insert into standing173_saved values('approve',jsonb_build_object('text',pg_temp.standing173_intent('approve',903)));
 insert into standing173_saved values('revoke',jsonb_build_object('text',pg_temp.standing173_intent('revoke',904)));
-create function pg_temp.standing173_mfa(intent text,actor int)returns uuid language plpgsql as $$
+create function pg_temp.standing173_mfa(intent text,actor int,ttl_ms integer default 300000)returns uuid language plpgsql as $$
 declare v jsonb:=intent::jsonb;op uuid:=(v#>>'{request,operationKey}')::uuid;digest text;binding text;ch jsonb;challenge uuid;begin
  digest:=encode(sha256(convert_to(intent,'UTF8')),'hex');binding:=encode(sha256(convert_to(controller_security.canonical_questionnaire_json(jsonb_build_array('axiom.standing-policy.'||(v->>'phase'),1,pg_temp.pg_id(1)::text,pg_temp.id(actor)::text,pg_temp.id(100+actor)::text,digest)),'UTF8')),'hex');
  set local role service_role;
- ch:=public.issue_standing_policy_mfa_challenge(pg_temp.pg_id(1),pg_temp.id(actor),pg_temp.id(100+actor),pg_temp.id(40+actor),op,binding,300000);challenge:=(ch->>'id')::uuid;
+ ch:=public.issue_standing_policy_mfa_challenge(pg_temp.pg_id(1),pg_temp.id(actor),pg_temp.id(100+actor),pg_temp.id(40+actor),op,binding,ttl_ms);challenge:=(ch->>'id')::uuid;
  reset role;
  -- Explicit SQL factor-counter stand-in. Actual verifier regression is separate.
  update public.mfa_challenges set attempts=1 where id=challenge;
@@ -37,10 +37,10 @@ declare v jsonb:=intent::jsonb;op uuid:=(v#>>'{request,operationKey}')::uuid;dig
  perform public.consume_standing_policy_mfa_challenge(pg_temp.pg_id(1),pg_temp.id(actor),pg_temp.id(100+actor),pg_temp.id(40+actor),op,binding,challenge,1,op);
  reset role;return challenge;
 end $$;
-create function pg_temp.standing173_record(name text,actor int)returns jsonb language plpgsql as $$
+create function pg_temp.standing173_record(name text,actor int,ttl_ms integer default 300000)returns jsonb language plpgsql as $$
 declare intent text;challenge uuid;result jsonb;begin
  select v->>'text'into strict intent from standing173_saved where standing173_saved.name=$1;
- challenge:=pg_temp.standing173_mfa(intent,actor);
+ challenge:=pg_temp.standing173_mfa(intent,actor,ttl_ms);
  set local role human_action_writer;
  result:=public.record_standing_policy_revision(pg_temp.pg_id(1),pg_temp.id(actor),pg_temp.id(100+actor),intent,challenge);
  reset role;return result;
@@ -62,12 +62,12 @@ reset role;
 -- Request needs the actual current owner, scope and measured source; reviewer
 -- approval is a second current session/factor decision, not approvedById.
 select pg_temp.standing173_refused('select public.preflight_standing_policy_revision(pg_temp.pg_id(1),pg_temp.id(6),pg_temp.id(106),(select v->>''text''from standing173_saved where name=''request''))');
-insert into standing173_saved values('ownerReceipt',pg_temp.standing173_record('request',1));
+insert into standing173_saved values('ownerReceipt',pg_temp.standing173_record('request',1,3000));
 set local role agent_ledger_writer;
 select pg_temp.ok(public.reserve_standing_policy_work()='{"work":[]}'::jsonb,'owner request alone confers no work');
 reset role;
 select pg_temp.standing173_refused('select public.preflight_standing_policy_revision(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),(select v->>''text''from standing173_saved where name=''approve''))');
-insert into standing173_saved values('reviewReceipt',pg_temp.standing173_record('approve',6));
+insert into standing173_saved values('reviewReceipt',pg_temp.standing173_record('approve',6,3000));
 set local role human_action_writer;
 select pg_temp.ok(public.read_standing_policy_revision_operation(pg_temp.pg_id(1),pg_temp.id(6),pg_temp.id(106),(select v->>'text'from standing173_saved where name='approve'))=(select v from standing173_saved where name='reviewReceipt'),'lost human reply returns original receipt');
 reset role;
@@ -81,6 +81,13 @@ select pg_temp.ok(public.claim_standing_policy_work(pg_temp.pg_id(1),(select(v->
 insert into standing173_saved select 'sealReceipt',public.seal_standing_policy_delegation(pg_temp.pg_id(1),(v->>'workId')::uuid,repeat('a',64))from standing173_saved where name='sealClaim';
 select pg_temp.ok((select v->>'state'='sealed'from standing173_saved where name='sealReceipt'),'reviewed exact delegation sealed once');
 select pg_temp.ok(public.seal_standing_policy_delegation(pg_temp.pg_id(1),(select(v->>'workId')::uuid from standing173_saved where name='sealClaim'),repeat('a',64))=(select v from standing173_saved where name='sealReceipt'),'lost seal reply recovers original');
+-- A sealed bounded delegation may outlive its original challenge's fresh
+-- step-up window. Its immutable proof and original active factor remain valid;
+-- no fresh browser session is impersonated or manufactured at the later fire.
+reset role;
+select pg_sleep(3.1);
+select pg_temp.ok((select expires_at<=clock_timestamp()from public.mfa_challenges where id=(select challenge_id from controller_security.standing173_reviews where revision_id=pg_temp.pg_id(902))),'original short MFA window genuinely elapsed after seal');
+set local role agent_ledger_writer;
 insert into standing173_saved values('approvalWork',public.reserve_standing_policy_work());
 insert into standing173_saved select 'approvalClaim',public.claim_standing_policy_work(pg_temp.pg_id(1),(v#>>'{work,0,workId}')::uuid)from standing173_saved where name='approvalWork';
 reset role;
@@ -96,6 +103,29 @@ do $$begin
  set local role agent_ledger_writer;perform pg_temp.standing173_refused('select public.issue_standing_policy_approval(pg_temp.pg_id(1),(select(v->>''workId'')::uuid from standing173_saved where name=''approvalClaim''),repeat(''b'',64),(select v from standing173_saved where name=''tokenPayload''))');reset role;
  raise sqlstate 'P1730' using message='rollback workload refusal';exception when sqlstate 'P1730'then null;end;
 end $$;
+-- Public MFA-store mutation cannot rebind a retained decision. Its original
+-- actor/session/domain/operation/factor and exact DB-clock window are private,
+-- append-only pins, checked again after delegation sealing and before issuance.
+do $$declare mutation text;statement text:='select public.issue_standing_policy_approval(pg_temp.pg_id(1),(select(v->>''workId'')::uuid from standing173_saved where name=''approvalClaim''),repeat(''b'',64),(select v from standing173_saved where name=''tokenPayload''))';begin
+ foreach mutation in array array[
+  'update public.mfa_challenges set purpose=''approval_issuance''where id=(select challenge_id from controller_security.standing173_reviews where revision_id=pg_temp.pg_id(902))',
+  'update public.mfa_challenges set consumed_for=pg_temp.pg_id(999)::text where id=(select challenge_id from controller_security.standing173_reviews where revision_id=pg_temp.pg_id(902))',
+  'update public.mfa_challenges set bound_payload_sha256=repeat(''e'',64)where id=(select challenge_id from controller_security.standing173_reviews where revision_id=pg_temp.pg_id(902))',
+  'update public.mfa_challenges set user_id=pg_temp.id(1),factor_id=pg_temp.id(41)where id=(select challenge_id from controller_security.standing173_reviews where revision_id=pg_temp.pg_id(902))',
+  'update public.mfa_challenges set expires_at=expires_at+interval ''1 second''where id=(select challenge_id from controller_security.standing173_reviews where revision_id=pg_temp.pg_id(902))',
+  'update public.mfa_challenges set created_at=created_at-interval ''1 second''where id=(select challenge_id from controller_security.standing173_reviews where revision_id=pg_temp.pg_id(902))'
+ ]loop
+  begin execute mutation;set local role agent_ledger_writer;perform pg_temp.standing173_refused(statement);reset role;
+   raise sqlstate 'P1730'using message='rollback public MFA-store mutation';exception when sqlstate 'P1730'then null;end;
+ end loop;
+ begin
+  update public.user_mfa_factors set status='revoked',revoked_at=clock_timestamp()where id=pg_temp.id(46);
+  insert into public.user_mfa_factors(id,user_id,factor_type,status,secret_encrypted)values(pg_temp.id(48),pg_temp.id(6),'totp','active','synthetic replacement factor stand-in');
+  update public.mfa_challenges set factor_id=pg_temp.id(48)where id=(select challenge_id from controller_security.standing173_reviews where revision_id=pg_temp.pg_id(902));
+  set local role agent_ledger_writer;perform pg_temp.standing173_refused(statement);reset role;
+  raise sqlstate 'P1730'using message='rollback same-actor replacement factor';exception when sqlstate 'P1730'then null;end;
+end $$;
+select pg_temp.standing173_refused('update controller_security.standing173_decisions set session_id=pg_temp.id(101)where operation_key=pg_temp.pg_id(903)','42501');
 set local role agent_ledger_writer;
 select pg_temp.standing173_refused('select public.issue_standing_policy_approval(pg_temp.pg_id(1),(select(v->>''workId'')::uuid from standing173_saved where name=''approvalClaim''),repeat(''b'',64),(select v||''{"nonce":"00000000000000000000000000000000"}''::jsonb from standing173_saved where name=''tokenPayload''))');
 insert into standing173_saved select 'issued',public.issue_standing_policy_approval(pg_temp.pg_id(1),(select(v->>'workId')::uuid from standing173_saved where name='approvalClaim'),repeat('b',64),v)from standing173_saved where name='tokenPayload';
