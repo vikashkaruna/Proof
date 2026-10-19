@@ -973,8 +973,18 @@ def renew_due(configuration_file: Path, *, now: float | None = None) -> dict:
             state.update(state="completed", readback=readback)
             write_private(pending_file, state)
             receipt = directory / ("renewal-" + identifier(intent["credentialId"]) + ".json")
-            os.rename(pending_file, receipt)
+            # Publish the head while pending still blocks every fresh mint.
+            # A crash at any cut leaves either this blocking intent or the
+            # durable new head+receipt, never the old head without a pending key.
             write_private(head_file, state)
+            if receipt.exists():
+                raise ValueError("Retained renewal receipt already exists")
+            os.rename(pending_file, receipt)
+            parent = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
             outcome["renewed"] += 1
     return outcome
 

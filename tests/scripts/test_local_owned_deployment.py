@@ -405,6 +405,39 @@ class OwnedPollerTests(unittest.TestCase):
                 MODULE.renew_due(self.configuration_file, now=now)
             self.assertEqual(call.call_count, 1)
 
+    def test_completed_renewal_head_is_durable_before_pending_retirement(self):
+        task = self.renewal_installation("2030-01-01T00:01:00+00:00")
+        now = MODULE.datetime.fromisoformat("2030-01-01T00:00:00+00:00").timestamp()
+
+        def api(config, path, body):
+            return {
+                "reservation": {
+                    "expiresAt": "2030-01-01T00:15:00+00:00",
+                    "credentialId": body["credentialId"],
+                },
+                "reviewedHost": task["reviewedHost"],
+            }
+
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call", side_effect=api) as call,
+            patch.object(MODULE, "same_reviewed_host"),
+            patch.object(MODULE, "fixed_effect", return_value={"filePublished": True}),
+            patch.object(MODULE.os, "rename", side_effect=OSError("controlled crash after head")),
+        ):
+            with self.assertRaises(OSError):
+                MODULE.renew_due(self.configuration_file, now=now)
+            head = self.state / ("renewal-head-" + task["requestId"] + ".json")
+            pending = self.state / ("renewal-pending-" + task["requestId"] + ".json")
+            self.assertEqual(
+                MODULE.parse_json(MODULE.protected_bytes(head)),
+                MODULE.parse_json(MODULE.protected_bytes(pending)),
+            )
+            self.assertEqual(MODULE.parse_json(MODULE.protected_bytes(head))["state"], "completed")
+            with self.assertRaisesRegex(ValueError, "exact readback"):
+                MODULE.renew_due(self.configuration_file, now=now)
+            self.assertEqual(call.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
