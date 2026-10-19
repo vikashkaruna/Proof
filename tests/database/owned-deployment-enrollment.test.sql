@@ -13,7 +13,7 @@ select set_config('axiom.platform_founder_sync','off',true);
 select pg_temp.ok(not exists(select 1 from public.tenant_users where tenant_id=pg_temp.pg_id(1) and user_id=pg_temp.id(2)),'founder fixture actually has no tenant membership');
 create temporary table enrollment169_saved(name text primary key,v jsonb);
 grant select,insert,update on enrollment169_saved to human_action_writer,service_role,owned_target_controller;
-insert into enrollment169_saved select 'host',jsonb_build_object('hostInstallerSha256',manifest#>>'{source,hostInstallerSha256}','images',jsonb_build_object('controllerImage',manifest#>'{deployment,controllerImage}','workerImage',manifest#>'{deployment,workerImage}','bffImage',manifest#>'{deployment,bffImage}'),'bffContainerId',manifest#>'{deployment,bffContainerId}','workloadApiVolume',manifest#>'{deployment,workloadApiVolume}','nodeId',manifest#>'{deployment,nodeId}','karyaIdentity',null,'persistentMutations',0,'runtime',jsonb_build_object('containerId',repeat('c',64),'image','sha256:'||repeat('d',64),'socketVolume',(manifest#>>'{deployment,controllerName}')||'-socket','socketGroup',20113,'adapterEnabled',true),'credentialRoot',jsonb_build_object('path','/var/lib/axiom/owned-target-credentials','ownerUid',0,'mode','0700','storage','container_layer')) from deployment169_saved where n=1;
+insert into enrollment169_saved select 'host',jsonb_build_object('hostInstallerSha256',manifest#>>'{source,hostInstallerSha256}','images',jsonb_build_object('controllerImage',manifest#>'{deployment,controllerImage}','workerImage',manifest#>'{deployment,workerImage}','bffImage',manifest#>'{deployment,bffImage}'),'bffContainerId',manifest#>'{deployment,bffContainerId}','workloadApiVolume',manifest#>'{deployment,workloadApiVolume}','nodeId',manifest#>'{deployment,nodeId}','karyaIdentity',null,'controller',jsonb_build_object('containerId',repeat('a',64),'configurationSha256',repeat('e',64)),'persistentMutations',0,'runtime',jsonb_build_object('containerId',repeat('c',64),'image','sha256:'||repeat('d',64),'socketVolume',(manifest#>>'{deployment,controllerName}')||'-socket','socketGroup',20113,'adapterEnabled',true),'credentialRoot',jsonb_build_object('path','/var/lib/axiom/owned-target-credentials','ownerUid',0,'mode','0700','storage','container_layer')) from deployment169_saved where n=1;
 set local role human_action_writer;
 select public.prepare_owned_deployment_preflight(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),pg_temp.pg_id(301),jsonb_build_object('operationKey',pg_temp.pg_id(341),'expectedManifestSha256',(select request->>'manifestSha256' from deployment169_saved where n=1)));
 reset role;
@@ -37,6 +37,16 @@ do $$declare principal text;begin
 end $$;
 drop role "axiom-proof-test-owned169-incoming";
 set local role service_role;
+-- A first installation may observe no controller. Roll back this successful
+-- observation only to reuse the same fixture for reviewed shared-controller reuse.
+do $$declare probe jsonb;begin
+ begin
+  probe:=public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select v||'{"controller":null}'::jsonb from enrollment169_saved where name='host'));
+  if probe->>'state' is distinct from 'preflight_ready' then raise exception 'First controller observation was not reviewable';end if;
+  raise exception 'intentional first-install observation rollback' using errcode='PX169';
+ exception when sqlstate 'PX169' then null;end;
+end $$;
+select pg_temp.deployment169_refused('select public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select jsonb_set(v,''{controller,configurationSha256}'',''null''::jsonb) from enrollment169_saved where name=''host''))');
 insert into enrollment169_saved values('preflight',public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select v from enrollment169_saved where name='host')));
 select pg_temp.ok((select v->>'state'='preflight_ready' and v#>>'{preflight,dryRunCompleted}'='true' and v#>>'{preflight,rollbackValidated}'='true' from enrollment169_saved where name='preflight'),'measured no-write host/DB observations and actual reducer become reviewable');
 select pg_temp.ok(public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select v from enrollment169_saved where name='host'))=(select v from enrollment169_saved where name='preflight'),'lost observation reply recovers same digest and receipt');
@@ -91,6 +101,7 @@ insert into enrollment169_saved select 'identity',jsonb_build_object('entryId','
 select public.confirm_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'register_karya_identity',(select v from enrollment169_saved where name='token'),(select v from enrollment169_saved where name='identity'));
 select public.authorize_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'stage_owned_controller',(select v from enrollment169_saved where name='token'));
 insert into enrollment169_saved select 'controller',jsonb_build_object('containerId',repeat('a',64),'controllerName',manifest#>'{deployment,controllerName}','controllerImage',manifest#>'{deployment,controllerImage}','workerImage',manifest#>'{deployment,workerImage}','workerUid',20005,'controllerUid',20106,'socketGid',20113,'bffContainerId',manifest#>'{deployment,bffContainerId}','bffImage',manifest#>'{deployment,bffImage}','socketReady',true) from deployment169_saved where n=1;
+select pg_temp.deployment169_refused('select public.confirm_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),''stage_owned_controller'',(select v from enrollment169_saved where name=''token''),(select jsonb_set(v,''{containerId}'',to_jsonb(repeat(''b'',64))) from enrollment169_saved where name=''controller''))');
 select public.confirm_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'stage_owned_controller',(select v from enrollment169_saved where name='token'),(select v from enrollment169_saved where name='controller'));
 select public.authorize_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'verify_installed_scope',(select v from enrollment169_saved where name='token'));
 select public.confirm_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'verify_installed_scope',(select v from enrollment169_saved where name='token'),jsonb_build_object('credential',(select v from enrollment169_saved where name='published'),'identity',(select v from enrollment169_saved where name='identity'),'controller',(select v from enrollment169_saved where name='controller'),'cryptoTransportVerified',true,'allSixReadBack',true));

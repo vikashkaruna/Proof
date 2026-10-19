@@ -793,8 +793,8 @@ begin
  or h.approval_id is not null or h.installation_key is not null or task.manifest_sha256<>r.manifest_sha256
  or not exists(select 1 from owned_synthetic.deployment_preflight_claims where(task_id,claim_id)=(task.id,p_claim_id))
  then raise exception 'owned deployment observation current source refused' using errcode='42501';end if;
- if jsonb_typeof(p_host) is distinct from 'object' or not(p_host?&array['hostInstallerSha256','images','bffContainerId','workloadApiVolume','nodeId','karyaIdentity','persistentMutations','runtime','credentialRoot'])
- or p_host-array['hostInstallerSha256','images','bffContainerId','workloadApiVolume','nodeId','karyaIdentity','persistentMutations','runtime','credentialRoot']<>'{}'::jsonb
+ if jsonb_typeof(p_host) is distinct from 'object' or not(p_host?&array['hostInstallerSha256','images','bffContainerId','workloadApiVolume','nodeId','karyaIdentity','persistentMutations','runtime','credentialRoot','controller'])
+ or p_host-array['hostInstallerSha256','images','bffContainerId','workloadApiVolume','nodeId','karyaIdentity','persistentMutations','runtime','credentialRoot','controller']<>'{}'::jsonb
  or p_host->>'hostInstallerSha256' is distinct from r.manifest#>>'{source,hostInstallerSha256}'
  or p_host->'images' is distinct from jsonb_build_object('controllerImage',r.manifest#>'{deployment,controllerImage}','workerImage',r.manifest#>'{deployment,workerImage}','bffImage',r.manifest#>'{deployment,bffImage}')
  or p_host->'bffContainerId' is distinct from r.manifest#>'{deployment,bffContainerId}'
@@ -812,6 +812,15 @@ begin
  or p_host#>'{runtime,socketGroup}' is distinct from '20113'::jsonb or p_host#>'{runtime,adapterEnabled}' is distinct from 'true'::jsonb
  or p_host->'credentialRoot' is distinct from jsonb_build_object('path','/var/lib/axiom/owned-target-credentials','ownerUid',0,'mode','0700','storage','container_layer')
  then raise exception 'owned deployment runtime observation refused' using errcode='42501';end if;
+ if p_host->'controller' is distinct from 'null'::jsonb and(
+ jsonb_typeof(p_host->'controller') is distinct from 'object'
+ or not((p_host->'controller')?&array['containerId','configurationSha256'])
+ or(p_host->'controller')-array['containerId','configurationSha256']<>'{}'::jsonb
+ or jsonb_typeof(p_host#>'{controller,containerId}') is distinct from 'string'
+ or jsonb_typeof(p_host#>'{controller,configurationSha256}') is distinct from 'string'
+ or p_host#>>'{controller,containerId}' !~ '^[a-f0-9]{64}$'
+ or p_host#>>'{controller,configurationSha256}' !~ '^[a-f0-9]{64}$')
+ then raise exception 'owned deployment existing controller observation refused' using errcode='42501';end if;
  identity:=p_host->'karyaIdentity';
  if identity is distinct from 'null'::jsonb and(jsonb_typeof(identity) is distinct from 'object'
  or not(identity?&array['entryId','spiffeId','parentId','workerUid']) or identity-array['entryId','spiffeId','parentId','workerUid']<>'{}'::jsonb
@@ -1305,6 +1314,10 @@ declare r owned_synthetic.deployment_requests;previous owned_synthetic.deploymen
    update public.workload_identities set status='active',version=version+1,updated_at=clock_timestamp() where id=registration.id returning * into registration;
   end if;
  elsif p_step='stage_owned_controller' then
+  select observation.* into strict observed from owned_synthetic.deployment_observations observation join owned_synthetic.deployment_heads h on h.preflight_key=observation.task_id where h.request_id=r.id;
+  if observed.host_observation->'controller' is distinct from 'null'::jsonb
+  and p_readback->'containerId' is distinct from observed.host_observation#>'{controller,containerId}'
+  then raise exception 'owned deployment reviewed controller replacement refused' using errcode='42501';end if;
   if not(p_readback?&array['containerId','controllerName','controllerImage','workerImage','workerUid','controllerUid','socketGid','bffContainerId','bffImage','socketReady'])
   or p_readback-array['containerId','controllerName','controllerImage','workerImage','workerUid','controllerUid','socketGid','bffContainerId','bffImage','socketReady']<>'{}'::jsonb
   or jsonb_typeof(p_readback->'containerId') is distinct from 'string' or p_readback->>'containerId' !~ '^[a-f0-9]{64}$'

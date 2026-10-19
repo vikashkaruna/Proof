@@ -14,6 +14,7 @@ import base64
 import contextlib
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -238,6 +239,8 @@ def _readonly_host_preflight(manifest: dict, configuration: dict, deadline: floa
         manifest.get("environment") != "local"
         or manifest.get("purpose") != "owned_synthetic_enrollment_v1"
         or manifest.get("source", {}).get("hostInstallerSha256") != host_source_sha256()
+        or manifest.get("deployment", {}).get("dockerGid") != configuration.get("dockerGid")
+        or manifest.get("deployment", {}).get("brokerPort") != configuration.get("internalBffPort")
         or manifest.get("deployment", {}).get("bffImage") != configuration.get("bffImage")
         or manifest.get("deployment", {}).get("bffContainerId")
         != configuration.get("bffContainerId")
@@ -381,6 +384,7 @@ def _readonly_host_preflight(manifest: dict, configuration: dict, deadline: floa
     return {
         "hostInstallerSha256": host_source_sha256(),
         "runtime": runtime_observation,
+        "controller": controller_observation(configuration, manifest, deadline=deadline),
         "credentialRoot": credential_root,
         "images": images,
         "bffContainerId": container,
@@ -451,6 +455,11 @@ const result={};for(const name of ['manifests.json','transport.json']){
 }
 const fd=fs.openSync(root,fs.constants.O_RDONLY);try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}process.stdout.write(JSON.stringify(result));
 """
+CONTROLLER_CONFIGURATION = r"""
+import fs from 'node:fs';
+const fd=fs.openSync('/etc/axiom/owned-execution-controller/config.json',fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+try{const st=fs.fstatSync(fd);if(!st.isFile()||st.uid!==20106||(st.mode&0o777)!==0o600||st.size<1||st.size>32768)throw Error('refused');process.stdout.write(JSON.stringify({base64:fs.readFileSync(fd).toString('base64')}));}finally{fs.closeSync(fd);}
+"""
 BFF_ROOT = r"""
 import fs from 'node:fs';
 const path='/var/lib/axiom/owned-target-credentials';const st=fs.lstatSync(path);
@@ -502,7 +511,10 @@ def owned_directory(path: Path, *, create: bool = False) -> None:
         raise ValueError("Owned journal directory refused")
     # Reuse the ancestor checks without trusting an arbitrary marker name.
     marker = path / "owner.json"
-    expected = {"purpose": "axiom-proof-local-owned-deployment", "ownerUid": os.getuid()}
+    expected = {
+        "purpose": "axiom-proof-local-owned-deployment",
+        "ownerUid": os.getuid(),
+    }
     if create:
         write_private(marker, expected, exclusive=True)
     if parse_json(protected_bytes(marker)) != expected:
@@ -583,7 +595,13 @@ def call(configuration: dict, path: str, body: dict) -> object:
     return reply["data"]
 
 
-def child(configuration: dict, script: str, arguments: list[str], *, controller: str | None = None):
+def child(
+    configuration: dict,
+    script: str,
+    arguments: list[str],
+    *,
+    controller: str | None = None,
+):
     if script not in HOST_SOURCES or configuration["hostInstallerSha256"] != host_source_sha256():
         raise ValueError("Reviewed helper bundle changed")
     environment = {
@@ -638,8 +656,14 @@ def prepare_configuration(configuration: dict) -> dict:
     ):
         raise ValueError("Existing protected transport refused")
     payload = {
-        name: {"base64": base64.b64encode(raw).decode(), "sha256": hashlib.sha256(raw).hexdigest()}
-        for name, raw in (("manifests.json", registry_raw), ("transport.json", transport_raw))
+        name: {
+            "base64": base64.b64encode(raw).decode(),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+        }
+        for name, raw in (
+            ("manifests.json", registry_raw),
+            ("transport.json", transport_raw),
+        )
     }
     result = parse_json(
         run(
@@ -679,57 +703,208 @@ def publish_credential(configuration: dict, scope: dict, file: Path) -> dict:
     container = bff_container(configuration)
     return parse_json(
         run(
-            ["docker", "exec", "-i", container, "node", "--input-type=module", "-e", BFF_PUBLISH],
+            [
+                "docker",
+                "exec",
+                "-i",
+                container,
+                "node",
+                "--input-type=module",
+                "-e",
+                BFF_PUBLISH,
+            ],
             private_input=canonical(payload).decode(),
         ).stdout.encode()
     )
 
 
-def controller_readback(configuration: dict, manifest: dict) -> dict:
+def expected_controller_configuration(configuration: dict, manifest: dict) -> dict:
+    filename = ROOT / "scripts/local-owned-execution-controller.py"
+    spec = importlib.util.spec_from_file_location("axiom_reviewed_owned_controller", filename)
+    if spec is None or spec.loader is None:
+        raise ValueError("Reviewed controller source unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.NAME = manifest["deployment"]["controllerName"]
+    return module.configuration(
+        manifest["deployment"]["workerImage"],
+        manifest["deployment"]["workloadApiVolume"],
+        manifest["deployment"]["brokerPort"],
+    )
+
+
+def existing_controller(
+    configuration: dict, manifest: dict, *, deadline: float | None = None
+) -> str | None:
+    expected_controller_configuration(
+        configuration, manifest
+    )  # Validates fixed name/port/mount grammar.
+    name = manifest["deployment"]["controllerName"]
+    found = run(
+        [
+            "docker",
+            "container",
+            "ls",
+            "-a",
+            "--no-trunc",
+            "--filter",
+            "name=^/" + re.escape(name) + "$",
+            "--format",
+            "{{.ID}}",
+        ],
+        deadline=deadline,
+    ).stdout.strip()
+    if not found:
+        return None
+    if not re.fullmatch(r"[a-f0-9]{64}", found):
+        raise ValueError("Ambiguous owned controller refused")
+    return found
+
+
+def controller_proof(
+    configuration: dict, manifest: dict, *, deadline: float | None = None
+) -> tuple[dict, str]:
     deployment = manifest["deployment"]
-    actual = parse_json(run(["docker", "inspect", deployment["controllerName"]]).stdout.encode())
+    container = existing_controller(configuration, manifest, deadline=deadline)
+    if container is None:
+        raise ValueError("Owned controller unavailable")
+    actual = parse_json(run(["docker", "inspect", container], deadline=deadline).stdout.encode())
     if not isinstance(actual, list) or len(actual) != 1:
         raise ValueError("Owned controller readback refused")
     info = actual[0]
-    container = info.get("Id", "")
+    host = info.get("HostConfig", {})
+    config = info.get("Config", {})
+    expected_mounts = {
+        (
+            "volume",
+            deployment["controllerName"] + "-conf",
+            "/etc/axiom/owned-execution-controller",
+            False,
+        ),
+        (
+            "volume",
+            deployment["controllerName"] + "-socket",
+            "/run/axiom-proof-local-owned-execution",
+            True,
+        ),
+        ("bind", "/var/run/docker.sock", "/var/run/docker.sock", True),
+    }
+    mounts = {
+        (
+            m.get("Type"),
+            m.get("Name") if m.get("Type") == "volume" else m.get("Source"),
+            m.get("Destination"),
+            m.get("RW"),
+        )
+        for m in info.get("Mounts", [])
+    }
     if (
-        not re.fullmatch(r"[a-f0-9]{64}", container)
+        info.get("Id") != container
         or info.get("Image") != deployment["controllerImage"]
         or info.get("State", {}).get("Running") is not True
-        or info.get("Config", {}).get("User") != "20106:20106"
-        or info.get("Config", {}).get("Labels", {}).get("axiom.purpose")
-        != "local-owned-execution-controller"
-        or info.get("HostConfig", {}).get("NetworkMode")
-        != "container:" + bff_container(configuration)
+        or config.get("User") != "20106:20106"
+        or config.get("Labels", {}).get("axiom.purpose") != "local-owned-execution-controller"
+        or config.get("Entrypoint") != ["node"]
+        or config.get("Cmd")
+        != [
+            "--import",
+            "tsx",
+            "src/local-owned-execution-controller.ts",
+            "/etc/axiom/owned-execution-controller/config.json",
+        ]
+        or host.get("NetworkMode") != "container:" + bff_container(configuration, deadline=deadline)
+        or host.get("Privileged") is not False
+        or host.get("ReadonlyRootfs") is not True
+        or host.get("CapDrop") != ["ALL"]
+        or bool(host.get("CapAdd"))
+        or set(host.get("GroupAdd", [])) != {"20113", str(deployment["dockerGid"])}
+        or set(host.get("SecurityOpt", [])) != {"no-new-privileges:true"}
+        or host.get("PidsLimit") != 128
+        or host.get("Memory") != 512 * 1024 * 1024
+        or mounts != expected_mounts
     ):
-        raise ValueError("Owned controller readback refused")
+        raise ValueError("Owned controller isolation/readback refused")
+    image = parse_json(
+        run(
+            ["docker", "image", "inspect", deployment["controllerImage"]],
+            deadline=deadline,
+        ).stdout.encode()
+    )
+    if (
+        not isinstance(image, list)
+        or len(image) != 1
+        or config.get("Env") != image[0].get("Config", {}).get("Env")
+    ):
+        raise ValueError("Owned controller inherited environment changed")
+    encoded = parse_json(
+        run(
+            [
+                "docker",
+                "exec",
+                "--user",
+                "20106:20106",
+                container,
+                "node",
+                "--input-type=module",
+                "-e",
+                CONTROLLER_CONFIGURATION,
+            ],
+            deadline=deadline,
+        ).stdout.encode()
+    )
+    if (
+        not isinstance(encoded, dict)
+        or set(encoded) != {"base64"}
+        or not isinstance(encoded["base64"], str)
+    ):
+        raise ValueError("Actual controller configuration unavailable")
+    observed = parse_json(base64.b64decode(encoded["base64"], validate=True))
+    if observed != expected_controller_configuration(configuration, manifest):
+        raise ValueError("Actual controller configuration changed")
     ready = parse_json(
         run(
             [
                 "docker",
                 "exec",
-                bff_container(configuration),
+                bff_container(configuration, deadline=deadline),
                 "node",
                 "--input-type=module",
                 "-e",
                 BFF_SOCKET,
-            ]
+            ],
+            deadline=deadline,
         ).stdout.encode()
     )
     if ready != {"socketReady": True}:
         raise ValueError("Owned controller socket unconfirmed")
-    return {
-        "containerId": container,
-        "controllerName": deployment["controllerName"],
-        "controllerImage": deployment["controllerImage"],
-        "workerImage": deployment["workerImage"],
-        "workerUid": 20005,
-        "controllerUid": 20106,
-        "socketGid": 20113,
-        "bffContainerId": configuration["bffContainerId"],
-        "bffImage": configuration["bffImage"],
-        "socketReady": True,
-    }
+    return (
+        {
+            "containerId": container,
+            "controllerName": deployment["controllerName"],
+            "controllerImage": deployment["controllerImage"],
+            "workerImage": observed["container"]["image"],
+            "workerUid": 20005,
+            "controllerUid": 20106,
+            "socketGid": 20113,
+            "bffContainerId": configuration["bffContainerId"],
+            "bffImage": configuration["bffImage"],
+            "socketReady": True,
+        },
+        hashlib.sha256(canonical(observed)).hexdigest(),
+    )
+
+
+def controller_readback(configuration: dict, manifest: dict) -> dict:
+    return controller_proof(configuration, manifest)[0]
+
+
+def controller_observation(
+    configuration: dict, manifest: dict, *, deadline: float | None = None
+) -> dict | None:
+    if existing_controller(configuration, manifest, deadline=deadline) is None:
+        return None
+    proof, digest = controller_proof(configuration, manifest, deadline=deadline)
+    return {"containerId": proof["containerId"], "configurationSha256": digest}
 
 
 def fixed_effect(
@@ -799,6 +974,20 @@ def fixed_effect(
             raise ValueError("Karya registration unconfirmed")
         return after["karyaIdentity"]
     if step == "stage_owned_controller":
+        reviewed_controller = task.get("reviewedHost", {}).get("controller")
+        current_controller = controller_observation(configuration, manifest)
+        if reviewed_controller is not None:
+            if current_controller != reviewed_controller:
+                raise ValueError("Founder-reviewed shared controller changed")
+            readback, digest = controller_proof(configuration, manifest)
+            if {
+                "containerId": readback["containerId"],
+                "configurationSha256": digest,
+            } != reviewed_controller:
+                raise ValueError("Founder-reviewed shared controller changed during readback")
+            return readback
+        if current_controller is not None:
+            raise ValueError("Unreviewed controller appeared before creation")
         controller = deployment["controllerName"]
         common = [
             "--controller-image",
@@ -923,11 +1112,20 @@ def once(configuration_file: Path) -> str:
         else:
             readbacks = {}
             for step in STEPS:
-                body = {"tenantId": task["tenantId"], "claimId": state["claimId"], "step": step}
+                body = {
+                    "tenantId": task["tenantId"],
+                    "claimId": state["claimId"],
+                    "step": step,
+                }
                 state.update(state="authorization_pending", step=step)
                 write_private(journal, state)
                 try:
-                    same_reviewed_host(manifest, configuration, task.get("reviewedHost"))
+                    same_reviewed_host(
+                        manifest,
+                        configuration,
+                        task.get("reviewedHost"),
+                        readbacks.get("stage_owned_controller"),
+                    )
                     authorization = call(
                         configuration, "tasks/" + task["requestId"] + "/authorize", body
                     )
@@ -959,13 +1157,23 @@ def once(configuration_file: Path) -> str:
                         )
                     state["steps"][step]["confirmed"] = True
                     write_private(journal, state)
-                except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
+                except (
+                    ValueError,
+                    KeyError,
+                    TypeError,
+                    OSError,
+                    subprocess.SubprocessError,
+                ):
                     state["state"] = "unconfirmed"
                     write_private(journal, state)
                     # The original journal retains uncertainty even if the
                     # private publication is unavailable or scope has expired.
                     with contextlib.suppress(ValueError, OSError, subprocess.SubprocessError):
-                        call(configuration, "tasks/" + task["requestId"] + "/unconfirmed", body)
+                        call(
+                            configuration,
+                            "tasks/" + task["requestId"] + "/unconfirmed",
+                            body,
+                        )
                     raise ValueError("Retained deployment step unconfirmed") from None
         state["state"] = "completed"
         write_private(journal, state)
@@ -1024,7 +1232,10 @@ def reconcile(configuration_file: Path, selected_claim: str | None = None) -> di
         if not isinstance(receipt["receiptId"], str) or not re.fullmatch(
             r"[1-9][0-9]*", receipt["receiptId"]
         ):
-            return {"state": "blocked", "detail": "Original outcome remains unconfirmed"}
+            return {
+                "state": "blocked",
+                "detail": "Original outcome remains unconfirmed",
+            }
         if terminal == "readonly_observation_recorded":
             if (
                 receipt["kind"] != "preflight"
@@ -1055,7 +1266,10 @@ def reconcile(configuration_file: Path, selected_claim: str | None = None) -> di
                 raise ValueError("Original stop receipt proof refused")
             final_state = terminal
         else:
-            return {"state": "blocked", "detail": "Original outcome remains unconfirmed"}
+            return {
+                "state": "blocked",
+                "detail": "Original outcome remains unconfirmed",
+            }
         pending_file = directory / ("renewal-pending-" + identifier(task["requestId"]) + ".json")
         if terminal == "authority_revoked_with_original_effect_history" and pending_file.exists():
             pending = parse_json(protected_bytes(pending_file))
@@ -1135,10 +1349,19 @@ def reconcile(configuration_file: Path, selected_claim: str | None = None) -> di
             },
         )
         write_private(journal, state)
-        return {"state": final_state, "disposition": terminal, "receiptId": receipt["receiptId"]}
+        return {
+            "state": final_state,
+            "disposition": terminal,
+            "receiptId": receipt["receiptId"],
+        }
 
 
-def same_reviewed_host(manifest: dict, configuration: dict, reviewed: object) -> None:
+def same_reviewed_host(
+    manifest: dict,
+    configuration: dict,
+    reviewed: object,
+    created_controller: dict | None = None,
+) -> None:
     fresh = readonly_host_preflight(manifest, configuration)
     if not isinstance(reviewed, dict) or any(
         fresh.get(key) != reviewed.get(key)
@@ -1153,6 +1376,19 @@ def same_reviewed_host(manifest: dict, configuration: dict, reviewed: object) ->
         )
     ):
         raise ValueError("Founder-reviewed host/runtime pins changed")
+    expected_controller = reviewed.get("controller")
+    observed_controller = fresh.get("controller")
+    if expected_controller is not None and observed_controller != expected_controller:
+        raise ValueError("Founder-reviewed controller changed")
+    if (
+        expected_controller is None
+        and observed_controller is not None
+        and (
+            created_controller is None
+            or observed_controller.get("containerId") != created_controller.get("containerId")
+        )
+    ):
+        raise ValueError("Unreviewed replacement controller refused")
 
 
 def renew_due(configuration_file: Path, *, now: float | None = None) -> dict:
@@ -1198,7 +1434,12 @@ def renew_due(configuration_file: Path, *, now: float | None = None) -> dict:
                 # Expired tokens do not bootstrap new authority. A fresh human
                 # enrollment/review is needed if the approved lifecycle lapses.
                 continue
-            same_reviewed_host(task["manifest"], configuration, task.get("reviewedHost"))
+            same_reviewed_host(
+                task["manifest"],
+                configuration,
+                task.get("reviewedHost"),
+                installation["steps"].get("stage_owned_controller", {}).get("readback"),
+            )
             intent = {
                 "tenantId": task["tenantId"],
                 "enrollmentId": request_id,
@@ -1217,7 +1458,12 @@ def renew_due(configuration_file: Path, *, now: float | None = None) -> dict:
                 "reviewedHost"
             ):
                 raise ValueError("Reviewed renewal source changed")
-            same_reviewed_host(task["manifest"], configuration, reserved["reviewedHost"])
+            same_reviewed_host(
+                task["manifest"],
+                configuration,
+                reserved["reviewedHost"],
+                installation["steps"].get("stage_owned_controller", {}).get("readback"),
+            )
             state.update(state="effect_pending", reservation=reserved["reservation"])
             write_private(pending_file, state)
             readback = fixed_effect(

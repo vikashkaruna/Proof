@@ -1,5 +1,7 @@
 """Protected filesystem/private-pipe preflight only; no live Docker or approval."""
 
+import base64
+import copy
 import importlib.util
 import json
 import subprocess
@@ -258,7 +260,10 @@ class OwnedPollerTests(unittest.TestCase):
                 pass
 
     def task(self, claim_id):
-        manifest = {"deployment": {}, "tenantId": "89110000-0000-4000-8000-000000000001"}
+        manifest = {
+            "deployment": {},
+            "tenantId": "89110000-0000-4000-8000-000000000001",
+        }
         return {
             "taskId": "89110000-0000-4000-8000-000000000002",
             "tenantId": manifest["tenantId"],
@@ -374,7 +379,8 @@ class OwnedPollerTests(unittest.TestCase):
             payload = MODULE.parse_json(kwargs["private_input"].encode())
             self.assertNotIn("private-fixture-token", kwargs["private_input"])
             self.assertIn(
-                "private-fixture-token", MODULE.base64.b64decode(payload["base64"]).decode()
+                "private-fixture-token",
+                MODULE.base64.b64decode(payload["base64"]).decode(),
             )
             return subprocess.CompletedProcess(arguments, 0, '{"filePublished":true}', "")
 
@@ -383,7 +389,8 @@ class OwnedPollerTests(unittest.TestCase):
             patch.object(MODULE, "run", side_effect=spawn),
         ):
             self.assertEqual(
-                MODULE.publish_credential(self.config, scope, file), {"filePublished": True}
+                MODULE.publish_credential(self.config, scope, file),
+                {"filePublished": True},
             )
 
     def renewal_installation(self, expiry):
@@ -401,7 +408,9 @@ class OwnedPollerTests(unittest.TestCase):
         MODULE.write_private(self.state / (task["claimId"] + ".json"), installation, exclusive=True)
         return task
 
-    def test_due_renewal_requires_exact_recorded_pins_and_retains_new_once_receipt(self):
+    def test_due_renewal_requires_exact_recorded_pins_and_retains_new_once_receipt(
+        self,
+    ):
         task = self.renewal_installation("2030-01-01T00:01:00+00:00")
         now = MODULE.datetime.fromisoformat("2030-01-01T00:00:00+00:00").timestamp()
 
@@ -422,15 +431,18 @@ class OwnedPollerTests(unittest.TestCase):
             patch.object(MODULE, "fixed_effect", return_value={"filePublished": True}),
         ):
             self.assertEqual(
-                MODULE.renew_due(self.configuration_file, now=now), {"renewed": 1, "expired": 0}
+                MODULE.renew_due(self.configuration_file, now=now),
+                {"renewed": 1, "expired": 0},
             )
             self.assertEqual(pins.call_count, 2)
             self.assertEqual(
-                MODULE.renew_due(self.configuration_file, now=now), {"renewed": 0, "expired": 0}
+                MODULE.renew_due(self.configuration_file, now=now),
+                {"renewed": 0, "expired": 0},
             )
             self.assertEqual(call.call_count, 1)
         self.assertEqual(
-            len(list(self.state.glob("renewal-????????-????-????-????-????????????.json"))), 1
+            len(list(self.state.glob("renewal-????????-????-????-????-????????????.json"))),
+            1,
         )
 
     def test_expired_and_uncertain_renewals_never_automatically_issue_again(self):
@@ -508,7 +520,11 @@ class OwnedPollerTests(unittest.TestCase):
             "receiptId": "52",
             "hostSha256": None,
             "stepReceipts": [
-                {"step": "publish_scoped_credential", "state": "unconfirmed", "receiptId": "50"}
+                {
+                    "step": "publish_scoped_credential",
+                    "state": "unconfirmed",
+                    "receiptId": "50",
+                }
             ],
         }
         return state, receipt
@@ -551,7 +567,9 @@ class OwnedPollerTests(unittest.TestCase):
         with (
             patch.object(MODULE, "load_configuration", return_value=self.config),
             patch.object(
-                MODULE, "call", return_value={**receipt, "terminal": "blocked", "receiptId": None}
+                MODULE,
+                "call",
+                return_value={**receipt, "terminal": "blocked", "receiptId": None},
             ),
         ):
             self.assertEqual(MODULE.reconcile(self.configuration_file)["state"], "blocked")
@@ -644,6 +662,246 @@ class OwnedPollerTests(unittest.TestCase):
         self.assertEqual(MODULE.protected_bytes(self.state / "current.json"), before)
         self.assertEqual(MODULE.parse_json(MODULE.protected_bytes(file)), pending)
         self.assertEqual(list(self.state.glob("renewal-stopped-*.json")), [])
+
+
+class SharedControllerTests(unittest.TestCase):
+    def setUp(self):
+        self.config = {
+            "bffContainerId": "b" * 64,
+            "bffImage": "sha256:" + "d" * 64,
+            "internalBffPort": 4000,
+            "dockerGid": 0,
+        }
+        self.deployment = {
+            "controllerName": "axiom-proof-local-owned-execution-controller",
+            "controllerImage": "sha256:" + "c" * 64,
+            "workerImage": "sha256:" + "e" * 64,
+            "workloadApiVolume": "axiom-workload-api-local",
+            "brokerPort": 4000,
+            "dockerGid": 0,
+            **self.config,
+        }
+        self.manifest = {"deployment": self.deployment}
+        self.observed = MODULE.expected_controller_configuration(self.config, self.manifest)
+        name = self.deployment["controllerName"]
+        self.info = {
+            "Id": "a" * 64,
+            "Image": self.deployment["controllerImage"],
+            "State": {"Running": True},
+            "Config": {
+                "User": "20106:20106",
+                "Labels": {"axiom.purpose": "local-owned-execution-controller"},
+                "Entrypoint": ["node"],
+                "Cmd": [
+                    "--import",
+                    "tsx",
+                    "src/local-owned-execution-controller.ts",
+                    "/etc/axiom/owned-execution-controller/config.json",
+                ],
+                "Env": ["PATH=/usr/bin"],
+            },
+            "HostConfig": {
+                "NetworkMode": "container:" + "b" * 64,
+                "Privileged": False,
+                "ReadonlyRootfs": True,
+                "CapDrop": ["ALL"],
+                "GroupAdd": ["20113", "0"],
+                "SecurityOpt": ["no-new-privileges:true"],
+                "PidsLimit": 128,
+                "Memory": 512 * 1024 * 1024,
+            },
+            "Mounts": [
+                {
+                    "Type": "volume",
+                    "Name": name + "-conf",
+                    "Destination": "/etc/axiom/owned-execution-controller",
+                    "RW": False,
+                },
+                {
+                    "Type": "volume",
+                    "Name": name + "-socket",
+                    "Destination": "/run/axiom-proof-local-owned-execution",
+                    "RW": True,
+                },
+                {
+                    "Type": "bind",
+                    "Source": "/var/run/docker.sock",
+                    "Destination": "/var/run/docker.sock",
+                    "RW": True,
+                },
+            ],
+        }
+
+    def run_command(self, argv, **kwargs):
+        if argv[1:3] == ["container", "ls"]:
+            output = "a" * 64
+        elif argv[1] == "inspect":
+            output = json.dumps([self.info])
+        elif argv[1:3] == ["image", "inspect"]:
+            output = json.dumps([{"Config": {"Env": ["PATH=/usr/bin"]}}])
+        elif MODULE.CONTROLLER_CONFIGURATION in argv:
+            output = json.dumps(
+                {"base64": base64.b64encode(json.dumps(self.observed).encode()).decode()}
+            )
+        elif MODULE.BFF_SOCKET in argv:
+            output = '{"socketReady":true}'
+        else:
+            self.fail("Unexpected effectful command")
+        return subprocess.CompletedProcess(argv, 0, stdout=output)
+
+    def proof(self):
+        with (
+            patch.object(MODULE, "run", side_effect=self.run_command),
+            patch.object(MODULE, "bff_container", return_value="b" * 64),
+        ):
+            return MODULE.controller_proof(self.config, self.manifest)
+
+    def test_second_tenant_reuses_exact_controller_without_effects(self):
+        readback, digest = self.proof()
+        reviewed = {
+            "containerId": readback["containerId"],
+            "configurationSha256": digest,
+        }
+        with (
+            patch.object(MODULE, "controller_observation", return_value=reviewed),
+            patch.object(MODULE, "controller_proof", return_value=(readback, digest)),
+            patch.object(MODULE, "child") as child,
+        ):
+            self.assertEqual(
+                MODULE.fixed_effect(
+                    self.config,
+                    Path("/fixture/config.json"),
+                    Path("/fixture"),
+                    {
+                        "manifest": self.manifest,
+                        "reviewedHost": {"controller": reviewed},
+                    },
+                    "stage_owned_controller",
+                    {},
+                    {},
+                ),
+                readback,
+            )
+            child.assert_not_called()
+        for field in ("containerId", "configurationSha256"):
+            altered = {**reviewed, field: "f" * 64}
+            with (
+                self.subTest(field=field),
+                patch.object(MODULE, "controller_observation", return_value=altered),
+                patch.object(MODULE, "child") as child,
+            ):
+                with self.assertRaises(ValueError):
+                    MODULE.fixed_effect(
+                        self.config,
+                        Path("/fixture/config.json"),
+                        Path("/fixture"),
+                        {
+                            "manifest": self.manifest,
+                            "reviewedHost": {"controller": reviewed},
+                        },
+                        "stage_owned_controller",
+                        {},
+                        {},
+                    )
+                child.assert_not_called()
+
+    def test_actual_image_configuration_environment_mounts_and_isolation_refused(self):
+        original = copy.deepcopy(self.info)
+        original_config = copy.deepcopy(self.observed)
+        mutations = [
+            lambda: self.info.update(Image="sha256:" + "f" * 64),
+            lambda: self.observed["container"].update(image="sha256:" + "f" * 64),
+            lambda: self.info["Config"]["Env"].append("UNREVIEWED=value"),
+            lambda: self.info["Mounts"].append(
+                {
+                    "Type": "bind",
+                    "Source": "/foreign",
+                    "Destination": "/foreign",
+                    "RW": True,
+                }
+            ),
+            lambda: self.info["HostConfig"].update(CapAdd=["SYS_ADMIN"]),
+            lambda: self.info["HostConfig"].update(
+                SecurityOpt=["no-new-privileges:true", "seccomp=unconfined"]
+            ),
+            lambda: self.info.update(Id="f" * 64),
+        ]
+        for index, mutate in enumerate(mutations):
+            self.info = copy.deepcopy(original)
+            self.observed = copy.deepcopy(original_config)
+            mutate()
+            with self.subTest(case=index), self.assertRaises(ValueError):
+                self.proof()
+
+    def test_first_install_creates_only_when_observation_was_absent(self):
+        readback, _ = self.proof()
+        task = {"manifest": self.manifest, "reviewedHost": {"controller": None}}
+        with (
+            patch.object(MODULE, "controller_observation", return_value=None),
+            patch.object(MODULE, "controller_readback", return_value=readback),
+            patch.object(MODULE, "child") as child,
+        ):
+            self.assertEqual(
+                MODULE.fixed_effect(
+                    self.config,
+                    Path("/fixture/config.json"),
+                    Path("/fixture"),
+                    task,
+                    "stage_owned_controller",
+                    {},
+                    {},
+                ),
+                readback,
+            )
+            self.assertEqual(
+                [call.args[2][0] for call in child.call_args_list],
+                ["stage", "check", "serve"],
+            )
+        with (
+            patch.object(MODULE, "controller_observation", return_value={"containerId": "a" * 64}),
+            patch.object(MODULE, "child") as child,
+        ):
+            with self.assertRaises(ValueError):
+                MODULE.fixed_effect(
+                    self.config,
+                    Path("/fixture/config.json"),
+                    Path("/fixture"),
+                    task,
+                    "stage_owned_controller",
+                    {},
+                    {},
+                )
+            child.assert_not_called()
+
+    def test_controller_replaced_between_observation_and_readback_refused(self):
+        readback, digest = self.proof()
+        reviewed = {
+            "containerId": readback["containerId"],
+            "configurationSha256": digest,
+        }
+        with (
+            patch.object(MODULE, "controller_observation", return_value=reviewed),
+            patch.object(
+                MODULE,
+                "controller_proof",
+                return_value=({**readback, "containerId": "f" * 64}, digest),
+            ),
+            patch.object(MODULE, "child") as child,
+        ):
+            with self.assertRaises(ValueError):
+                MODULE.fixed_effect(
+                    self.config,
+                    Path("/fixture/config.json"),
+                    Path("/fixture"),
+                    {
+                        "manifest": self.manifest,
+                        "reviewedHost": {"controller": reviewed},
+                    },
+                    "stage_owned_controller",
+                    {},
+                    {},
+                )
+            child.assert_not_called()
 
 
 if __name__ == "__main__":
