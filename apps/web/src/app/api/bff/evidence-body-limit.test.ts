@@ -109,6 +109,9 @@ it.each([
   'plans/owned-synthetic/cancel',
   'plans/owned-synthetic/outcome',
   'plans/owned-synthetic/observe-effect',
+  ...['challenge', 'verify', 'record', 'recover', 'fence'].map(
+    (phase) => `standing-approvals/${phase}`,
+  ),
   'owned-deployments',
   ...[
     'preflight',
