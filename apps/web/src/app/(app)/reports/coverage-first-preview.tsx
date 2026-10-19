@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { reportPreviewVersion } from './report-preview-version';
 import type { ReportDetail } from './report-contract';
 
 // A display projection only. The authenticated HTML/PDF endpoints independently
@@ -38,7 +39,13 @@ export function CoverageFirstPreview({ report }: { report: ReportDetail }) {
   if (!report.contentText || report.contentText.length > 4 * 1024 * 1024) return null;
   let parsed: z.infer<typeof projection>;
   try {
-    parsed = projection.parse(JSON.parse(report.contentText));
+    parsed = projection.parse(
+      reportPreviewVersion(
+        JSON.parse(report.contentText),
+        5,
+        report.assurance === 'digest_bound' && !!report.contentHash,
+      ),
+    );
     if (
       parsed.title !== report.title ||
       parsed.engagement_id !== report.engagementId ||
