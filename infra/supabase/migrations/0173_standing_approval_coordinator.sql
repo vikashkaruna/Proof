@@ -252,11 +252,19 @@ create table controller_security.standing173_suspensions (
  foreign key(tenant_id,revision_id) references controller_security.standing173_requests(tenant_id,id),
  foreign key(tenant_id,work_id) references controller_security.standing173_work(tenant_id,id),foreign key(tenant_id,receipt_id) references public.audit_ledger(tenant_id,id)
 );
+-- Scheduling metadata only: the serialized bounded scan resumes AFTER its last
+-- examined immutable tuple, wrapping once. This row never grants authority.
+create table controller_security.standing173_scan_cursor (
+ singleton boolean primary key default true check(singleton),
+ last_created_at timestamptz,last_revision_id uuid,
+ check((last_created_at is null)=(last_revision_id is null))
+);
+insert into controller_security.standing173_scan_cursor(singleton)values(true);
 -- No API/backend caller has direct table privileges or a mutable authority row.
 do $$declare n text;begin
- foreach n in array array['requests','reviews','seals','heads','revocations','decisions','fences','work','suspensions'] loop
+ foreach n in array array['requests','reviews','seals','heads','revocations','decisions','fences','work','suspensions','scan_cursor'] loop
   execute format('revoke all on controller_security.%I from public,anon,authenticated,service_role,human_action_writer,agent_ledger_writer,axiom_assessment_controller,owned_target_controller','standing173_'||n);
-  if n not in('heads','work') then execute format('create trigger standing173_immutable before update or delete on controller_security.%I for each row execute function public.evidence_receipt_immutable()','standing173_'||n);
+  if n not in('heads','work','scan_cursor') then execute format('create trigger standing173_immutable before update or delete on controller_security.%I for each row execute function public.evidence_receipt_immutable()','standing173_'||n);
   else execute format('create trigger standing173_no_delete before delete on controller_security.%I for each row execute function public.evidence_receipt_immutable()','standing173_'||n);end if;
   execute format('create trigger standing173_no_truncate before truncate on controller_security.%I for each statement execute function public.evidence_receipt_immutable()','standing173_'||n);
  end loop;
@@ -713,7 +721,7 @@ end $$;
 
 create function public.reserve_standing_policy_work()returns jsonb
 language plpgsql volatile security definer set search_path='' set lock_timeout='5s' as $$
-declare w controller_security.standing173_work;r controller_security.standing173_requests;work uuid;receipt bigint;work_kind text;deadline timestamptz;
+declare w controller_security.standing173_work;r controller_security.standing173_requests;work uuid;receipt bigint;work_kind text;deadline timestamptz;cursor_at timestamptz;cursor_id uuid;
 begin
  if current_setting('role',true)is distinct from 'agent_ledger_writer'then raise exception 'private standing coordinator required'using errcode='42501';end if;
  -- One global bounded assignment. Restart always recovers a prior claimed row;
@@ -727,15 +735,19 @@ begin
   end if;
   return jsonb_build_object('work','[]'::jsonb);
  end if;
+ select last_created_at,last_revision_id into strict cursor_at,cursor_id from controller_security.standing173_scan_cursor where singleton;
  for r in select request.* from controller_security.standing173_requests request join controller_security.standing173_reviews review on(review.tenant_id,review.revision_id)=(request.tenant_id,request.id)
  where request.expires_at>clock_timestamp()and not exists(select 1 from controller_security.standing173_revocations where revision_id=request.id)
  and not exists(select 1 from controller_security.standing173_suspensions where revision_id=request.id)
  and not exists(select 1 from controller_security.standing173_work where revision_id=request.id and kind='approval')
- order by request.created_at,request.id limit 32 loop
+ order by case when cursor_at is null or(request.created_at,request.id)>(cursor_at,cursor_id)then 0 else 1 end,request.created_at,request.id limit 32 loop
+  -- Advance outside the readiness subtransaction: a temporary refusal remains
+  -- eligible on the next wrap, but cannot hide all later revisions forever.
+  update controller_security.standing173_scan_cursor set last_created_at=r.created_at,last_revision_id=r.id where singleton;
   work_kind:=case when exists(select 1 from controller_security.standing173_seals where revision_id=r.id)then 'approval'else 'seal'end;
   if exists(select 1 from controller_security.standing173_work where revision_id=r.id and standing173_work.kind=work_kind)then continue;end if;
   -- Authority drift does not become a polling exception or a new reservation.
-  begin perform controller_security.standing173_live(r.tenant_id,r.id,work_kind='seal');exception when insufficient_privilege or no_data_found then continue;end;
+  begin perform controller_security.standing173_live(r.tenant_id,r.id,work_kind='seal');exception when insufficient_privilege or no_data_found or lock_not_available then continue;end;
   deadline:=least(clock_timestamp()+interval '2 minutes',r.expires_at);
   if deadline<=clock_timestamp()then continue;end if;
   work:=pg_catalog.gen_random_uuid();
@@ -901,7 +913,7 @@ begin
  where pol.tenant_id=p_tenant_id and pol.status='active'and pol.expires_at>clock_timestamp()and p.generated_by_agent='human'and p.purpose='remediation'and p.status in('review','approved')
  and pol.created_by=p_actor_id order by p.created_at desc,pol.id limit 20 loop
   begin src:=controller_security.standing173_source(p_tenant_id,candidate.plan_id,candidate.policy_id);
-  exception when insufficient_privilege or no_data_found then continue;end;
+  exception when insufficient_privilege or no_data_found or lock_not_available then continue;end;
   select revision_id into head from controller_security.standing173_heads where tenant_id=p_tenant_id and policy_id=candidate.policy_id;
   candidates:=candidates||jsonb_build_array(jsonb_build_object('policyName',candidate.name,'ownerId',candidate.created_by,'reviewerId',candidate.approved_by,'previousRevisionId',head,'source',src));
  end loop;

@@ -21,13 +21,13 @@ from uuid import UUID
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def fixture_program(root: Path = ROOT) -> str:
+def fixture_program(root: Path = ROOT, *, queue: bool = False) -> str:
     pg = (root / 'tests/database/postgresql-sandbox-discovery.test.sql').read_text()
     cut = "select pg_temp.ok(pg_temp.resolve()->>'targetBinding'"
     human = (root / 'tests/database/owned-human-plans.test.sql').read_text()
     human_cut = '-- Ordinary backend, browser and target roles cannot use the human source.'
     standing = (root / 'tests/database/standing-approval-coordinator.test.sql').read_text()
-    standing_cut = '-- Default legacy revoke return/actor behavior'
+    standing_cut = '-- Fair cursor polling assertions' if queue else '-- Default legacy revoke return/actor behavior'
     if any(text.count(marker) != 1 for text, marker in [(pg, cut), (human, human_cut), (standing, standing_cut)]):
         raise ValueError('Reviewed173 fixture boundaries changed')
     program = pg[:pg.index(cut)] + '\nreset role;\n' + (root / 'tests/database/lib/owned-deployment-fixture.sql').read_text() + '\n' + human[:human.index(human_cut)] + '\nreset role;\n' + standing[:standing.index(standing_cut)]
@@ -76,7 +76,7 @@ def main() -> None:
         return result.stdout.strip()
 
     def psql(database: str) -> list[str]:
-        if not re.fullmatch(r'axiom_proof_local_173_[a-f0-9]{12}_(revoke|claim)', database):
+        if not re.fullmatch(r'axiom_proof_local_173_[a-f0-9]{12}_(revoke|claim|queue)', database):
             raise Refused('Owned database name refused')
         return ['exec', '-i', args.container, 'psql', '-X', '-U', 'supabase_admin', '-d', database, '-v', 'ON_ERROR_STOP=1', '-qAt']
 
@@ -93,7 +93,7 @@ def main() -> None:
         return child
 
     def wait_blocked(database: str, app: str, blocker: str, label: str) -> None:
-        if app not in {'axiom173_claim', 'axiom173_revoke'} or blocker not in {'axiom173_claim', 'axiom173_revoke', 'axiom173_barrier'}:
+        if app not in {'axiom173_claim', 'axiom173_revoke', 'axiom173_poll_a', 'axiom173_poll_b'} or blocker not in {'axiom173_claim', 'axiom173_revoke', 'axiom173_barrier', 'axiom173_poll_a', 'axiom173_poll_b'}:
             raise Refused('Fixed race phase required')
         # Names are fixed constants above. Metadata proves the actual dependency,
         # not merely that an unrelated advisory wait happened somewhere.
@@ -152,8 +152,59 @@ def main() -> None:
             if final != expected:
                 raise Refused('173 race final authority mismatch')
             proof.append({'order': order + '_first', 'actualBlockingObserved': True, 'final': final})
+        # Two real concurrent polls: first scans32 stale rows and holds the
+        # global scan lock. Second must observe its committed cursor, progress
+        # to the valid34th revision, and retain exactly one original assignment.
+        queue_db = 'axiom_proof_local_173_' + suffix + '_queue'
+        command(['exec', args.container, 'createdb', '-U', 'supabase_admin', '--template', args.database, queue_db], 'create-queue-database')
+        databases.append(queue_db)
+        query(queue_db, fixture_program(queue=True), 'committed-fair-queue-fixture')
+        holder = spawn(queue_db, "set application_name='axiom173_poll_a';begin;set local statement_timeout='15s';set local role agent_ledger_writer;select public.reserve_standing_policy_work();\n\\echo READY173")
+        if holder.stdout is None:
+            raise Refused('Queue holder output unavailable')
+        for _ in range(4):
+            if holder.stdout.readline().strip() == 'READY173':
+                break
+        else:
+            raise Refused('Queue cursor barrier unavailable')
+        contender = spawn(queue_db, "set application_name='axiom173_poll_b';begin;set local statement_timeout='15s';set local role agent_ledger_writer;select public.reserve_standing_policy_work();commit;")
+        wait_blocked(queue_db, 'axiom173_poll_b', 'axiom173_poll_a', 'fair-poll-contender-blocked')
+        assert holder.stdin is not None
+        holder.stdin.write('commit;\n\\q\n')
+        holder.stdin.flush()
+        for name, child in [('holder',holder),('contender',contender)]:
+            stdout, stderr = child.communicate(timeout=20)
+            (evidence / ('fair-poll-' + name + '.log')).write_text(stdout + stderr)
+            if child.returncode:
+                raise Refused('Concurrent fair poll failed')
+        queue_final = json.loads(query(queue_db, "select jsonb_build_object('workCount',(select count(*)from controller_security.standing173_work),'validRevision',(select bool_and(revision_id=standing173_race.pg_id(902))from controller_security.standing173_work),'suspensions',(select count(*)from controller_security.standing173_suspensions));", 'fair-poll-final'))
+        if queue_final != {'workCount':1,'validRevision':True,'suspensions':0}:
+            raise Refused('Fair cursor duplicate or starvation detected')
+        # A second simultaneous claim is a readback, never another handoff.
+        # Resolve the sole private work UUID as fixture admin, never granting
+        # the agent direct table access or a generic helper capability.
+        work_id = str(UUID(query(queue_db, 'select id from controller_security.standing173_work;', 'fair-work-id')))
+        claim_sql = "set local role agent_ledger_writer;select public.claim_standing_policy_work(standing173_race.pg_id(1),'" + work_id + "');"  # nosec B608 -- validated fixture UUID
+        holder = spawn(queue_db, "set application_name='axiom173_poll_a';begin;" + claim_sql + "\n\\echo READY173")
+        assert holder.stdout is not None
+        for _ in range(4):
+            if holder.stdout.readline().strip() == 'READY173':
+                break
+        else:
+            raise Refused('Claim barrier unavailable')
+        contender = spawn(queue_db, "set application_name='axiom173_poll_b';begin;" + claim_sql + 'commit;')
+        wait_blocked(queue_db, 'axiom173_poll_b', 'axiom173_poll_a', 'fair-claim-contender-blocked')
+        assert holder.stdin is not None
+        holder.stdin.write('commit;\n\\q\n')
+        holder.stdin.flush()
+        for name,child in [('holder',holder),('contender',contender)]:
+            stdout,stderr=child.communicate(timeout=20)
+            (evidence / ('fair-claim-' + name + '.log')).write_text(stdout+stderr)
+            if child.returncode or (name=='contender' and '"state": "unconfirmed"' not in stdout):
+                raise Refused('Concurrent claim relaunched or failed')
+        proof.append({'order':'fair_cursor_concurrent_polls_and_claims','actualBlockingObserved':True,'final':queue_final})
         (evidence / 'proof.json').write_text(json.dumps({'races': proof, 'scope': 'owned_disposable_SQL_only'}, indent=2))
-        print('Both173 actual plan-lock race orders passed; evidence ' + str(evidence))
+        print('173 plan-lock and fair cursor concurrent races passed; evidence ' + str(evidence))
     finally:
         for client in clients:
             if client.poll() is None:

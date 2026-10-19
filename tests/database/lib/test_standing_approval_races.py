@@ -25,5 +25,13 @@ class StandingFixtureIdentity(unittest.TestCase):
         self.assertNotIn('pg_temp.',program)
         self.assertNotIn('rollback;',program)
 
+    def test_queue_fixture_contains33_stale_and_one_real_review_before_polling(self):
+        program=module.fixture_program(queue=True)
+        self.assertIn('for n in 1..33 loop',program)
+        self.assertIn("standing173_record('request',1)",program)
+        self.assertIn("standing173_record('approve',6)",program)
+        self.assertNotIn('first bounded page examines32',program)
+        self.assertTrue(program.endswith('commit;\n'))
+
 if __name__=='__main__':
     unittest.main()

@@ -62,6 +62,59 @@ reset role;
 -- Request needs the actual current owner, scope and measured source; reviewer
 -- approval is a second current session/factor decision, not approvedById.
 select pg_temp.standing173_refused('select public.preflight_standing_policy_revision(pg_temp.pg_id(1),pg_temp.id(6),pg_temp.id(106),(select v->>''text''from standing173_saved where name=''request''))');
+-- Fair cursor fixture start: real eligible dual-human revision, followed by
+-- administrative synthetic stale histories with missing immutable MFA proof.
+-- These rows test scheduling only; none may ever receive authority/work.
+savepoint standing173_fair_scan;
+select pg_temp.standing173_record('request',1);
+select pg_temp.standing173_record('approve',6);
+do $$declare n integer;r controller_security.standing173_requests;a controller_security.standing173_reviews;revision uuid;owner_ch uuid;review_ch uuid;begin
+ select *into strict r from controller_security.standing173_requests where id=pg_temp.pg_id(902);
+ select *into strict a from controller_security.standing173_reviews where revision_id=r.id;
+ for n in 1..33 loop
+  revision:=gen_random_uuid();owner_ch:=gen_random_uuid();review_ch:=gen_random_uuid();
+  insert into public.mfa_challenges(id,user_id,tenant_id,factor_id,purpose,created_at,expires_at)
+  values(owner_ch,r.owner_id,r.tenant_id,pg_temp.id(41),'standing_policy_revision',clock_timestamp(),clock_timestamp()+interval '5 minutes'),
+  (review_ch,r.reviewer_id,r.tenant_id,pg_temp.id(46),'standing_policy_revision',clock_timestamp(),clock_timestamp()+interval '5 minutes');
+  insert into controller_security.standing173_requests(id,tenant_id,policy_id,owner_id,reviewer_id,session_id,request_text,request_sha256,challenge_id,receipt_id,source,created_at,expires_at)
+  values(revision,r.tenant_id,r.policy_id,r.owner_id,r.reviewer_id,r.session_id,r.request_text,r.request_sha256,owner_ch,r.receipt_id,r.source,r.created_at-make_interval(secs=>n),r.expires_at);
+  insert into controller_security.standing173_reviews(operation_key,tenant_id,revision_id,actor_id,session_id,decision_text,decision_sha256,challenge_id,receipt_id)
+  values(gen_random_uuid(),r.tenant_id,revision,a.actor_id,a.session_id,a.decision_text,a.decision_sha256,review_ch,a.receipt_id);
+ end loop;
+end $$;
+-- Fair cursor polling assertions (also a frozen concurrency fixture boundary).
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_standing_policy_work()='{"work":[]}'::jsonb,'first bounded page examines32 stale revisions');
+reset role;
+select pg_temp.ok((select last_revision_id is not null from controller_security.standing173_scan_cursor),'cursor survives empty poll');
+-- Temporary current-role drift must not permanently refuse any human revision.
+update public.tenant_users set approval_scopes='{sql.other}'where tenant_id=pg_temp.pg_id(1)and user_id=pg_temp.id(6);
+set local role agent_ledger_writer;
+select pg_temp.ok(public.reserve_standing_policy_work()='{"work":[]}'::jsonb,'temporarily invalid eligible revision is skipped without authority');
+reset role;
+select pg_temp.ok(not exists(select 1 from controller_security.standing173_suspensions)and not exists(select 1 from controller_security.standing173_work),'temporary refusal creates no suspension or delegated work');
+update public.tenant_users set approval_scopes='{}'where tenant_id=pg_temp.pg_id(1)and user_id=pg_temp.id(6);
+do $$declare result jsonb;n integer;cursor_before record;cursor_after record;begin
+ for n in 1..2 loop
+  set local role agent_ledger_writer;result:=public.reserve_standing_policy_work();reset role;
+  exit when jsonb_array_length(result->'work')=1;
+ end loop;
+ perform pg_temp.ok(jsonb_array_length(result->'work')=1,'later eligible revision progresses past33 stale rows after transient recovery');
+ perform pg_temp.ok((select revision_id=pg_temp.pg_id(902)from controller_security.standing173_work where id=(result#>>'{work,0,workId}')::uuid),'only actual dual-human revision reserved');
+ select *into cursor_before from controller_security.standing173_scan_cursor;
+ set local role agent_ledger_writer;
+ perform pg_temp.ok(public.reserve_standing_policy_work()=result,'retained queued work takes priority over cursor');
+ perform public.claim_standing_policy_work(pg_temp.pg_id(1),(result#>>'{work,0,workId}')::uuid);
+ perform pg_temp.ok(public.reserve_standing_policy_work()=result,'retained claimed work takes priority over cursor');
+ perform pg_temp.ok(public.claim_standing_policy_work(pg_temp.pg_id(1),(result#>>'{work,0,workId}')::uuid)->>'state'='unconfirmed','lost claim reply never relaunches original');
+ reset role;
+ select *into cursor_after from controller_security.standing173_scan_cursor;
+ perform pg_temp.ok(cursor_before is not distinct from cursor_after,'retained-work recovery does not advance scheduling cursor');
+ perform pg_temp.ok((select count(*)=1 from controller_security.standing173_work),'one reservation despite repeated polls/claims');
+end $$;
+rollback to savepoint standing173_fair_scan;
+release savepoint standing173_fair_scan;
+-- Fair cursor fixture end.
 insert into standing173_saved values('ownerReceipt',pg_temp.standing173_record('request',1,3000));
 set local role agent_ledger_writer;
 select pg_temp.ok(public.reserve_standing_policy_work()='{"work":[]}'::jsonb,'owner request alone confers no work');

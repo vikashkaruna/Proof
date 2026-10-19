@@ -72,3 +72,26 @@ it('pins and retains the legacy base-policy revoke body without rewriting its re
   expect(wrapper).toContain("w.state='issued'");
   expect(wrapper).toContain('return result;');
 });
+
+it('fair scan is private scheduling metadata serialized with retained-work priority', () => {
+  const reserve = body(next, 'public.reserve_standing_policy_work');
+  expect(next).toContain("'work','suspensions','scan_cursor'");
+  expect(next).toContain("n not in('heads','work','scan_cursor')");
+  expect(reserve.indexOf('pg_advisory_xact_lock(173,173)')).toBeLessThan(
+    reserve.indexOf('select last_created_at,last_revision_id'),
+  );
+  expect(reserve.indexOf("where state in('queued','claimed')")).toBeLessThan(
+    reserve.indexOf('select last_created_at,last_revision_id'),
+  );
+  expect(reserve).toContain(
+    'order by case when cursor_at is null or(request.created_at,request.id)>(cursor_at,cursor_id)then 0 else 1 end,request.created_at,request.id limit 32',
+  );
+  expect(reserve.indexOf('update controller_security.standing173_scan_cursor')).toBeLessThan(
+    reserve.indexOf('begin perform controller_security.standing173_live'),
+  );
+  expect(reserve).toContain(
+    'exception when insufficient_privilege or no_data_found or lock_not_available then continue;end;',
+  );
+  expect(reserve).not.toContain('insert into controller_security.standing173_suspensions');
+  expect(reserve).not.toContain('when others');
+});
