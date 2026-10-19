@@ -20,6 +20,22 @@ reset role;
 set local role service_role;
 select public.claim_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351));
 select pg_temp.deployment169_refused('select public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select v||''{"bffContainerId":"foreign"}''::jsonb from enrollment169_saved where name=''host''))');
+reset role;
+-- Ordinary/shared backend principals cannot gain target RPC authority. Refusal
+-- preserves the unsafe edge for review instead of automatically repairing it.
+create role "axiom-proof-test-owned169-incoming" nologin noinherit;
+do $$declare principal text;begin
+ foreach principal in array array['axiom-proof-test-owned169-incoming','service_role','human_action_writer','agent_ledger_writer'] loop
+  execute format('grant owned_target_controller to %I',principal);
+  set local role service_role;
+  perform pg_temp.deployment169_refused('select public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select v from enrollment169_saved where name=''host''))');
+  reset role;
+  if not pg_has_role(principal,'owned_target_controller','MEMBER') then raise exception 'Unsafe role edge was silently repaired';end if;
+  execute format('revoke owned_target_controller from %I',principal);
+ end loop;
+end $$;
+drop role "axiom-proof-test-owned169-incoming";
+set local role service_role;
 insert into enrollment169_saved values('preflight',public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select v from enrollment169_saved where name='host')));
 select pg_temp.ok((select v->>'state'='preflight_ready' and v#>>'{preflight,dryRunCompleted}'='true' and v#>>'{preflight,rollbackValidated}'='true' from enrollment169_saved where name='preflight'),'measured no-write host/DB observations and actual reducer become reviewable');
 select pg_temp.ok(public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select v from enrollment169_saved where name='host'))=(select v from enrollment169_saved where name='preflight'),'lost observation reply recovers same digest and receipt');

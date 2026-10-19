@@ -3,6 +3,7 @@
 -- A short installer token has a distinct signed domain from remediation; the
 -- immutable approved scope has its separately signed <=24h manifest expiry.
 alter type public.mfa_challenge_purpose add value if not exists 'owned_synthetic_enrollment';
+alter type public.mfa_challenge_purpose add value if not exists 'owned_synthetic_revocation';
 alter type public.ledger_action_type add value if not exists 'deployment.owned_requested';
 alter type public.ledger_action_type add value if not exists 'deployment.owned_preflight';
 alter type public.ledger_action_type add value if not exists 'deployment.owned_approved';
@@ -33,7 +34,7 @@ create table owned_synthetic.deployment_approvals (
  actor_id uuid not null references public.users(id),session_id uuid not null,
  operation_key uuid not null,challenge_id uuid not null references public.mfa_challenges(id),
  decision jsonb not null,decision_sha256 text not null check(decision_sha256~'^[a-f0-9]{64}$'),
- signed_token jsonb not null,preflight_sha256 text not null check(preflight_sha256~'^[a-f0-9]{64}$'),
+ signed_token jsonb not null,role_graph jsonb not null,preflight_sha256 text not null check(preflight_sha256~'^[a-f0-9]{64}$'),
  rollback_sha256 text not null check(rollback_sha256~'^[a-f0-9]{64}$'),
  approved_at timestamptz not null default clock_timestamp(),scope_expires_at timestamptz not null,
  receipt_id bigint not null,
@@ -58,7 +59,7 @@ create table owned_synthetic.deployment_heads (
 );
 create table owned_synthetic.deployment_operations (
  tenant_id uuid not null,actor_id uuid not null references public.users(id),request_id uuid not null,
- phase text not null check(phase in('request','preflight','challenge','verify','approve','install','fence')),
+ phase text not null check(phase in('request','preflight','challenge','verify','approve','install','fence','revoke_challenge','revoke_verify','revoke')),
  operation_key uuid not null,intent jsonb not null,intent_sha256 text not null check(intent_sha256~'^[a-f0-9]{64}$'),
  outcome text not null check(outcome in('pending','recorded','unconfirmed')),
  result jsonb,phase_result jsonb,receipt_id bigint,
@@ -69,7 +70,7 @@ create table owned_synthetic.deployment_operations (
 );
 create table owned_synthetic.deployment_fences (
  tenant_id uuid not null references public.tenants(id),actor_id uuid not null references public.users(id),
- request_id uuid not null,target_phase text not null check(target_phase in('request','preflight','decision')),
+ request_id uuid not null,target_phase text not null check(target_phase in('request','preflight','decision','revocation')),
  target_operation_key uuid not null,target_sha256 text not null check(target_sha256~'^[a-f0-9]{64}$'),
  operation_key uuid not null,receipt_id bigint not null,created_at timestamptz not null default clock_timestamp(),
  primary key(tenant_id,actor_id,request_id,target_phase,target_operation_key),
@@ -141,7 +142,7 @@ create function owned_synthetic.deployment_unfenced(t uuid,a uuid,r uuid,phase t
 language plpgsql security definer set search_path='' as $$begin
  perform owned_synthetic.deployment_lock(t,r);
  if exists(select 1 from owned_synthetic.deployment_fences f where(f.tenant_id,f.actor_id,f.request_id,f.target_operation_key)=(t,a,r,op)
-  and f.target_phase=case when phase in('challenge','verify','approve') then 'decision' else phase end)
+  and f.target_phase=case when phase in('challenge','verify','approve') then 'decision' when phase in('revoke_challenge','revoke_verify','revoke') then 'revocation' else phase end)
  then raise exception 'owned deployment intent fenced' using errcode='42501';end if;
 end $$;
 create function owned_synthetic.deployment_operation_sha256(t uuid,a uuid,r uuid,op uuid,intent jsonb) returns text
@@ -189,16 +190,16 @@ revoke all on all functions in schema owned_synthetic from public,anon,authentic
 -- credential, login-MFA attestation, or arbitrary operation UUID is insufficient.
 create function owned_synthetic.deployment_mfa_authority(t uuid,a uuid,s uuid,op uuid,digest text) returns void
 language plpgsql security definer set search_path='' as $$
-declare request uuid;r owned_synthetic.deployment_requests;h owned_synthetic.deployment_heads;d owned_synthetic.deployment_decisions;
+declare request_id_value uuid;r owned_synthetic.deployment_requests;h owned_synthetic.deployment_heads;d owned_synthetic.deployment_decisions;
 begin
  if current_setting('role',true) is distinct from 'service_role' then raise exception 'owned deployment MFA service refused' using errcode='42501';end if;
  select * into d from owned_synthetic.deployment_decisions where(tenant_id,actor_id,operation_key,session_id,bound_payload_sha256)=(t,a,op,s,digest);
- request:=d.request_id;
- if request is null then raise exception 'owned deployment MFA source refused' using errcode='42501';end if;
- perform owned_synthetic.deployment_unfenced(t,a,request,'approve',op);
- select * into strict r from owned_synthetic.deployment_requests where id=request and tenant_id=t;
+ request_id_value:=d.request_id;
+ if request_id_value is null then raise exception 'owned deployment MFA source refused' using errcode='42501';end if;
+ perform owned_synthetic.deployment_unfenced(t,a,request_id_value,'approve',op);
+ select * into strict r from owned_synthetic.deployment_requests where id=request_id_value and tenant_id=t;
  perform owned_synthetic.deployment_live_source(r);
- select * into strict h from owned_synthetic.deployment_heads where request_id=request for share;
+ select * into strict h from owned_synthetic.deployment_heads where request_id=request_id_value for share;
  if h.state<>'preflight_ready' or d.decision->>'expectedManifestSha256' is distinct from r.manifest_sha256
  or d.decision->>'expectedPreflightSha256' is distinct from h.preflight->>'sha256'
  or d.decision->>'expectedRollbackSha256' is distinct from h.preflight->>'rollbackSha256'
@@ -431,7 +432,7 @@ declare h owned_synthetic.deployment_heads;a owned_synthetic.deployment_approval
 begin
  select * into strict h from owned_synthetic.deployment_heads where request_id=r.id;
  if h.approval_id is not null then select * into strict a from owned_synthetic.deployment_approvals where id=h.approval_id;end if;
- effective:=case when r.expires_at<=clock_timestamp() then 'expired'
+ effective:=case when h.state='revoked' then 'revoked' when r.expires_at<=clock_timestamp() then 'expired'
  when not exists(select 1 from public.local_custody_policy_heads where(tenant_id,policy_id,activation_epoch)=(r.tenant_id,r.custody_policy_id,r.custody_epoch) and state='active') then 'revoked' else h.state end;
  select jsonb_agg(jsonb_build_object('step',fixed.step,'state',coalesce(latest.transition,'pending'),'receiptId',latest.receipt_id::text,
  'detail',case when latest.transition='confirmed' then 'Independent readback recorded' when latest.transition='unconfirmed' then 'Effect remains unconfirmed; automatic retry refused' else null end) order by fixed.ordinal)
@@ -507,7 +508,7 @@ language plpgsql security definer set search_path='' as $$
 declare op owned_synthetic.deployment_operations;
 begin
  perform owned_synthetic.human_authority(p_tenant_id,p_actor_id,p_session_id);
- if p_phase not in('request','preflight','challenge','verify','approve','install','fence') or p_operation_key is null
+ if p_phase not in('request','preflight','challenge','verify','approve','install','fence','revoke_challenge','revoke_verify','revoke') or p_operation_key is null
  then raise exception 'owned deployment operation refused' using errcode='22023';end if;
  perform pg_advisory_xact_lock_shared(hashtextextended(p_tenant_id::text,47));
  perform owned_synthetic.deployment_lock(p_tenant_id,p_request_id);
@@ -527,7 +528,7 @@ begin
  or p_request-array['operationKey','target','reason']<>'{}'::jsonb or p_request->>'reason' is null or p_request->>'reason' not in('expired','superseded_after_no_effect')
  or jsonb_typeof(p_request->'target') is distinct from 'object' or(p_request->'target')-array['phase','operationKey','canonicalRequestHash']<>'{}'::jsonb
  or not((p_request->'target')?&array['phase','operationKey','canonicalRequestHash'])
- or p_request#>>'{target,phase}' is null or p_request#>>'{target,phase}' not in('request','preflight','decision')
+ or p_request#>>'{target,phase}' is null or p_request#>>'{target,phase}' not in('request','preflight','decision','revocation')
  or jsonb_typeof(p_request#>'{target,canonicalRequestHash}') is distinct from 'string' or p_request#>>'{target,canonicalRequestHash}' !~ '^[a-f0-9]{64}$'
  then raise exception 'owned deployment fence refused' using errcode='22023';end if;
  opkey:=(p_request->>'operationKey')::uuid;oldkey:=(p_request#>>'{target,operationKey}')::uuid;target_kind:=p_request#>>'{target,phase}';
@@ -550,21 +551,24 @@ begin
  -- A fresh explicit fence operation may acknowledge an existing tombstone;
  -- it appends a new receipt without changing or deleting the original fence.
  if oldfence.operation_key is null then
-  if exists(select 1 from owned_synthetic.deployment_approvals where request_id=p_request_id)
+  if target_kind<>'revocation' and exists(select 1 from owned_synthetic.deployment_approvals where request_id=p_request_id)
   then raise exception 'owned deployment approval already recorded' using errcode='42501';end if;
-  if exists(select 1 from owned_synthetic.deployment_steps where request_id=p_request_id)
-   or exists(select 1 from owned_synthetic.deployment_operations where tenant_id=p_tenant_id and request_id=p_request_id and(phase='install' or outcome='unconfirmed'))
+  if target_kind<>'revocation' and(exists(select 1 from owned_synthetic.deployment_steps where request_id=p_request_id)
+   or exists(select 1 from owned_synthetic.deployment_operations where tenant_id=p_tenant_id and request_id=p_request_id and(phase='install' or outcome='unconfirmed')))
   then raise exception 'owned deployment effect unresolved' using errcode='42501';end if;
  end if;
  select * into target from owned_synthetic.deployment_operations where(tenant_id,actor_id,request_id,operation_key)=(p_tenant_id,p_actor_id,p_request_id,oldkey)
- and case when target_kind='decision' then deployment_operations.phase in('challenge','verify','approve') else deployment_operations.phase=target_kind end
+ and case when target_kind='decision' then deployment_operations.phase in('challenge','verify','approve') when target_kind='revocation' then deployment_operations.phase in('revoke_challenge','revoke_verify','revoke') else deployment_operations.phase=target_kind end
  and intent_sha256=p_request#>>'{target,canonicalRequestHash}' order by case deployment_operations.phase when 'approve' then 3 when 'verify' then 2 else 1 end desc limit 1;
  if target.operation_key is null and exists(select 1 from owned_synthetic.deployment_operations where(tenant_id,actor_id,request_id,operation_key)=(p_tenant_id,p_actor_id,p_request_id,oldkey)
- and case when target_kind='decision' then deployment_operations.phase in('challenge','verify','approve') else deployment_operations.phase=target_kind end)
+ and case when target_kind='decision' then deployment_operations.phase in('challenge','verify','approve') when target_kind='revocation' then deployment_operations.phase in('revoke_challenge','revoke_verify','revoke') else deployment_operations.phase=target_kind end)
  then raise exception 'owned deployment fence intent changed' using errcode='23505';end if;
  if oldfence.operation_key is not null and oldfence.target_sha256 is distinct from p_request#>>'{target,canonicalRequestHash}'
  then raise exception 'owned deployment fence intent changed' using errcode='23505';end if;
- if target_kind='decision' then
+ if target_kind='revocation' then
+  if exists(select 1 from owned_synthetic.deployment_operations where tenant_id=p_tenant_id and request_id=p_request_id and phase='revoke' and operation_key=oldkey) then raise exception 'owned deployment stop already recorded' using errcode='42501';end if;
+  if p_request->>'reason'='expired' and exists(select 1 from public.mfa_challenges where user_id=p_actor_id and tenant_id=p_tenant_id and purpose::text='owned_synthetic_revocation' and bound_resource_ref=oldkey::text and expires_at>clock_timestamp() and attempts<max_attempts and consumed_at is null) then raise exception 'owned deployment stop decision remains live' using errcode='42501';end if;
+ elsif target_kind='decision' then
   perform owned_synthetic.deployment_founder(p_tenant_id,p_actor_id,p_session_id);
   if p_request->>'reason'='expired' and exists(select 1 from public.mfa_challenges where user_id=p_actor_id and tenant_id=p_tenant_id and purpose::text='owned_synthetic_enrollment'
     and bound_resource_ref=oldkey::text and expires_at>clock_timestamp() and attempts<max_attempts and consumed_at is null)
@@ -572,7 +576,7 @@ begin
  end if;
  select * into h from owned_synthetic.deployment_heads where request_id=p_request_id for update;
  needs_preflight:=h.preflight is null or(h.preflight->>'expiresAt')::timestamptz<=clock_timestamp() or h.preflight->'dryRunCompleted' is distinct from 'true'::jsonb or h.preflight->'rollbackValidated' is distinct from 'true'::jsonb;
- previous:=case when target.operation_key is null then 'not_recorded' when target_kind='decision' then 'expired_decision' else 'recorded_readonly_no_effect' end;
+ previous:=case when target.operation_key is null then 'not_recorded' when target_kind in('decision','revocation') then 'expired_decision' else 'recorded_readonly_no_effect' end;
  receipt:=public.append_ledger(p_tenant_id,opkey,'human',p_actor_id::text,null,null,null,'deployment.owned_fenced',p_request_id::text,
  digest,p_request#>>'{target,canonicalRequestHash}',null,null,null,null,'success',jsonb_build_object('target_phase',target_kind,'target_operation_key',oldkey,'previous_fence_receipt',oldfence.receipt_id,'target_mutations',0));
  answer:=jsonb_build_object('requestId',p_request_id,'tenantId',p_tenant_id,'actorId',p_actor_id,'operationKey',opkey,'target',p_request->'target',
@@ -796,7 +800,7 @@ begin
  or exists(select 1 from owned_synthetic.bindings where id=r.binding_id or(fixture_id,resource_id)=(r.fixture_id,r.resource_id))
  or exists(select 1 from owned_synthetic.resources where(fixture_id,resource_id)=(r.fixture_id,r.resource_id))
  then raise exception 'owned deployment database scope refused' using errcode='42501';end if;
- db:=jsonb_build_object('engineSha256',owned_synthetic.engine_sha256(),'newDedicatedResource',true,'roleFlagsSafe',true,'outgoingRoleMemberships',0,
+ db:=jsonb_build_object('roleGraph',owned_synthetic.deployment_role_graph(),'engineSha256',owned_synthetic.engine_sha256(),'newDedicatedResource',true,'roleFlagsSafe',true,'outgoingRoleMemberships',0,
  'karyaRegistration',(select jsonb_build_object('id',w.id,'status',w.status,'version',w.version) from public.workload_identities w where w.tenant_id=r.tenant_id and w.spiffe_id='spiffe://local.axiomproof.test/agent/karya'),'incomingRoleNames',coalesce((select jsonb_agg(member.rolname order by member.rolname) from pg_catalog.pg_auth_members edge join pg_catalog.pg_roles role on role.oid=edge.roleid join pg_catalog.pg_roles member on member.oid=edge.member where role.rolname='owned_target_controller'),'[]'::jsonb),'persistentMutations',0);
  beforestate:='{"bindingState":"absent","credentialActive":false,"resourceRetained":false,"journalsRetained":true,"sharedRoleRetained":true,"sharedIdentityRetained":true}'::jsonb;
  afterstate:=owned_synthetic.deployment_project(beforestate,true);restored:=owned_synthetic.deployment_project(afterstate,false);
@@ -933,8 +937,8 @@ begin
  then raise exception 'owned deployment signed scope refused' using errcode='42501';end if;
  approval:=gen_random_uuid();
  receipt:=public.append_ledger(p_tenant_id,op,'human',p_actor_id::text,null,null,null,'deployment.owned_approved',r.id::text,digest,owned_synthetic.snapshot_sha256(p_token),null,null,null,null,'success',jsonb_build_object('approval_id',approval,'purpose','owned_synthetic_enrollment_v1','target_mutations',0));
- insert into owned_synthetic.deployment_approvals(id,tenant_id,request_id,actor_id,session_id,operation_key,challenge_id,decision,decision_sha256,signed_token,preflight_sha256,rollback_sha256,scope_expires_at,receipt_id)
- values(approval,p_tenant_id,r.id,p_actor_id,p_session_id,op,p_challenge_id,p_decision,d.bound_payload_sha256,p_token,h.preflight->>'sha256',h.preflight->>'rollbackSha256',r.expires_at,receipt);
+ insert into owned_synthetic.deployment_approvals(id,tenant_id,request_id,actor_id,session_id,operation_key,challenge_id,decision,decision_sha256,signed_token,role_graph,preflight_sha256,rollback_sha256,scope_expires_at,receipt_id)
+ values(approval,p_tenant_id,r.id,p_actor_id,p_session_id,op,p_challenge_id,p_decision,d.bound_payload_sha256,p_token,(select database_observation->'roleGraph' from owned_synthetic.deployment_observations where task_id=h.preflight_key),h.preflight->>'sha256',h.preflight->>'rollbackSha256',r.expires_at,receipt);
  update owned_synthetic.deployment_heads set state='approved',approval_id=approval where request_id=r.id;
  answer:=owned_synthetic.deployment_summary(r);
  insert into owned_synthetic.deployment_operations(tenant_id,actor_id,request_id,phase,operation_key,intent,intent_sha256,outcome,result,receipt_id)
@@ -981,6 +985,7 @@ declare r owned_synthetic.deployment_requests;a owned_synthetic.deployment_appro
  perform owned_synthetic.deployment_live_source(r);
  select * into strict h from owned_synthetic.deployment_heads where request_id=rid for share;
  select * into strict a from owned_synthetic.deployment_approvals where(tenant_id,id,request_id)=(t,h.approval_id,rid) for share;
+ perform owned_synthetic.deployment_require_role_graph(a.role_graph);
  perform 1 from public.platform_founders founder join public.users u on u.id=founder.user_id
  where founder.user_id=a.actor_id and founder.revoked_at is null and u.is_axiom_internal for share of founder,u;
  if not found then raise exception 'owned deployment approving founder revoked' using errcode='42501';end if;
@@ -1202,7 +1207,7 @@ declare r owned_synthetic.deployment_requests;a owned_synthetic.deployment_appro
   if role_oid is null or exists(select 1 from pg_catalog.pg_auth_members where member=role_oid)
   or exists(select 1 from pg_catalog.pg_auth_members edge join pg_catalog.pg_roles member on member.oid=edge.member where edge.roleid=role_oid and member.rolname<>'authenticator' and not member.rolsuper and member.oid<>(select nspowner from pg_catalog.pg_namespace where nspname='owned_synthetic'))
   then raise exception 'owned deployment role graph refused' using errcode='42501';end if;
-  grant owned_target_controller to authenticator;
+  grant owned_target_controller to authenticator with admin false,inherit false,set true;
   if not pg_has_role('authenticator','owned_target_controller','MEMBER') then raise exception 'owned deployment role switch readback refused' using errcode='42501';end if;
   readback:=jsonb_build_object('role','owned_target_controller','member','authenticator','membershipConfirmed',true,'outgoingRoleMemberships',0);
  end if;
@@ -1420,3 +1425,25 @@ declare a owned_synthetic.deployment_approvals;r owned_synthetic.deployment_requ
 end $$;
 revoke all on function public.read_owned_deployment_credential_reservation(uuid,uuid,uuid) from public,anon,authenticated,human_action_writer,agent_ledger_writer,owned_target_controller;
 grant execute on function public.read_owned_deployment_credential_reservation(uuid,uuid,uuid) to service_role;
+
+create function owned_synthetic.deployment_role_graph() returns jsonb
+language sql volatile security definer set search_path='' as $$
+ select jsonb_build_object('schemaOwnerOid',(select nspowner from pg_catalog.pg_namespace where nspname='owned_synthetic'),
+ 'databaseOwnerOid',(select datdba from pg_catalog.pg_database where datname=current_database()),
+ 'roles',(select jsonb_agg(jsonb_build_object('oid',r.oid,'name',r.rolname,'login',r.rolcanlogin,'inherit',r.rolinherit,'superuser',r.rolsuper,'createdb',r.rolcreatedb,'createrole',r.rolcreaterole,'replication',r.rolreplication,'bypassrls',r.rolbypassrls) order by r.rolname) from pg_catalog.pg_roles r where r.rolname in('owned_target_controller','authenticator')),
+ 'edges',coalesce((select jsonb_agg(jsonb_build_object('roleOid',e.roleid,'memberOid',e.member,'memberName',m.rolname,'memberSuperuser',m.rolsuper,'memberLogin',m.rolcanlogin,'memberInherit',m.rolinherit,'memberCreateRole',m.rolcreaterole,'memberCreateDb',m.rolcreatedb,'memberReplication',m.rolreplication,'memberBypassRls',m.rolbypassrls,'grantorOid',e.grantor,'admin',e.admin_option,'inherit',e.inherit_option,'set',e.set_option) order by e.roleid,e.member,e.grantor) from pg_catalog.pg_auth_members e join pg_catalog.pg_roles r on r.oid=e.roleid join pg_catalog.pg_roles m on m.oid=e.member where r.rolname='owned_target_controller' or m.rolname='owned_target_controller'),'[]'::jsonb))
+$$;
+create function owned_synthetic.deployment_require_role_graph(expected jsonb) returns void
+language plpgsql security definer set search_path='' as $$
+declare actual jsonb;expected_edges jsonb;actual_edges jsonb;auth_expected jsonb;auth_actual jsonb;begin
+ actual:=owned_synthetic.deployment_role_graph();
+ select coalesce(jsonb_agg(e order by e->>'roleOid',e->>'memberOid',e->>'grantorOid'),'[]'::jsonb) into expected_edges from jsonb_array_elements(expected->'edges') e where e->>'memberName'<>'authenticator';
+ select coalesce(jsonb_agg(e order by e->>'roleOid',e->>'memberOid',e->>'grantorOid'),'[]'::jsonb) into actual_edges from jsonb_array_elements(actual->'edges') e where e->>'memberName'<>'authenticator';
+ select e into auth_expected from jsonb_array_elements(expected->'edges') e where e->>'memberName'='authenticator';
+ select e into auth_actual from jsonb_array_elements(actual->'edges') e where e->>'memberName'='authenticator';
+ if expected is null or actual-'edges' is distinct from expected-'edges' or actual_edges is distinct from expected_edges
+ or(auth_expected is not null and auth_actual is distinct from auth_expected)
+ or(auth_actual is not null and(auth_actual->'admin' is distinct from 'false'::jsonb or auth_actual->'inherit' is distinct from 'false'::jsonb or auth_actual->'set' is distinct from 'true'::jsonb))
+ then raise exception 'owned deployment reviewed role graph changed' using errcode='42501';end if;
+end $$;
+revoke all on all functions in schema owned_synthetic from public,anon,authenticated,service_role,human_action_writer,agent_ledger_writer,owned_target_controller;

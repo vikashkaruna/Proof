@@ -23,8 +23,8 @@ begin
   values(rid,b.tenant_id,pg_temp.id(1),pg_temp.id(101),'{"reason":"Explicit administrative SQL fixture only"}',repeat('a',64),manifest,owned_synthetic.snapshot_sha256(manifest),b.engagement_id,b.connector_id,b.id,b.fixture_id,b.resource_id,b.custody_policy_id,b.custody_activation_epoch,b.expires_at,receipt);
   insert into public.mfa_challenges(id,user_id,tenant_id,factor_id,purpose,bound_resource_ref,bound_payload_sha256,created_at,expires_at,satisfied_at,satisfied_with,consumed_at,consumed_for)
   values(cid,pg_temp.id(7),b.tenant_id,pg_temp.id(47),'owned_synthetic_enrollment',rid::text,repeat('a',64),stamp-interval '1 second',stamp+interval '5 minutes',stamp,'totp',stamp,rid::text);
-  insert into owned_synthetic.deployment_approvals(id,tenant_id,request_id,actor_id,session_id,operation_key,challenge_id,decision,decision_sha256,signed_token,preflight_sha256,rollback_sha256,scope_expires_at,receipt_id)
-  values(aid,b.tenant_id,rid,pg_temp.id(7),pg_temp.id(107),rid,cid,'{"provenance":"ADMIN SQL STAND IN ONLY"}',repeat('a',64),jsonb_build_object('spec',jsonb_build_object('expiresAt',stamp+interval '5 minutes'),'signature',repeat('f',64)),repeat('b',64),repeat('c',64),b.expires_at,receipt);
+  insert into owned_synthetic.deployment_approvals(id,tenant_id,request_id,actor_id,session_id,operation_key,challenge_id,decision,decision_sha256,signed_token,role_graph,preflight_sha256,rollback_sha256,scope_expires_at,receipt_id)
+  values(aid,b.tenant_id,rid,pg_temp.id(7),pg_temp.id(107),rid,cid,'{"provenance":"ADMIN SQL STAND IN ONLY"}',repeat('a',64),jsonb_build_object('spec',jsonb_build_object('expiresAt',stamp+interval '5 minutes'),'signature',repeat('f',64)),owned_synthetic.deployment_role_graph(),repeat('b',64),repeat('c',64),b.expires_at,receipt);
   insert into owned_synthetic.deployment_heads(request_id,state,preflight,approval_id) values(rid,'active',jsonb_build_object('sha256',repeat('b',64),'rollbackSha256',repeat('c',64)),aid);
   -- No issuer/signing key or real token exists: claims below only test native SQL
   -- fences. The HTTP crypto test remains a separately required acceptance gate.
