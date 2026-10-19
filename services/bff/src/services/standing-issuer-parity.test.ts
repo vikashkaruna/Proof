@@ -87,11 +87,24 @@ it('fair scan is private scheduling metadata serialized with retained-work prior
     'order by case when cursor_at is null or(request.created_at,request.id)>(cursor_at,cursor_id)then 0 else 1 end,request.created_at,request.id limit 32',
   );
   expect(reserve.indexOf('update controller_security.standing173_scan_cursor')).toBeLessThan(
-    reserve.indexOf('begin perform controller_security.standing173_live'),
+    reserve.indexOf('perform controller_security.standing173_live'),
   );
   expect(reserve).toContain(
-    'exception when insufficient_privilege or no_data_found or lock_not_available then continue;end;',
+    'exception when insufficient_privilege or no_data_found or lock_not_available then',
   );
   expect(reserve).not.toContain('insert into controller_security.standing173_suspensions');
   expect(reserve).not.toContain('when others');
+});
+
+it('bounds fair scan clock and per-entry locks, restoring the original timeout on both paths', () => {
+  const reserve = body(next, 'public.reserve_standing_policy_work');
+  expect(reserve).toContain("scan_deadline:=clock_timestamp()+interval '2 seconds'");
+  expect(reserve.split('exit when clock_timestamp()>=scan_deadline;')).toHaveLength(3);
+  expect(reserve).toContain(
+    "greatest(1,least(50,ceil(extract(epoch from(scan_deadline-clock_timestamp()))*1000)::integer))::text||'ms'",
+  );
+  expect(reserve.split("set_config('lock_timeout',prior_lock_timeout,true)")).toHaveLength(3);
+  expect(reserve.lastIndexOf('exit when clock_timestamp()>=scan_deadline;')).toBeLessThan(
+    reserve.indexOf('receipt:=public.append_ledger'),
+  );
 });
