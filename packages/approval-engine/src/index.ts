@@ -1,5 +1,11 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { canonicalJson, sha256 } from '@axiom/ledger';
+import {
+  standingPolicyDelegation,
+  encodeStandingPolicyDelegation,
+  encodeStandingRevisionIntent,
+  type StandingPolicyDelegation,
+} from '@axiom/types';
 
 /**
  * Approval Engine — signed, scope-bound, single-use tokens.
@@ -159,6 +165,40 @@ export class ApprovalEngine {
     const payload = canonicalJson(this.canonicalSpec(spec) as unknown as Record<string, unknown>);
     const secret = this.getSecret(tenantId);
     return createHmac('sha256', secret).update(payload).digest('hex');
+  }
+
+  /** Attest only a retained, dual-human-reviewed standing delegation. The
+   * domain is fixed and cannot produce a remediation approval signature.
+   * No signing key or general-purpose signing oracle is exposed. */
+  signStandingDelegation(tenantId: string, input: StandingPolicyDelegation): string {
+    const value = standingPolicyDelegation.parse(input);
+    if (value.tenantId !== tenantId.toLowerCase())
+      throw new Error('Standing delegation tenant refused');
+    if (
+      createHash('sha256')
+        .update(encodeStandingRevisionIntent({ phase: 'request', request: value.request }), 'utf8')
+        .digest('hex') !== value.requestSha256
+    )
+      throw new Error('Standing delegation scope digest refused');
+    return createHmac('sha256', this.getSecret(tenantId))
+      .update('axiom.standing-policy-delegation.v1\0', 'utf8')
+      .update(encodeStandingPolicyDelegation(value), 'utf8')
+      .digest('hex');
+  }
+  verifyStandingDelegation(
+    tenantId: string,
+    input: StandingPolicyDelegation,
+    signature: string,
+  ): boolean {
+    if (!/^[a-f0-9]{64}$/.test(signature)) return false;
+    try {
+      return timingSafeEqual(
+        Buffer.from(this.signStandingDelegation(tenantId, input), 'hex'),
+        Buffer.from(signature, 'hex'),
+      );
+    } catch {
+      return false;
+    }
   }
 
   /** Check a persisted Samadhan statement without expiry/replay semantics. */
