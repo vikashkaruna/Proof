@@ -1311,7 +1311,9 @@ test.describe('real-provider board report lifecycle', () => {
           name: 'Build and retain reviewed source and PDF',
         })
         .click();
-      await expect(selected).toContainText('Retained artifact build: settled', { timeout: 90_000 });
+      await expect(
+        selected.getByText('Retention: Source and PDF retained', { exact: true }),
+      ).toBeVisible({ timeout: 90_000 });
       const preview = selected.getByRole('link', { name: 'Preview retained PDF' });
       await expect(preview).toBeVisible();
       const path = await preview.getAttribute('href');

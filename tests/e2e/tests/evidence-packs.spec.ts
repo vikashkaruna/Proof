@@ -359,8 +359,10 @@ test.describe('retained evidence pack acceptance', () => {
         ).status(),
       ).toBe(409);
       await detail
-        .getByRole('checkbox', { name: 'I reviewed the exact content and SHA-256 shown above.' })
-        .check();
+        .getByRole('checkbox', {
+          name: 'I reviewed the exact content and its SHA-256 in Source and version details.',
+        })
+        .check({ timeout: 15_000 });
       await detail.getByRole('button', { name: 'Approve reviewed content' }).click();
       await expect(detail.getByText(/approved by/)).toBeVisible();
       expect(
@@ -391,7 +393,12 @@ test.describe('retained evidence pack acceptance', () => {
         (await page.request.get(`/api/bff/v1/evidence-packs/${pack.id}/content`)).status(),
       ).toBe(409);
       await detail.getByRole('button', { name: 'Refresh report detail' }).click();
-      await expect(detail.getByText(/Archive SHA-256:/)).toBeVisible();
+      const sourceDetails = detail
+        .locator('details')
+        .filter({ has: detail.getByText('Source and version details', { exact: true }) });
+      if ((await sourceDetails.getAttribute('open')) === null)
+        await sourceDetails.getByText('Source and version details', { exact: true }).click();
+      await expect(sourceDetails.getByText(/Archive SHA-256:/)).toBeVisible();
       expect(
         (
           await post(founderPage, `/reports/${pack.reportId}/release`, {
@@ -528,8 +535,10 @@ test.describe('retained evidence pack acceptance', () => {
       await founder(reviewer, 'pack-reject');
       const detail = await openReport(reviewer, body.title);
       await detail
-        .getByRole('checkbox', { name: 'I reviewed the exact content and SHA-256 shown above.' })
-        .check();
+        .getByRole('checkbox', {
+          name: 'I reviewed the exact content and its SHA-256 in Source and version details.',
+        })
+        .check({ timeout: 15_000 });
       await detail.getByLabel('Review note (required for rejection)').fill('  ');
       await expect(detail.getByRole('button', { name: 'Reject with reason' })).toBeDisabled();
       await detail
