@@ -30,7 +30,7 @@ do $$declare original jsonb:=pg_temp.declare174(299)::jsonb;change jsonb;begin
  jsonb_set(original,'{request,destination}',jsonb_build_object('kind','system','system',controller_security.flow174_pin(pg_temp.id(12),pg_temp.id(33)))),
  jsonb_set(original,'{request,sourceRopaId}',to_jsonb(pg_temp.id(999))),
  jsonb_set(original,'{request,validUntil}','null'),
- jsonb_set(original,'{request,sourceNote}',to_jsonb(U&'\00A0leading whitespace'))
+ jsonb_set(original,'{request,sourceNote}',to_jsonb(U&'\00A0leading whitespace'::text))
  ]loop
   begin
    perform public.preflight_data_flow_declaration(pg_temp.id(11),pg_temp.id(1),pg_temp.id(101),controller_security.canonical_questionnaire_json(change));
@@ -65,14 +65,14 @@ do $$declare intent text:=pg_temp.declare174(250);c uuid;mutation text;begin
  foreach mutation in array array[
  'user_id=pg_temp.id(2)',
  'tenant_id=pg_temp.id(12)',
- 'purpose=''plan_approve''',
+ 'purpose=''approval_issuance''',
  'bound_resource_ref=pg_temp.id(999)::text',
  'bound_payload_sha256=repeat(''f'',64)',
  'factor_id=pg_temp.id(42)',
  'created_at=created_at-interval ''1 second''',
  'expires_at=expires_at-interval ''1 second''',
- 'satisfied_at=null',
- 'consumed_at=null',
+ 'satisfied_at=null,consumed_at=null,consumed_for=null,satisfied_with=null',
+ 'consumed_at=null,consumed_for=null',
  'consumed_for=pg_temp.id(999)::text'
  ]loop
   begin

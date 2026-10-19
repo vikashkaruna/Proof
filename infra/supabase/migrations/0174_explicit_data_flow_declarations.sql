@@ -130,7 +130,7 @@ create function controller_security.flow174_intent(raw text)returns jsonb langua
  elsif p->>'kind'='new'then
  if controller_security.flow174_keys(p,array['kind','declaration'])is distinct from true or controller_security.flow174_keys(p->'declaration',array['partyRef','label','role','supersedesPartyRef'])is distinct from true
  or not controller_security.flow174_uuid(p#>'{declaration,partyRef}',false)or not controller_security.flow174_uuid(p#>'{declaration,supersedesPartyRef}',true)
- or not controller_security.flow174_text(p#>'{declaration,label}',200,false)or coalesce(p#>>'{declaration,role}'in('processor','recipient'),false)is distinct from truethen raise exception 'bounded party declaration required'using errcode='22023';end if;
+ or not controller_security.flow174_text(p#>'{declaration,label}',200,false)or coalesce(p#>>'{declaration,role}'in('processor','recipient'),false)is distinct from true then raise exception 'bounded party declaration required'using errcode='22023';end if;
  else raise exception 'explicit party reference required'using errcode='22023';end if;
  else raise exception 'typed flow destination required'using errcode='22023';end if;
  foreach pin in array array[q->'origin',case when d->'system'='null'::jsonb then null else d->'system'end]loop
