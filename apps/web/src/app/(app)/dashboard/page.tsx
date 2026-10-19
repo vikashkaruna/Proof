@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ACTIVE_RUN_STALE_MS, capabilitiesFor, type UserRole } from '@axiom/types';
+import { ACTIVE_RUN_STALE_MS, Capability, can, capabilitiesFor, type UserRole } from '@axiom/types';
 import { DataPlaceholder, PageHeader, formatDateTime } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
 import { requireTenantContext } from '@/lib/tenant-context';
@@ -21,6 +21,12 @@ export default async function DashboardPage() {
   // A tile links only to a screen this persona is offered; otherwise it is a
   // figure, not a door that redirects them to "forbidden".
   const reachable = new Set(visibleRoutes(role ? capabilitiesFor(role as UserRole) : []));
+  const canManageEstate = can(Capability.ESTATE_MANAGE, { role });
+  const canRunAssessment =
+    can(Capability.AGENT_INVOKE, { role }) && can(Capability.ASSESSMENT_RUN, { role });
+  // Match ReportsPage's preparation gate, rather than treating read access or
+  // REPORT_GENERATE (which other workflows use) as preparation authority.
+  const canPrepareReports = can(Capability.EVIDENCE_RECORD, { role });
   const [ledger, evidence, dsars, consents, findings, actions, engagement, runs] =
     await Promise.all([
       supabase
@@ -104,7 +110,9 @@ export default async function DashboardPage() {
       label: 'Ledger entries',
       value: ledger.error ? null : ledger.count,
       href: '/ledger',
-      detail: 'Verify chain integrity in the ledger',
+      detail: can(Capability.LEDGER_VERIFY, { role })
+        ? 'Verify chain integrity in the ledger'
+        : 'Read the recorded audit trail and verification status',
     },
   ];
 
@@ -133,18 +141,24 @@ export default async function DashboardPage() {
   const journey = [
     {
       href: '/estate',
-      title: '1. Set up the estate',
-      detail: 'Identify systems and data sources before discovery.',
+      title: canManageEstate ? '1. Set up the estate' : '1. Inspect the estate',
+      detail: canManageEstate
+        ? 'Identify systems and data sources before discovery.'
+        : 'Read the registered systems and their recorded data sources.',
     },
     {
       href: '/assessment',
-      title: '2. Assess the gaps',
-      detail: 'Review control results and finalize an assessment.',
+      title: canRunAssessment ? '2. Assess the gaps' : '2. Inspect the assessment',
+      detail: canRunAssessment
+        ? 'Prepare an assessment request and follow its recorded results and finalization.'
+        : 'Read control results and the recorded assessment status.',
     },
     {
       href: '/plans',
       title: '3. Review the plan',
-      detail: 'Inspect each action, recorded dry run and rollback before a decision.',
+      detail: can(Capability.PLAN_APPROVE, { role })
+        ? 'Inspect each action, recorded dry run and rollback before a decision.'
+        : 'Read each action and its recorded dry-run and rollback details.',
     },
     {
       href: '/approval',
@@ -159,7 +173,9 @@ export default async function DashboardPage() {
     {
       href: '/reports',
       title: '6. Review reports',
-      detail: 'Prepare or read working reports, then follow their review and release status.',
+      detail: canPrepareReports
+        ? 'Prepare working reports and follow their recorded review and release status.'
+        : 'Read working reports and their recorded review and release status.',
     },
     {
       href: '/evidence',
@@ -231,10 +247,13 @@ export default async function DashboardPage() {
         aria-label="Your workflow"
         className="rounded-xl border border-slate-200 bg-white p-5"
       >
-        <h2 className="font-heading text-base font-semibold text-[#1E2A4A]">Your next steps</h2>
+        <h2 className="font-heading text-base font-semibold text-[#1E2A4A]">
+          Available workflow steps
+        </h2>
         <p className="mt-1 text-sm text-slate-600">
           Follow the work from setup to released reports. These shortcuts reflect your role; each
-          screen shows the recorded state and any prerequisites still needed.
+          screen shows the recorded state and any prerequisites still needed. Numbers mark the
+          shared workflow order; steps outside your role are omitted.
         </p>
         <ol className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {journey.map((step) => (

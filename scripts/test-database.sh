@@ -82,7 +82,7 @@ while IFS= read -r suite; do
     { python3 tests/database/lib/postgresql-discovery-fixture.py; python3 tests/database/lib/owned-human-canonical-fixture.py; python3 tests/database/lib/owned-execution-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
   elif [[ "$suite" = postgresql-discovery-requests.test.sql || "$suite" = owned-postgres-target.test.sql || "$suite" = owned-human-plans.test.sql || "$suite" = scheduled-postgresql-reads.test.sql ]]; then
     { python3 tests/database/lib/postgresql-discovery-fixture.py; if [[ "$suite" = owned-human-plans.test.sql || "$suite" = scheduled-postgresql-reads.test.sql ]]; then python3 tests/database/lib/owned-human-canonical-fixture.py; fi; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
-  elif [[ "$suite" = prativedan-accounted-terminal.test.sql || "$suite" = postgresql-sandbox-discovery.test.sql || "$suite" = controller-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance-demo.test.sql || "$suite" = local-custody-credential-identity.test.sql ]]; then
+  elif [[ "$suite" = explicit-data-flow-declarations.test.sql || "$suite" = prativedan-accounted-terminal.test.sql || "$suite" = postgresql-sandbox-discovery.test.sql || "$suite" = controller-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance-demo.test.sql || "$suite" = local-custody-credential-identity.test.sql ]]; then
     # The production migration deliberately grants no issuer membership to
     # postgres. Only this disposable test session assumes the private role.
     docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "tests/database/$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
@@ -106,6 +106,7 @@ done < <(python3 tests/database/lib/report-policy-phases.py current-list --direc
 python3 tests/database/lib/report-policy-phases.py verify --directory "$phase_dir"
 standing173_race_image=$(docker image inspect --format '{{.Id}}' "$image")
 python3 tests/database/lib/standing-approval-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
+python3 tests/database/lib/explicit-data-flow-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
 python3 tests/database/sudhaar-review-adoption-fixture.py | sql
 bash tests/database/operator-workflows-public-source.sh "$container"
 bash tests/database/concurrent-operator-workflows.sh "$container"

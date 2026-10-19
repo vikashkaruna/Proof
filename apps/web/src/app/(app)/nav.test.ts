@@ -67,6 +67,7 @@ const MENUS: Record<string, string[]> = {
     '/discovery',
     '/classification',
     '/datamap',
+    '/datamap/flows',
     '/assessment',
     '/engagements',
     '/controls',
@@ -89,6 +90,7 @@ const MENUS: Record<string, string[]> = {
     '/discovery',
     '/classification',
     '/datamap',
+    '/datamap/flows',
     '/assessment',
     '/engagements',
     '/controls',
@@ -111,6 +113,7 @@ const MENUS: Record<string, string[]> = {
   ],
   [UserRole.VIEWER]: [
     '/dashboard',
+    '/datamap/flows',
     '/plans',
     '/evidence',
     '/ledger',
@@ -120,6 +123,7 @@ const MENUS: Record<string, string[]> = {
   ],
   [UserRole.PARTNER]: [
     '/dashboard',
+    '/datamap/flows',
     '/plans',
     '/evidence',
     '/reports',
@@ -129,6 +133,7 @@ const MENUS: Record<string, string[]> = {
   ],
   [UserRole.APPROVER]: [
     '/dashboard',
+    '/datamap/flows',
     '/plans',
     '/approval',
     '/evidence',
@@ -144,6 +149,7 @@ const MENUS: Record<string, string[]> = {
     '/discovery',
     '/classification',
     '/datamap',
+    '/datamap/flows',
     '/assessment',
     '/engagements',
     '/controls',
@@ -397,5 +403,22 @@ describe('page guards match the menu', () => {
   it('resolves every declared route and refuses an undeclared one', () => {
     for (const route of pageRoutes) expect(routeCapability(route)).toBeTruthy();
     expect(() => routeCapability('/nowhere')).toThrow();
+  });
+});
+
+describe('declared data flow history navigation', () => {
+  it('offers the independently guarded read page without exposing legacy map access', () => {
+    for (const role of [UserRole.VIEWER, UserRole.REVIEWER])
+      expect(routesFor(role)).toContain('/datamap/flows');
+    expect(routesFor(UserRole.VIEWER)).not.toContain('/datamap');
+    expect(routesFor(UserRole.VIEWER)).not.toContain('/estate');
+    expect(routesFor(UserRole.AGENT)).not.toContain('/datamap/flows');
+    expect(visibleRoutes([])).not.toContain('/datamap/flows');
+    expect(routeCapability('/datamap/flows')).toBe(Capability.POSTURE_READ);
+    expect(
+      APP_NAV_GROUPS.find((group) => group.label === 'Discover & Classify')?.items.find(
+        (item) => item.route === '/datamap/flows',
+      )?.en,
+    ).toBe('Declared data flows');
   });
 });

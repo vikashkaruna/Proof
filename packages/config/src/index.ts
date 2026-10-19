@@ -136,6 +136,7 @@ const EnvFields = z.object({
   // Protected server-owned deployment mapping; never a browser-provided configuration.
   AXIOM_PRATIVEDAN_SOCKET_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_POSTGRESQL_DISCOVERY_SOCKET_CONFIG_FILE: z.string().min(1).max(4096).optional(),
+  AXIOM_DATA_FLOW_DECLARATIONS_ENABLED: z.enum(['true', 'false']).default('false'),
   AXIOM_STANDING_POLICY_COORDINATOR_ENABLED: z.enum(['true', 'false']).default('false'),
   AXIOM_POSTGRESQL_SANDBOX_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE: z.string().min(1).max(4096).optional(),

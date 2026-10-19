@@ -175,6 +175,7 @@ def plan(root: Path = ROOT) -> dict:
             "owned_deployment169_suites_required",
         ),
         (173, {"standing-approval-coordinator.test.sql"}, "standing173_suite_required"),
+        (174,{"explicit-data-flow-declarations.test.sql"},"data_flow174_suite_required"),
         (170, {"owned-effect-observations.test.sql"}, "owned_effect170_suite_required"),
         (
             171,

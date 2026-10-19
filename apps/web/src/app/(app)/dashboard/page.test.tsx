@@ -172,7 +172,7 @@ it('guides operators through the workflow and links the latest recorded assessme
     error: null,
   };
   const view = await html();
-  expect(view).toContain('Your next steps');
+  expect(view).toContain('Available workflow steps');
   expect(view).toContain('1. Set up the estate');
   expect(view).toContain('6. Review reports');
   expect(view).toContain('Current compliance review');
@@ -188,6 +188,29 @@ it('limits the viewer workflow to read-only evidence, reports and ledger destina
   for (const route of ['/estate', '/assessment', '/approval', '/execution', '/engagements'])
     expect(view).not.toContain(`href="${route}"`);
   expect(view).not.toContain('aria-label="Latest assessment"');
+  expect(view).toContain('Read working reports and their recorded review and release status.');
+  expect(view).not.toContain('Prepare working reports');
+  expect(view).not.toContain('Verify chain integrity in the ledger');
+  expect(view).toContain('3. Review the plan');
+  expect(view).toContain('6. Review reports');
+  expect(view).toContain('Numbers mark the shared workflow order');
+});
+
+it('describes reviewer inspection without advertising estate, assessment or report mutations', async () => {
+  state.role = 'reviewer';
+  const view = await html();
+  expect(view).toContain('1. Inspect the estate');
+  expect(view).toContain('2. Inspect the assessment');
+  expect(view).toContain('Read control results and the recorded assessment status.');
+  expect(view).toContain('Read working reports and their recorded review and release status.');
+  expect(view).not.toContain('Set up the estate');
+  expect(view).not.toContain('Prepare an assessment request');
+  expect(view).not.toContain('Prepare working reports');
+  state.role = 'owner';
+  const owner = await html();
+  expect(owner).toContain('1. Set up the estate');
+  expect(owner).toContain('Prepare an assessment request');
+  expect(owner).toContain('Prepare working reports');
 });
 
 it('distinguishes a missing assessment from an unavailable assessment', async () => {

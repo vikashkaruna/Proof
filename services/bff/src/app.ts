@@ -254,6 +254,7 @@ export function createApp(
       prativedan: options.prativedan,
       licensePublicKeyPem: options.licensePublicKeyPem,
       approvalEngine,
+      dataFlowDeclarationsEnabled: env.AXIOM_DATA_FLOW_DECLARATIONS_ENABLED === 'true',
       standingCoordinatorEnabled: standingCoordinator !== null,
       standingCoordinatorStatus: standingCoordinator
         ? () => standingCoordinator.health()

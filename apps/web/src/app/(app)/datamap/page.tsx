@@ -1,3 +1,4 @@
+import { DataFlowAvailability } from './flows/flow-availability';
 import { GenericModuleView } from '../generic-module-view';
 import { Capability, can } from '@axiom/types';
 import { requireCapabilityContext } from '@/lib/tenant-context';
@@ -23,6 +24,7 @@ export default async function DataMapPage() {
         cards: [],
       }}
     >
+      <DataFlowAvailability tenantId={tenantId} actorId={userId} />
       <WorkflowPanel
         tenantId={tenantId}
         actorId={userId}
