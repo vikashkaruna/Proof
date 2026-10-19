@@ -590,7 +590,7 @@ async def internal_execute(
     from .approval_engine import ApprovalEngine
     from .executor import ExecutorDb, ExecutorRefused, execute_batch
     from .kill_switch import KillSwitchReader
-    from .write_adapters import ReferenceWriteAdapter
+    from .write_adapters import ReferenceWriteAdapter, WriteAdapter
 
     db = ExecutorDb(create_client(settings.supabase_url, settings.supabase_service_key))
     engine = ApprovalEngine(signing_key=settings.approval_signing_key)
@@ -599,6 +599,7 @@ async def internal_execute(
         result = await engine.verify(tenant_id, token)
         return result.valid, result.reason
 
+    adapter: WriteAdapter
     try:
         if getattr(settings, "owned_execution_enabled", False):
             from .owned_execution_adapter import OwnedExecutionAdapter, OwnedSocketPort
@@ -716,9 +717,10 @@ async def internal_rollback(
 
     from .executor import ExecutorDb, ExecutorRefused, run_manual_rollbacks
     from .kill_switch import KillSwitchReader
-    from .write_adapters import ReferenceWriteAdapter
+    from .write_adapters import ReferenceWriteAdapter, WriteAdapter
 
     db = ExecutorDb(create_client(settings.supabase_url, settings.supabase_service_key))
+    adapter: WriteAdapter
     try:
         if getattr(settings, "owned_execution_enabled", False):
             from types import SimpleNamespace
