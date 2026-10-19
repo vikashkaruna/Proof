@@ -33,7 +33,10 @@ import {
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
 import { loadParityFixture, guardedParitySql } from './lib/parity-fixture-target.js';
-import { acceptanceHttpFailure } from './lib/acceptance-http-failure.js';
+import {
+  acceptanceHttpFailure,
+  acceptanceHttpFailureArtifact,
+} from './lib/acceptance-http-failure.js';
 import { createServer } from 'node:http';
 import { canonicalJson } from '../packages/ledger/src/canonicalise.js';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
@@ -132,6 +135,9 @@ async function stopOwnedBrowserChildren() {
   ownedBrowserChildren.clear();
 }
 async function main() {
+  assertRegisteredDiagnosticDestinationAbsent(
+    '.axiom-runtime/workload-assessment/http-failure.json',
+  );
   const withPublicReports = reportAcceptanceRequested();
   const withRegisteredBrowser = registeredBrowserRequested();
   if (withRegisteredBrowser) {
@@ -2688,6 +2694,12 @@ main()
         `${directory}/actual-http-failure-${revision.slice(0, 12)}-${Date.now()}.private.json`,
         JSON.stringify({ revision, phase, ...httpFailure, accepted: false }, null, 2) + '\n',
         { mode: 0o600 },
+      );
+      mkdirSync('.axiom-runtime/workload-assessment', { recursive: true, mode: 0o700 });
+      writeFileSync(
+        '.axiom-runtime/workload-assessment/http-failure.json',
+        JSON.stringify(acceptanceHttpFailureArtifact(revision, phase, httpFailure)) + '\n',
+        { mode: 0o600, flag: 'wx' },
       );
     }
     process.stderr.write(`Workload assessment failed at ${phase}. Private output withheld.\n`);

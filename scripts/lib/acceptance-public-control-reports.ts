@@ -407,9 +407,20 @@ export function verifyCoverageFirstAcceptanceReport(input: {
 
 /** Current mounted request policy is source6/document7; legacy source4/doc5
  * remains separately strict above. Unwrap only after verifying every outer pin. */
+export type BrandedAcceptancePhase =
+  | 'source-proof'
+  | 'content-hash'
+  | 'source-envelope'
+  | 'document-schema'
+  | 'document-rebuild'
+  | 'document-compare'
+  | 'inner-rebuild'
+  | 'inner-verify';
 export function verifyBrandedAcceptanceReport(
   input: Parameters<typeof verifyCoverageFirstAcceptanceReport>[0],
+  onPhase: (phase: BrandedAcceptancePhase) => void = () => {},
 ) {
+  onPhase('source-proof');
   const source = sourceProofSchema.parse(input.source);
   const scope = {
     tenantId: input.tenantId,
@@ -417,12 +428,16 @@ export function verifyBrandedAcceptanceReport(
     engagementId: source.engagementId,
     assessmentRunId: source.runId,
   };
+  onPhase('content-hash');
   assert.equal(sha(input.contentText), input.contentSha256);
+  onPhase('source-envelope');
   const frozen = verifyBrandedSource(input.sourceText, input.sourceSha256, scope);
   assert.equal(frozen.envelope.report_kind, input.kind);
   assert.equal(frozen.version, 4); // This public-source acceptance must not adopt questionnaire-only provenance.
+  onPhase('document-schema');
   const content = BrandedDocumentV7Schema.parse(parseCoverageFirstJson(input.contentText, 4194304));
   assert(content.underlying_document_version === 5);
+  onPhase('document-rebuild');
   const expected = buildBrandedReport({
     ...scope,
     title: input.title,
@@ -430,8 +445,10 @@ export function verifyBrandedAcceptanceReport(
     sourceText: input.sourceText,
     sourceSha256: input.sourceSha256,
   });
+  onPhase('document-compare');
   assert.deepEqual(content, expected);
   assert.deepEqual(content.presentation, BRANDED_PRESENTATION_V1);
+  onPhase('inner-rebuild');
   const inner = buildCoverageFirstReport({
     ...scope,
     title: input.title,
@@ -440,6 +457,7 @@ export function verifyBrandedAcceptanceReport(
     sourceSha256: frozen.inner.sha256,
   });
   const innerText = JSON.stringify(inner);
+  onPhase('inner-verify');
   const verified = verifyCoverageFirstAcceptanceReport({
     ...input,
     sourceText: frozen.inner.text,
@@ -560,18 +578,23 @@ export async function verifyPublicControlReports(deps: {
         title: `Synthetic source-linked ${kind} report`,
         operationKey: randomUUID(),
       };
+      deps.onPhase(`${kind}-request-create`);
       const requested = z
         .object({ requestId: uuid })
         .parse(await (await deps.request(requestPath, 201, post(deps.ownerHeaders, body))).json());
+      deps.onPhase(`${kind}-request-replay`);
       const replay = z
         .object({ requestId: uuid, replayed: z.literal(true) })
         .parse(await (await deps.request(requestPath, 201, post(deps.ownerHeaders, body))).json());
+      deps.onPhase(`${kind}-request-replay-compare`);
       assert.equal(replay.requestId, requested.requestId);
       const generatePath =
         kind === 'board'
           ? `/v1/reports/board/${requested.requestId}/generate`
           : `/v1/reports/statutory/auditor/requests/${requested.requestId}/draft`;
+      deps.onPhase(`${kind}-generate-owner-refusal`);
       await deps.request(generatePath, 403, post(deps.ownerHeaders, {}));
+      deps.onPhase(`${kind}-generate-founder`);
       const generated = z
         .object({ reportId: uuid })
         .parse(
@@ -580,6 +603,7 @@ export async function verifyPublicControlReports(deps: {
           ).json(),
         );
       const reportId = generated.reportId;
+      deps.onPhase(`${kind}-draft-row`);
       const row = z
         .object({ content_text: z.string(), content_sha256: digest, status: z.literal('draft') })
         .parse(
@@ -592,7 +616,9 @@ export async function verifyPublicControlReports(deps: {
               .single(),
           ),
         );
+      deps.onPhase(`${kind}-draft-hash`);
       assert.equal(sha(row.content_text), row.content_sha256);
+      deps.onPhase(`${kind}-frozen-row`);
       const frozen = z.object({ source_text: z.string(), source_sha256: digest }).parse(
         check(
           await deps.db
@@ -603,23 +629,29 @@ export async function verifyPublicControlReports(deps: {
             .single(),
         ),
       );
+      deps.onPhase(`${kind}-frozen-hash`);
       assert.equal(sha(frozen.source_text), frozen.source_sha256);
-      const { parsed, content, appendix } = verifyBrandedAcceptanceReport({
-        kind,
-        title: body.title,
-        tenantId: deps.tenantId,
-        requestId: requested.requestId,
-        source,
-        resultDigest,
-        sourceText: frozen.source_text,
-        sourceSha256: frozen.source_sha256,
-        contentText: row.content_text,
-        contentSha256: row.content_sha256,
-      });
+      const { parsed, content, appendix } = verifyBrandedAcceptanceReport(
+        {
+          kind,
+          title: body.title,
+          tenantId: deps.tenantId,
+          requestId: requested.requestId,
+          source,
+          resultDigest,
+          sourceText: frozen.source_text,
+          sourceSha256: frozen.source_sha256,
+          contentText: row.content_text,
+          contentSha256: row.content_sha256,
+        },
+        (stage) => deps.onPhase(`${kind}-verify-${stage}`),
+      );
+      deps.onPhase(`${kind}-appendix-explicit`);
       assert.equal(
         appendix.controls.find((c) => c.controlId === 'DPDPA-GOV-001')?.questions[0]?.judgment,
         'explicit',
       );
+      deps.onPhase(`${kind}-appendix-omitted`);
       assert.equal(
         appendix.controls.find((c) => c.controlId === 'DPDPA-GOV-002')?.questions[0]?.judgment,
         'omitted',
@@ -628,7 +660,9 @@ export async function verifyPublicControlReports(deps: {
         kind === 'board'
           ? `/v1/reports/board/${reportId}/pdf`
           : `/v1/reports/statutory/${reportId}/pdf`;
+      deps.onPhase(`${kind}-pdf-before-review`);
       await deps.request(pdfPath, 409, { headers: founder });
+      deps.onPhase(`${kind}-release-before-review`);
       await deps.request(
         `/v1/reports/${reportId}/release`,
         409,

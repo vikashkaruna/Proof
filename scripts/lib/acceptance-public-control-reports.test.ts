@@ -413,7 +413,25 @@ for (const kind of ['board', 'auditor'] as const)
         contentText: text,
         contentSha256: sha(text),
       };
-      const actual = verifyBrandedAcceptanceReport(input);
+      const phases: string[] = [];
+      const actual = verifyBrandedAcceptanceReport(input, (stage) => phases.push(stage));
+      assert.deepEqual(phases, [
+        'source-proof',
+        'content-hash',
+        'source-envelope',
+        'document-schema',
+        'document-rebuild',
+        'document-compare',
+        'inner-rebuild',
+        'inner-verify',
+      ]);
+      const refusedPhases: string[] = [];
+      assert.throws(() =>
+        verifyBrandedAcceptanceReport({ ...input, contentSha256: 'f'.repeat(64) }, (stage) =>
+          refusedPhases.push(stage),
+        ),
+      );
+      assert.deepEqual(refusedPhases, ['source-proof', 'content-hash']);
       assert.equal(actual.content.schema_version, 7);
       assert.equal(actual.content.underlying_document_version, 5);
       assert.equal(actual.retainedSourceSha256, f.fixture.input.sourceSha256);
