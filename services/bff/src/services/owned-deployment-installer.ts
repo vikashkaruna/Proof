@@ -144,6 +144,72 @@ export class OwnedDeploymentInstaller {
     else await this.approvals.verifyInstallerToken(tenantId, requestId, current.token, step);
     return current;
   }
+  async readTask(raw: unknown) {
+    const { claimId } = z.object({ claimId: uuid }).strict().parse(raw);
+    const result = z
+      .object({
+        claimId: z.literal(claimId),
+        kind: z.enum(['absent', 'preflight', 'installation']),
+        tenantId: uuid.nullable(),
+        requestId: uuid.nullable(),
+        taskId: uuid.nullable(),
+        manifestSha256: sha.nullable(),
+        terminal: z.enum([
+          'blocked',
+          'readonly_observation_recorded',
+          'installation_confirmed_history',
+          'authority_revoked_with_original_effect_history',
+        ]),
+        receiptId: z
+          .string()
+          .regex(/^[1-9][0-9]*$/)
+          .nullable(),
+        hostSha256: sha.nullable(),
+        stepReceipts: z
+          .array(
+            z
+              .object({
+                step: ownedDeploymentStep,
+                state: z.enum(['authorized', 'confirmed', 'unconfirmed', 'revoked']),
+                receiptId: z.string().regex(/^[1-9][0-9]*$/),
+              })
+              .strict(),
+          )
+          .max(6),
+      })
+      .strict()
+      .parse(
+        await this.ports.serviceRpc('read_owned_deployment_task_receipt', { p_claim_id: claimId }),
+      );
+    if (
+      result.terminal !== 'blocked' &&
+      (!result.receiptId ||
+        !result.tenantId ||
+        !result.requestId ||
+        !result.taskId ||
+        !result.manifestSha256)
+    )
+      throw Error('Owned terminal task receipt refused');
+    if (
+      result.terminal === 'installation_confirmed_history' &&
+      (result.kind !== 'installation' ||
+        result.stepReceipts.length !== 6 ||
+        new Set(result.stepReceipts.map((s) => s.step)).size !== 6 ||
+        result.stepReceipts.some((s) => s.state !== 'confirmed'))
+    )
+      throw Error('Owned installation receipt refused');
+    if (
+      result.terminal === 'authority_revoked_with_original_effect_history' &&
+      result.kind !== 'installation'
+    )
+      throw Error('Owned stop task receipt refused');
+    if (
+      result.terminal === 'readonly_observation_recorded' &&
+      (result.kind !== 'preflight' || !result.hostSha256)
+    )
+      throw Error('Owned observation receipt refused');
+    return result;
+  }
   async claim(raw: unknown) {
     const { claimId } = z.object({ claimId: uuid }).strict().parse(raw);
     const result = z

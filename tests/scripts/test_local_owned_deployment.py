@@ -487,6 +487,99 @@ class OwnedPollerTests(unittest.TestCase):
                 MODULE.renew_due(self.configuration_file, now=now)
             self.assertEqual(call.call_count, 1)
 
+    def reconciliation_fixture(self):
+        claim_id = "89110000-0000-4000-8000-000000000004"
+        task = self.task(claim_id)
+        state = {
+            "claimId": claim_id,
+            "task": task,
+            "state": "unconfirmed",
+            "steps": {"publish_scoped_credential": {"state": "unknown_original_effect"}},
+        }
+        MODULE.write_private(self.state / "current.json", state, exclusive=True)
+        receipt = {
+            "claimId": claim_id,
+            "kind": "installation",
+            "tenantId": task["tenantId"],
+            "requestId": task["requestId"],
+            "taskId": task["taskId"],
+            "manifestSha256": task["manifestSha256"],
+            "terminal": "authority_revoked_with_original_effect_history",
+            "receiptId": "52",
+            "hostSha256": None,
+            "stepReceipts": [
+                {"step": "publish_scoped_credential", "state": "unconfirmed", "receiptId": "50"}
+            ],
+        }
+        return state, receipt
+
+    def test_stop_readback_retains_unknown_history_and_never_reexecutes(self):
+        original, receipt = self.reconciliation_fixture()
+
+        def api(config, path, body):
+            self.assertEqual(path, "tasks/read")
+            self.assertEqual(body, {"claimId": original["claimId"]})
+            return receipt
+
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call", side_effect=api) as call,
+            patch.object(MODULE, "fixed_effect") as effect,
+        ):
+            result = MODULE.reconcile(self.configuration_file)
+            self.assertEqual(result["state"], "authority_revoked_with_original_effect_history")
+            self.assertEqual(MODULE.reconcile(self.configuration_file), result)
+            self.assertEqual(call.call_count, 2)
+            effect.assert_not_called()
+        saved = MODULE.parse_json(MODULE.protected_bytes(self.state / "current.json"))
+        self.assertEqual(saved["steps"], original["steps"])
+        evidence = next(self.state.glob("reconciled-*.json"))
+        self.assertEqual(MODULE.parse_json(MODULE.protected_bytes(evidence))["original"], original)
+        self.assertNotEqual(saved["state"], "completed")
+
+    def test_foreign_or_unknown_readback_never_clears_original_intent(self):
+        original, receipt = self.reconciliation_fixture()
+        before = MODULE.protected_bytes(self.state / "current.json")
+        for key in ("tenantId", "requestId", "claimId", "manifestSha256"):
+            with (
+                patch.object(MODULE, "load_configuration", return_value=self.config),
+                patch.object(MODULE, "call", return_value={**receipt, key: "foreign"}),
+            ):
+                with self.assertRaisesRegex(ValueError, "Foreign"):
+                    MODULE.reconcile(self.configuration_file)
+            self.assertEqual(MODULE.protected_bytes(self.state / "current.json"), before)
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(
+                MODULE, "call", return_value={**receipt, "terminal": "blocked", "receiptId": None}
+            ),
+        ):
+            self.assertEqual(MODULE.reconcile(self.configuration_file)["state"], "blocked")
+        self.assertEqual(MODULE.protected_bytes(self.state / "current.json"), before)
+        self.assertEqual(list(self.state.glob("reconciled-*.json")), [])
+
+    def test_completion_requires_six_distinct_actual_confirmation_receipts(self):
+        original, receipt = self.reconciliation_fixture()
+        receipt.update(
+            terminal="installation_confirmed_history",
+            stepReceipts=[
+                {"step": step, "state": "confirmed", "receiptId": str(10 + n)}
+                for n, step in enumerate(MODULE.STEPS)
+            ],
+        )
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call", return_value=receipt),
+        ):
+            receipt["stepReceipts"][1]["step"] = MODULE.STEPS[0]
+            with self.assertRaisesRegex(ValueError, "six-step"):
+                MODULE.reconcile(self.configuration_file)
+            receipt["stepReceipts"][1]["step"] = MODULE.STEPS[1]
+            self.assertEqual(
+                MODULE.reconcile(self.configuration_file)["disposition"],
+                "installation_confirmed_history",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

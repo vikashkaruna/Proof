@@ -11,6 +11,7 @@ function fixture() {
         kind: 'idle',
         task: null,
       })),
+      readTask: vi.fn(),
       preflight: vi.fn(),
       authorize: vi.fn(),
       confirm: vi.fn(),

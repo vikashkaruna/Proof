@@ -11,6 +11,7 @@ export interface OwnedDeploymentPrivateDeps {
   installer: Pick<
     OwnedDeploymentInstaller,
     | 'claim'
+    | 'readTask'
     | 'preflight'
     | 'authorize'
     | 'confirm'
@@ -51,6 +52,13 @@ export function ownedDeploymentPrivateRoutes(deps: OwnedDeploymentPrivateDeps | 
   });
   const raw = async (request: { text(): Promise<string> }) =>
     parsePrativedanAssessmentJson(await request.text());
+  app.post('/tasks/read', async (c) => {
+    try {
+      return c.json({ data: await deps!.installer.readTask(await raw(c.req)) });
+    } catch {
+      return c.json({ error: 'owned_deployment_receipt_unconfirmed' }, 503);
+    }
+  });
   app.post('/tasks/claim', async (c) => {
     try {
       return c.json({ data: await deps!.installer.claim(await raw(c.req)) });

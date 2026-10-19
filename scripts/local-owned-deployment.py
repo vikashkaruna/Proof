@@ -43,7 +43,7 @@ BFF_REQUEST = r"""
 let input='';
 for await (const part of process.stdin) {input+=part;if(Buffer.byteLength(input)>131072)throw Error('refused');}
 const value=JSON.parse(input);
-const allowed=/^\/internal\/owned-deployments\/(?:tasks\/claim|tasks\/[a-f0-9-]{36}\/(?:preflight|authorize|confirm|unconfirmed)|credentials\/(?:authorize|complete|renew))$/;
+const allowed=/^\/internal\/owned-deployments\/(?:tasks\/(?:claim|read)|tasks\/[a-f0-9-]{36}\/(?:preflight|authorize|confirm|unconfirmed)|credentials\/(?:authorize|complete|renew))$/;
 if(!Number.isInteger(value.port)||value.port<1||value.port>65535||
  !allowed.test(value.path)) throw Error('refused');
 const response=await fetch('http://127.0.0.1:'+value.port+value.path,{
@@ -869,7 +869,10 @@ def once(configuration_file: Path) -> str:
                 != hashlib.sha256(protected_bytes(configuration_file)).hexdigest()
             ):
                 raise ValueError("Retained operator configuration changed")
-            if state.get("state") != "completed":
+            if state.get("state") not in (
+                "completed",
+                "authority_revoked_with_original_effect_history",
+            ):
                 # Never repeat a possibly applied host mutation/issuer operation.
                 raise ValueError("Retained deployment outcome requires exact readback")
             archive = directory / (identifier(state["claimId"]) + ".json")
@@ -967,6 +970,127 @@ def once(configuration_file: Path) -> str:
         state["state"] = "completed"
         write_private(journal, state)
         return "completed"
+
+
+def reconcile(configuration_file: Path) -> dict:
+    configuration = load_configuration(configuration_file)
+    directory = Path(configuration["stateDirectory"])
+    with journal_lock(directory):
+        journal = directory / "current.json"
+        if not journal.exists():
+            return {"state": "blocked", "detail": "No captured current claim"}
+        original_raw = protected_bytes(journal)
+        state = parse_json(original_raw)
+        if not isinstance(state, dict) or not isinstance(state.get("task"), dict):
+            return {"state": "blocked", "detail": "Original task scope not captured"}
+        task = state["task"]
+        claim_id = identifier(state["claimId"])
+        receipt = call(configuration, "tasks/read", {"claimId": claim_id})
+        fields = {
+            "claimId",
+            "kind",
+            "tenantId",
+            "requestId",
+            "taskId",
+            "manifestSha256",
+            "terminal",
+            "receiptId",
+            "hostSha256",
+            "stepReceipts",
+        }
+        if (
+            not isinstance(receipt, dict)
+            or set(receipt) != fields
+            or any(
+                receipt.get(key) != expected
+                for key, expected in (
+                    ("claimId", claim_id),
+                    ("tenantId", task["tenantId"]),
+                    ("requestId", task["requestId"]),
+                    ("taskId", task["taskId"]),
+                    ("manifestSha256", task["manifestSha256"]),
+                )
+            )
+        ):
+            raise ValueError("Foreign or missing captured task proof refused")
+        terminal = receipt["terminal"]
+        if not isinstance(receipt["receiptId"], str) or not re.fullmatch(
+            r"[1-9][0-9]*", receipt["receiptId"]
+        ):
+            return {"state": "blocked", "detail": "Original outcome remains unconfirmed"}
+        if terminal == "readonly_observation_recorded":
+            if (
+                receipt["kind"] != "preflight"
+                or "observation" not in state
+                or receipt["hostSha256"]
+                != hashlib.sha256(canonical(state["observation"])).hexdigest()
+            ):
+                raise ValueError("Original read-only observation proof refused")
+            final_state = "completed"
+        elif terminal == "installation_confirmed_history":
+            steps = receipt["stepReceipts"]
+            if (
+                receipt["kind"] != "installation"
+                or not isinstance(steps, list)
+                or len(steps) != 6
+                or {step.get("step") for step in steps if isinstance(step, dict)} != set(STEPS)
+                or any(
+                    step.get("state") != "confirmed"
+                    or not isinstance(step.get("receiptId"), str)
+                    or not re.fullmatch(r"[1-9][0-9]*", step["receiptId"])
+                    for step in steps
+                )
+            ):
+                raise ValueError("Original six-step receipt proof refused")
+            final_state = "completed"
+        elif terminal == "authority_revoked_with_original_effect_history":
+            if receipt["kind"] != "installation":
+                raise ValueError("Original stop receipt proof refused")
+            final_state = terminal
+        else:
+            return {"state": "blocked", "detail": "Original outcome remains unconfirmed"}
+        # The original unknown journal/steps remain intact in a protected receipt.
+        # Revocation proves only authority stopped; no target/no-effect or worker
+        # state is inferred. No claim, authorization, token, JTI or effect retry.
+        evidence = directory / ("reconciled-" + claim_id + "-" + receipt["receiptId"] + ".json")
+        record = {
+            "original": state,
+            "originalSha256": hashlib.sha256(original_raw).hexdigest(),
+            "receipt": receipt,
+            "disposition": terminal,
+        }
+        if evidence.exists():
+            retained = parse_json(protected_bytes(evidence))
+            if (
+                isinstance(retained, dict)
+                and retained.get("receipt") == receipt
+                and state.get("reconciliation")
+                == {
+                    "disposition": terminal,
+                    "receiptId": receipt["receiptId"],
+                    "originalSha256": retained.get("originalSha256"),
+                }
+                and state.get("state") == final_state
+            ):
+                return {
+                    "state": final_state,
+                    "disposition": terminal,
+                    "receiptId": receipt["receiptId"],
+                }
+            if retained != record:
+                raise ValueError("Retained reconciliation receipt conflict")
+        else:
+            write_private(evidence, record, exclusive=True)
+        state.update(
+            state=final_state,
+            reconciliation={
+                "disposition": terminal,
+                "receiptId": receipt["receiptId"],
+                "originalSha256": record["originalSha256"],
+            },
+        )
+        write_private(journal, state)
+        return {"state": final_state, "disposition": terminal, "receiptId": receipt["receiptId"]}
 
 
 def same_reviewed_host(manifest: dict, configuration: dict, reviewed: object) -> None:
@@ -1082,7 +1206,16 @@ def renew_due(configuration_file: Path, *, now: float | None = None) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "command", choices=("init-state", "prepare-config", "once", "serve", "status", "renew-due")
+        "command",
+        choices=(
+            "init-state",
+            "prepare-config",
+            "once",
+            "serve",
+            "status",
+            "renew-due",
+            "reconcile",
+        ),
     )
     parser.add_argument("configuration", type=Path)
     parser.add_argument("--interval", type=int, default=15)
@@ -1093,6 +1226,8 @@ def main() -> None:
         directory = Path(configuration["stateDirectory"])
         if args.command == "init-state":
             owned_directory(directory, create=True)
+        elif args.command == "reconcile":
+            print(json.dumps(reconcile(args.configuration)))
         elif args.command == "prepare-config":
             print(json.dumps(prepare_configuration(configuration)))
         elif args.command == "renew-due":

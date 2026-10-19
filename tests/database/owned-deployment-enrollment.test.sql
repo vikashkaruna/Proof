@@ -96,6 +96,10 @@ select public.authorize_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301
 select public.confirm_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'verify_installed_scope',(select v from enrollment169_saved where name='token'),jsonb_build_object('credential',(select v from enrollment169_saved where name='published'),'identity',(select v from enrollment169_saved where name='identity'),'controller',(select v from enrollment169_saved where name='controller'),'cryptoTransportVerified',true,'allSixReadBack',true));
 reset role;
 select pg_temp.ok((select state='active' from owned_synthetic.deployment_heads where request_id=pg_temp.pg_id(301)),'only all six confirmed readbacks make the scope active');
+set local role service_role;
+select pg_temp.ok(public.read_owned_deployment_task_receipt(pg_temp.pg_id(381))->>'terminal'='installation_confirmed_history','exact claim metadata proves six historical confirmations without new authority');
+select pg_temp.ok(public.read_owned_deployment_task_receipt(pg_temp.pg_id(399))->>'terminal'='blocked','unknown claim never clears retained uncertainty');
+reset role;
 set local role owned_target_controller;
 select pg_temp.ok(public.read_owned_synthetic_target(pg_temp.pg_id(1),pg_temp.pg_id(291),pg_temp.pg_id(269))->>'audit_log_enabled'='false','active exact native credential independently reads actual synthetic state');
 reset role;

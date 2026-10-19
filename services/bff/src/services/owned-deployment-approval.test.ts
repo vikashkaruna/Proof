@@ -574,3 +574,41 @@ it('checks retained HMAC, actual protected token and independently authenticated
     key.fill(0);
   }
 });
+
+it('keeps exact-claim recovery metadata-only and refuses foreign or incomplete terminal proofs', async () => {
+  const f = await fixture();
+  const readback = {
+    claimId: id(81),
+    kind: 'installation',
+    tenantId: f.context.tenantId,
+    requestId: id(10),
+    taskId: id(10),
+    manifestSha256: f.current.summary.manifestSha256,
+    terminal: 'authority_revoked_with_original_effect_history',
+    receiptId: '82',
+    hostSha256: null,
+    stepReceipts: [{ step: 'publish_scoped_credential', state: 'unconfirmed', receiptId: '80' }],
+  };
+  const serviceRpc = vi.fn(async () => readback);
+  const installer = new OwnedDeploymentInstaller({
+    serviceRpc,
+    manifests: async () => new Map([[f.current.summary.manifestSha256, f.current.manifest]]),
+    approval: f.engine,
+    credentialDirectory: '/unused-private-unit-fixture',
+    verifyTransport: vi.fn(),
+  });
+  expect((await installer.readTask({ claimId: id(81) })).terminal).toBe(
+    'authority_revoked_with_original_effect_history',
+  );
+  expect(serviceRpc).toHaveBeenCalledWith('read_owned_deployment_task_receipt', {
+    p_claim_id: id(81),
+  });
+  readback.claimId = id(99);
+  await expect(installer.readTask({ claimId: id(81) })).rejects.toThrow();
+  readback.claimId = id(81);
+  readback.terminal = 'installation_confirmed_history';
+  await expect(installer.readTask({ claimId: id(81) })).rejects.toThrow(
+    'installation receipt refused',
+  );
+  expect(f.issue).not.toHaveBeenCalled();
+});

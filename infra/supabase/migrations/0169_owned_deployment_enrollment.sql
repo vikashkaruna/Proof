@@ -1789,3 +1789,45 @@ declare approved owned_synthetic.deployment_approvals;answer jsonb;begin
 end $$;
 revoke all on function public.read_owned_deployment_reviewed_host(uuid,uuid) from public,anon,authenticated,human_action_writer,agent_ledger_writer,owned_target_controller;
 grant execute on function public.read_owned_deployment_reviewed_host(uuid,uuid) to service_role;
+
+-- Metadata-only recovery of one captured host claim. It grants no installation,
+-- credential issuance, target operation, or retry authority, including after
+-- original start authority expires. Missing/intermediate state remains unknown.
+create function public.read_owned_deployment_task_receipt(p_claim_id uuid) returns jsonb
+language plpgsql security definer set search_path='' set lock_timeout='5s' as $$
+declare rid uuid;tid uuid;kind text;taskid uuid;r owned_synthetic.deployment_requests;h owned_synthetic.deployment_heads;
+ terminal text:='blocked';receipt bigint;hosthash text;steps jsonb:='[]'::jsonb;
+begin
+ if current_setting('role',true) is distinct from 'service_role' or p_claim_id is null then raise exception 'owned deployment receipt transport refused' using errcode='42501';end if;
+ perform pg_advisory_xact_lock(hashtextextended(p_claim_id::text,16901));
+ select task.request_id,task.tenant_id,task.id into rid,tid,taskid from owned_synthetic.deployment_preflight_claims claim join owned_synthetic.deployment_preflight_tasks task on task.id=claim.task_id where claim.claim_id=p_claim_id;
+ if found then kind:='preflight';else
+  select request.id,request.tenant_id,request.id into rid,tid,taskid from owned_synthetic.deployment_installation_claims claim join owned_synthetic.deployment_requests request on request.id=claim.request_id where claim.claim_id=p_claim_id;
+  if found then kind:='installation';else kind:='absent';end if;
+ end if;
+ if kind<>'absent' then
+  perform pg_advisory_xact_lock_shared(hashtextextended(tid::text,47));perform owned_synthetic.deployment_lock(tid,rid);
+  select * into strict r from owned_synthetic.deployment_requests where(tenant_id,id)=(tid,rid) for share;
+  select * into strict h from owned_synthetic.deployment_heads where request_id=rid for share;
+  if kind='preflight' then
+   select o.receipt_id,o.host_sha256 into receipt,hosthash from owned_synthetic.deployment_observations o where(o.task_id,o.claim_id)=(taskid,p_claim_id);
+   if found then terminal:='readonly_observation_recorded';end if;
+  else
+   select coalesce(jsonb_agg(jsonb_build_object('step',latest.step,'state',latest.transition,'receiptId',latest.receipt_id::text) order by latest.step),'[]'::jsonb) into steps
+   from(select distinct on(s.step) s.step,s.transition,s.receipt_id from owned_synthetic.deployment_steps s where(s.tenant_id,s.request_id)=(tid,rid) order by s.step,s.sequence desc) latest;
+   -- A later human stop proves only authority revocation. It cannot claim a
+   -- successful installation, no target effect, or a paused/stopped worker.
+   select op.receipt_id into receipt from owned_synthetic.deployment_operations op join public.audit_ledger ledger on(ledger.tenant_id,ledger.id)=(op.tenant_id,op.receipt_id)
+   where(op.tenant_id,op.request_id,op.phase,op.outcome)=(tid,rid,'revoke','recorded') and op.result->>'state'='revoked'
+   and ledger.actor_type='human' and ledger.action_type='deployment.owned_revoked' and ledger.target_ref=rid::text order by op.receipt_id desc limit 1;
+   if found and h.state='revoked' then terminal:='authority_revoked_with_original_effect_history';
+   elsif h.state='active' and jsonb_array_length(steps)=6 and not exists(select 1 from jsonb_array_elements(steps) v where v->>'state'<>'confirmed')
+   then terminal:='installation_confirmed_history';receipt:=h.installation_receipt;
+   else receipt:=null;end if;
+  end if;
+ end if;
+ return jsonb_build_object('claimId',p_claim_id,'kind',kind,'tenantId',tid,'requestId',rid,'taskId',taskid,'manifestSha256',r.manifest_sha256,
+ 'terminal',terminal,'receiptId',receipt::text,'hostSha256',hosthash,'stepReceipts',steps);
+end $$;
+revoke all on function public.read_owned_deployment_task_receipt(uuid) from public,anon,authenticated,human_action_writer,agent_ledger_writer,owned_target_controller;
+grant execute on function public.read_owned_deployment_task_receipt(uuid) to service_role;

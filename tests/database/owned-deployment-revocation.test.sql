@@ -41,6 +41,10 @@ select pg_temp.ok(public.record_owned_deployment_revocation(pg_temp.pg_id(1),pg_
 select pg_temp.ok(public.read_owned_deployment_operation(pg_temp.pg_id(1),pg_temp.id(6),pg_temp.id(106),pg_temp.pg_id(301),'revoke',pg_temp.pg_id(390))#>>'{data,outcome}'='recorded','durable stop readback binds exact original operation');
 reset role;
 select pg_temp.ok((select v->>'state'='revoked' and v#>>'{currentAuthority,state}'='inactive' from enrollment169_saved where name='stopped'),'new current owner stops enrollment after original start authority and token expire');
+set local role service_role;
+select pg_temp.ok(public.read_owned_deployment_task_receipt(pg_temp.pg_id(381))->>'terminal'='authority_revoked_with_original_effect_history','exact human stop receipt proves only authority revocation while original effect history remains');
+select pg_temp.ok(public.read_owned_deployment_task_receipt(pg_temp.pg_id(381))->>'requestId'=pg_temp.pg_id(301)::text,'stop receipt remains pinned to original claim request');
+reset role;
 select pg_temp.ok((select count(*)=1 from owned_synthetic.resources where version=0 and not audit_log_enabled),'fresh stop preserves actual target setting and resource');
 select pg_temp.ok((select state='revoked' from owned_synthetic.bindings where id=pg_temp.pg_id(291)),'fresh stop revokes exact binding');
 select pg_temp.ok((select count(*)=1 from owned_synthetic.deployment_credential_revocations),'fresh stop appends credential revocation');
