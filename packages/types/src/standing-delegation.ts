@@ -1,6 +1,6 @@
 /** Narrow local synthetic standing-approval delegation; never an execution token. */
 import { z } from 'zod';
-import { canonicalLocalCustody } from './local-custody-policy.js';
+import { canonicalLocalCustody } from './local-custody-policy';
 const uuid = z.uuid().transform((v) => v.toLowerCase());
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const instant = z.iso.datetime({ offset: true });

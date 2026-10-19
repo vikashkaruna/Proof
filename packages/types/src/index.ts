@@ -53,4 +53,4 @@ export * from './owned-effect-observation';
 export * from './monitoring-read';
 
 export * from './owned-deployment';
-export * from './standing-delegation.js';
+export * from './standing-delegation';

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { canonicalLocalCustody as canonicalJson } from './local-custody-policy.js';
+import { canonicalLocalCustody as canonicalJson } from './local-custody-policy';
 const uuid = z.uuid().transform((s) => s.toLowerCase());
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const receipt = z
