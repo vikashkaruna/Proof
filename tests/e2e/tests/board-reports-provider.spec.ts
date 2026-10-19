@@ -109,7 +109,14 @@ async function assertReadableCoveragePreview(
     await preview.waitForLoadState('domcontentloaded');
     expect(new URL(preview.url()).origin).toBe(new URL(founder.url()).origin);
     expect(new URL(preview.url()).pathname).toBe(path);
-    await expect(preview.getByRole('heading', { name: expected.title, exact: true })).toBeVisible();
+    // Document7 retains the source document heading beneath its branded cover.
+    // Assert both exact headings rather than an ambiguous strict locator.
+    const titleHeadings = preview.getByRole('heading', { name: expected.title, exact: true });
+    await expect(titleHeadings).toHaveCount(2);
+    await expect(
+      preview.locator('.brand-cover').getByRole('heading', { name: expected.title, exact: true }),
+    ).toBeVisible();
+    await expect(titleHeadings.nth(1)).toBeVisible();
     await expect(
       preview.getByText(/^Scores and financial exposure estimates are withheld\./),
     ).toBeVisible();
