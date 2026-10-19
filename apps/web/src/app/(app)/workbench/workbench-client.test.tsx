@@ -209,7 +209,15 @@ it('opens the specific draft plan for inspection even when no actions are approv
   render(
     <AgentWorkbenchClient
       {...props}
-      pendingPlans={[{ id, title: 'Draft DPIA plan', version: 1, status: 'draft' }]}
+      pendingPlans={[
+        {
+          id,
+          title: 'Draft DPIA plan',
+          version: 1,
+          status: 'draft',
+          created_at: '2026-10-19T00:00:00Z',
+        },
+      ]}
     />,
   );
   expect(screen.getByRole('link', { name: 'Inspect plan →' }).getAttribute('href')).toBe(
