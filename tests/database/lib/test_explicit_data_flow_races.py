@@ -29,6 +29,15 @@ class DeclarationFixture(unittest.TestCase):
         self.assertIn('python3 tests/database/lib/explicit-data-flow-races.py --container "$container_id"',runner)
         self.assertIn('data_flow174_suite_required',(HERE/'report-policy-phases.py').read_text())
 
+    def test_auth_standin_is_absent_only_and_preserves_migration_owner_without_grants(self):
+        program=RACES.fixture_program()
+        self.assertIn("if to_regclass('auth.sessions') is null then",program)
+        self.assertIn('set local role postgres;',program)
+        self.assertIn("execute format('set local role %I',prior);",program)
+        self.assertNotIn('create table if not exists auth.sessions',program)
+        self.assertNotIn('alter table auth.sessions',program)
+        self.assertNotIn('grant select on auth.sessions',program)
+
 
 if __name__=='__main__':
     unittest.main()

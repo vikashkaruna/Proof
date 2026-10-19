@@ -1,7 +1,15 @@
 -- Synthetic metadata only; real SQL authority/immutability. No target/provider
 -- call, actual TOTP enrollment, hosted identity or personal values.
 begin;
-create table if not exists auth.sessions(id uuid primary key,user_id uuid not null references auth.users(id),not_after timestamptz);
+-- Match the canonical migration owner's Auth stand-in. Only create an absent
+-- rollback-scoped fixture; never change a real Auth table or caller grants.
+do $auth$declare prior text:=current_user;begin
+ if to_regclass('auth.sessions') is null then
+  set local role postgres;
+  create table auth.sessions(id uuid primary key,user_id uuid not null references auth.users(id),not_after timestamptz);
+  execute format('set local role %I',prior);
+ end if;
+end $auth$;
 create function pg_temp.id(n int)returns uuid language sql immutable as $$select('17400000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 create function pg_temp.ok(v boolean,m text)returns void language plpgsql as $$begin if v is distinct from true then raise exception 'ASSERTION: %',m;end if;end$$;
 create function pg_temp.refused(q text,code text default'42501')returns void language plpgsql as $$begin begin execute q;exception when others then if sqlstate=code then return;end if;raise;end;raise exception 'Statement unexpectedly succeeded';end$$;
