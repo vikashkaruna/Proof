@@ -1,3 +1,4 @@
+import { requireLocalX509Material } from './workloads/local-x509-preflight.js';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { controllerFilePath, readControllerFile } from './workloads/controller-files.js';
@@ -51,7 +52,7 @@ export const localKeyServiceConfiguration = z
   .strict();
 
 /** Operator-run local custody key service (D2: operator-managed custody).
- * --check  verifies configuration, policy digest and credential shapes only.
+ * --check  verifies configuration, policy digest, credential shapes and live own X.509 material.
  * --provision  creates the policy's primary key version once (operator role).
  * --serve  answers producer wraps and controller unwraps, one mTLS exchange per
  *          generation, every operation re-admitted in SQL with that role's own
@@ -94,6 +95,7 @@ export async function prepareLocalKeyService(args: string[]) {
       role: 'operator' as const,
       servicePrincipal: principals.operator,
     };
+    if (args[0] === '--check') await requireLocalX509Material(config.workload, 'server');
     return {
       mode: args[0] as '--check' | '--provision' | '--serve',
       provision: () => service.provision(operator, policy.keyPolicy.primary),

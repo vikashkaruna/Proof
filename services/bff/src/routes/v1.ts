@@ -1,3 +1,7 @@
+import {
+  postgresqlDiscoveryRoutes,
+  type DiscoveryRequestController,
+} from './postgresql-discovery.js';
 import { mfaRecoveryRoutes } from './mfa-recovery.js';
 import { localCustodyPolicyRoutes } from './local-custody-policy.js';
 import { engagementIntakeRoutes } from './engagement-intake.js';
@@ -20,6 +24,7 @@ import type { AssessmentRequestProducer } from '../workloads/assessment-producer
 import { assessmentRoutes } from './assessment.js';
 import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
+import { catalogueVersionRoutes } from './catalogue-versions.js';
 import { catalogueReferenceRoutes } from './catalogue-references.js';
 import { publicWebsiteControlReviewRoutes } from './public-website-control-review.js';
 import { publicControlReviewSetRoutes } from './public-control-review-sets.js';
@@ -80,13 +85,13 @@ import { requireCapability } from '../middleware/authorize.js';
 import {
   APPROVABLE_PLAN_STATUSES,
   Capability,
+  ApprovedLibraryVersionSchema,
   authorize,
   describePlanStatusBlocker,
 } from '@axiom/types';
 import { logger } from '../lib/logger.js';
 import { randomUUID } from 'node:crypto';
 import { loadEnv } from '@axiom/config';
-import { LIBRARY_VERSION } from '@axiom/control-library';
 
 const env = loadEnv();
 
@@ -226,6 +231,7 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 }
 
 interface Deps {
+  discoveryController?: DiscoveryRequestController;
   licensePublicKeyPem?: string;
   ownedSynthetic?: OwnedSyntheticRouteDeps | null;
   stagedEvidence?: StagedEvidenceRoutesDeps;
@@ -267,7 +273,9 @@ export function v1Routes(deps: Deps) {
   app.route('/', sudhaarReviewAdoptionRoutes({ killSwitch: deps.killSwitch }));
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
+  app.route('/', postgresqlDiscoveryRoutes(deps.discoveryController));
   app.route('/', catalogueReferenceRoutes());
+  app.route('/', catalogueVersionRoutes({ mfa: deps.mfa }));
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', localCustodyPolicyRoutes({ mfa: deps.mfa }));
   app.route('/', mfaRecoveryRoutes({ mfa: deps.mfa }));
@@ -3840,6 +3848,21 @@ export function v1Routes(deps: Deps) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '')
         .slice(0, 45) || 'organization';
+    const currentCatalogue = await admin.rpc('read_current_catalogue_version');
+    const currentVersion = z
+      .object({ version: ApprovedLibraryVersionSchema })
+      .strict()
+      .safeParse(currentCatalogue.data);
+    if (currentCatalogue.error || !currentVersion.success)
+      return c.json(
+        {
+          error: {
+            code: 'current_catalogue_unavailable',
+            message: 'The approved current control library could not be verified.',
+          },
+        },
+        503,
+      );
     const { data, error } = await createHumanActionWriter().rpc('onboard_organization', {
       p_user_id: user.id,
       p_slug: `${baseSlug}-${randomUUID()}`,
@@ -3851,7 +3874,7 @@ export function v1Routes(deps: Deps) {
       p_dpo_name: input.dpo_name ?? null,
       p_dpo_email: input.dpo_email ?? null,
       p_systems: input.systems ?? [],
-      p_library_version: LIBRARY_VERSION,
+      p_library_version: currentVersion.data.version,
       p_correlation_id: randomUUID(),
     });
     if (error) {

@@ -41,8 +41,8 @@ echo
 
 # Any "<number> controls" that is not the canonical number.
 mismatches=$(
-  grep -rnoE "\b[0-9]{2,3}\s+controls\b" \
-    --include='*.ts' --include='*.tsx' --include='*.md' . 2>/dev/null \
+  rg -no '\b[0-9]{2,3}\s+controls\b' \
+    --glob '*.ts' --glob '*.tsx' --glob '*.md' . 2>/dev/null \
   | grep -v node_modules \
   | grep -v '/\.kilo' \
   | grep -v '/\.claude/' \
@@ -63,8 +63,8 @@ mismatches=$(
 
 # Spelled-out numbers in prose.
 worded=$(
-  grep -rnoiE "\b(forty|fifty)[- ](one|two|three|four|five|six|seven|eight|nine)? ?controls?\b" \
-    --include='*.md' . 2>/dev/null \
+  rg -noi '\b(forty|fifty)[- ](one|two|three|four|five|six|seven|eight|nine)? ?controls?\b' \
+    --glob '*.md' . 2>/dev/null \
   | grep -v node_modules \
   | grep -vE '(^|/)(docs/private-(docs|plans)|private-docs)/' \
   | grep -vE '(docs|private-docs/reference)/11_Phase0-5_Gap_Closure_Plan.md' \

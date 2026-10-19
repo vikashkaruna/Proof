@@ -122,3 +122,20 @@ it('exposes only eight individually reviewed partial-public requirement facet se
     ).toBe(true);
   }
 });
+
+it('resolves the corrected version manifest without changing the legacy exact bytes', async () => {
+  const { createPublicControlCatalogueManifest, publicControlCatalogueManifestText } =
+    await import('./public-evidence-mapping-v2');
+  const { controls_0_2_0 } = await import('./versions/v0_2_0/controls');
+  const { createHash } = await import('node:crypto');
+  const candidate = createPublicControlCatalogueManifest('0.2.0');
+  expect(candidate.controls.map((row) => row.control)).toEqual(controls_0_2_0);
+  expect(candidate.controls).toHaveLength(46);
+  expect(
+    createHash('sha256').update(publicControlCatalogueManifestText('0.2.0')).digest('hex'),
+  ).toBe('3bfc2044ceaab0275caf528c932a2a0a5f314fab776c03b51037a78ca812437e');
+  expect(
+    createHash('sha256').update(publicControlCatalogueManifestText('0.1.1')).digest('hex'),
+  ).toBe('3bdf816d71e132b23f849f5d5b497d8f0a8874afa124aed31be8652ec6ab31c6');
+  expect(() => createPublicControlCatalogueManifest('0.3.0')).toThrow();
+});

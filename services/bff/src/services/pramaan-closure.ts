@@ -10,6 +10,7 @@ import { accessFor } from './evidence-pack-records.js';
 import { PramaanArtifactService } from './pramaan-artifacts.js';
 import { PramaanAuditorArtifactService } from './pramaan-auditor-artifacts.js';
 import { PramaanTechnicalArtifactService } from './pramaan-technical-artifacts.js';
+import { PramaanFullArtifactService } from './pramaan-full-artifacts.js';
 import { PramaanDpbArtifactService } from './pramaan-dpb-artifacts.js';
 
 export const synthesizeDossierInputSchema = z
@@ -79,10 +80,16 @@ export class PramaanClosureService {
   readonly auditorArtifacts: PramaanAuditorArtifactService;
   readonly technicalArtifacts: PramaanTechnicalArtifactService;
   readonly dpbArtifacts: PramaanDpbArtifactService;
+  readonly fullArtifacts: PramaanFullArtifactService;
   constructor(
     private readonly db: EvidenceDatabase,
     writerDb?: EvidenceDatabase,
   ) {
+    this.fullArtifacts = new PramaanFullArtifactService(
+      db,
+      undefined,
+      writerDb ? () => writerDb : undefined,
+    );
     this.artifacts = new PramaanArtifactService(db, undefined, writerDb);
     this.auditorArtifacts = new PramaanAuditorArtifactService(
       db,
@@ -107,16 +114,21 @@ export class PramaanClosureService {
   }
 
   async listMyBuilds(tenantId: string, actorId: string, signal?: AbortSignal) {
-    const [board, auditor, technical, dpb] = await Promise.all([
+    const [board, auditor, technical, dpb, full] = await Promise.all([
       this.artifacts.mine(tenantId, actorId, signal),
       this.auditorArtifacts.mine(tenantId, actorId, signal),
       this.technicalArtifacts.mine(tenantId, actorId, signal),
       this.dpbArtifacts.mine(tenantId, actorId, signal),
+      this.fullArtifacts.mine(tenantId, actorId, signal),
     ]);
     return {
-      builds: [...board.builds, ...auditor.builds, ...technical.builds, ...dpb.builds].sort(
-        (a, b) => b.createdAt.localeCompare(a.createdAt),
-      ),
+      builds: [
+        ...board.builds,
+        ...auditor.builds,
+        ...technical.builds,
+        ...dpb.builds,
+        ...full.builds,
+      ].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     };
   }
 
@@ -131,6 +143,13 @@ export class PramaanClosureService {
     if (input.dossierType === 'dpb_statutory')
       return this.dpbArtifacts.create(tenantId, actorId, input, signal);
     if (input.engagementId === null) throw new EvidenceError('source_bound_dossier_required', 409);
+    if (input.dossierType === 'full_closure')
+      return this.fullArtifacts.create(
+        tenantId,
+        actorId,
+        { ...input, engagementId: input.engagementId },
+        signal,
+      );
     if (input.dossierType === 'auditor_assurance')
       return this.auditorArtifacts.create(
         tenantId,
@@ -145,6 +164,8 @@ export class PramaanClosureService {
         { ...input, engagementId: input.engagementId },
         signal,
       );
+    if (input.dossierType !== 'board_executive')
+      throw new EvidenceError('source_bound_dossier_required', 409);
     return this.artifacts.create(
       tenantId,
       actorId,
@@ -199,6 +220,14 @@ export class PramaanClosureService {
   }
 
   private async artifactFor(tenantId: string, dossierId: string, signal?: AbortSignal) {
+    const identity = await this.db
+      .from('pramaan_dossiers')
+      .select('dossier_type')
+      .eq('tenant_id', tenantId)
+      .eq('id', dossierId)
+      .maybeSingle();
+    if (identity.error) throw new EvidenceError('dossier_storage_unavailable', 503);
+    if (identity.data?.dossier_type === 'full_closure') return this.fullArtifacts;
     if (await this.auditorArtifacts.owns(tenantId, dossierId, signal)) return this.auditorArtifacts;
     if (await this.technicalArtifacts.owns(tenantId, dossierId, signal))
       return this.technicalArtifacts;
@@ -354,29 +383,34 @@ export class PramaanClosureService {
     signal?: AbortSignal,
   ): Promise<{ dossiers: SealedDossierSummary[]; total: number }> {
     await accessFor(this.db, tenantId, actorId, signal);
-    const query = this.db
-      .from('pramaan_dossiers')
-      .select('id, dossier_type, title, merkle_root, proof_seal_hash, sealed_at, created_at', {
-        count: 'exact',
+    let rpc = this.db.rpc('read_sealed_dossier_summaries', {
+      p_tenant_id: tenantId,
+      p_actor_id: actorId,
+      p_limit: input.limit,
+      p_offset: input.offset,
+    });
+    if (signal) rpc = rpc.abortSignal(signal);
+    const result = await rpc;
+    if (result.error) throw new EvidenceError('closure_storage_unavailable', 503);
+    const parsed = z
+      .object({
+        rows: z.array(
+          z.object({
+            id: z.uuid(),
+            dossier_type: DossierTypeSchema,
+            title: z.string(),
+            merkle_root: z.string(),
+            proof_seal_hash: z.string(),
+            sealed_at: z.string().nullable(),
+            created_at: z.string(),
+          }),
+        ),
+        total: z.number().int().nonnegative(),
       })
-      .eq('tenant_id', tenantId)
-      .eq('status', 'sealed')
-      .order('sealed_at', { ascending: false })
-      .range(input.offset, input.offset + input.limit - 1);
-    const queryWithSignal =
-      signal &&
-      typeof (query as unknown as { abortSignal?: (s: AbortSignal) => unknown }).abortSignal ===
-        'function'
-        ? (query as unknown as { abortSignal: (s: AbortSignal) => typeof query }).abortSignal(
-            signal,
-          )
-        : query;
-    const { data, count, error } = await (queryWithSignal as unknown as Promise<{
-      data: Record<string, unknown>[] | null;
-      count: number | null;
-      error: unknown;
-    }>);
-    if (error) throw new EvidenceError('closure_storage_unavailable', 503);
+      .strict()
+      .parse(result.data);
+    const data = parsed.rows,
+      count = parsed.total;
     const dossiers = (data ?? []).map((row) => ({
       id: row.id as string,
       dossierType: row.dossier_type as DossierType,
@@ -387,6 +421,33 @@ export class PramaanClosureService {
       createdAt: row.created_at as string,
     }));
     return { dossiers, total: count ?? dossiers.length };
+  }
+
+  async previewFullDossier(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    signal?: AbortSignal,
+  ) {
+    return this.fullArtifacts.preview(tenantId, actorId, dossierId, signal);
+  }
+  async reviewFullDossier(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    input: { expectedArchiveSha256: string; expectedVersionId: string; note: string },
+    signal?: AbortSignal,
+  ) {
+    return this.fullArtifacts.review(tenantId, actorId, dossierId, input, signal);
+  }
+  async releaseFullDossier(
+    tenantId: string,
+    actorId: string,
+    dossierId: string,
+    input: { expectedArchiveSha256: string; expectedVersionId: string },
+    signal?: AbortSignal,
+  ) {
+    return this.fullArtifacts.release(tenantId, actorId, dossierId, input, signal);
   }
 
   /** External dispatch is closed until the selected artifact is source-bound and retained. */

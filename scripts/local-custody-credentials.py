@@ -31,13 +31,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from lib.local_custody_credentials import (  # noqa: E402
+from lib.local_custody_credentials import (
     DEFAULT_RENEW_MARGIN_S,
     KINDS,
     issue_request,
     last_expiry,
     renewal_due,
 )
+from lib.local_tenant_registry import tenant_alias, validate_manifest
 
 DB = "supabase_db_axiom-owner-test"
 ISSUER_ROOT = Path(
@@ -80,7 +81,9 @@ def active_policy(tenant: str) -> dict:
 def issue(tenant: str, kind: str, renew: bool) -> None:
     if kind not in KINDS:
         raise SystemExit("kind must be operator, producer or controller")
+    alias = tenant_alias(tenant)
     policy = active_policy(tenant)
+    validate_manifest(alias, policy)
     settings = ISSUER_ROOT / "settings.json"
     settings_sha = (ISSUER_ROOT / "settings.sha256").read_text().strip()
     base = ISSUER_ROOT / "credentials" / tenant
@@ -124,13 +127,6 @@ def issue(tenant: str, kind: str, renew: bool) -> None:
     print(f"{kind} credential {credential_id} published at {base / (kind + '.key')}")
 
 
-# Tenant ids the key-service launcher knows (scripts/local-key-service.py TENANTS).
-KEY_SERVICE_TENANTS = {
-    "fd5e0001-0000-4000-8000-000000000001": "kosha",
-    "fd5e0002-0000-4000-8000-000000000002": "sanjeevani",
-    "fd5e0003-0000-4000-8000-000000000003": "nimbus",
-}
-
 
 def due_kinds(base: Path, now: int, margin_s: int) -> list[str]:
     due = []
@@ -149,8 +145,10 @@ def due_kinds(base: Path, now: int, margin_s: int) -> list[str]:
     return due
 
 
-def renew_due(tenant: str | None, margin_s: int) -> int:
+def renew_due(tenant: str | None, margin_s: int, key_service_image: str | None = None) -> int:
     """Renew what is due; return how many tenants failed (0 = all fine)."""
+    if key_service_image is not None and tenant is None:
+        raise ValueError("Pinned key service image requires one explicit tenant")
     root = ISSUER_ROOT / "credentials"
     tenants = [str(uuid.UUID(tenant))] if tenant else sorted(p.name for p in root.iterdir() if p.is_dir()) if root.exists() else []
     failures = 0
@@ -159,14 +157,15 @@ def renew_due(tenant: str | None, margin_s: int) -> int:
             kinds = due_kinds(root / tenant_id, int(time.time()), margin_s)
             for kind in kinds:
                 issue(tenant_id, kind, renew=True)
-            name = KEY_SERVICE_TENANTS.get(tenant_id)
-            if kinds and name:
+            if kinds:
+                name = tenant_alias(tenant_id)
                 subprocess.run(  # nosec B603 - fixed launcher path, isolated interpreter
-                    [sys.executable, "-I", str(ROOT / "scripts/local-key-service.py"), "sync", "--tenant", name],
+                    [sys.executable, "-I", str(ROOT / "scripts/local-key-service.py"), "sync", "--tenant", name,
+                     *(["--image", key_service_image] if key_service_image is not None else [])],
                     check=True, timeout=300,
                 )
             print(f"{tenant_id}: renewed {kinds or 'nothing (not due)'}")
-        except (SystemExit, subprocess.SubprocessError, OSError) as error:
+        except (SystemExit, subprocess.SubprocessError, OSError, ValueError, TypeError) as error:
             failures += 1
             print(f"{tenant_id}: renewal FAILED: {error}", file=sys.stderr)
     return failures
@@ -181,6 +180,7 @@ if __name__ == "__main__":
     p.add_argument("--renew", action="store_true")
     r = sub.add_parser("renew-due")
     r.add_argument("--tenant-id")
+    r.add_argument("--key-service-image")
     r.add_argument("--margin", type=int, default=DEFAULT_RENEW_MARGIN_S)
     r.add_argument("--watch", type=int, metavar="SECONDS", help="repeat every SECONDS (60..1200)")
     args = parser.parse_args()
@@ -191,7 +191,7 @@ if __name__ == "__main__":
         if args.watch is not None and not 60 <= args.watch <= 1200:
             raise SystemExit("--watch must be 60..1200 seconds")
         while True:
-            failed = renew_due(args.tenant_id, args.margin)
+            failed = renew_due(args.tenant_id, args.margin, args.key_service_image)
             if args.watch is None:
                 raise SystemExit(1 if failed else 0)
             time.sleep(args.watch)

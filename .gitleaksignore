@@ -149,3 +149,8 @@ ec0f06167de0fb6940dab182ac1c090aafb1eb34:tests/database/local-custody-credential
 # with LocalKeyPolicy. These exact historical findings are not credentials.
 cc7eec8cad1bd6da176116c52c1a30be90ead250:tests/database/local-custody-intent-cancellation.test.sql:generic-api-key:15
 cc7eec8cad1bd6da176116c52c1a30be90ead250:tests/database/local-custody-operator-context.test.sql:generic-api-key:15
+
+# Reviewed 2026-10-18: deterministic public LocalKeyPolicy SHA-256 metadata,
+# independently rederived from the synthetic fixture UUIDs, mode and references.
+# Exact historical finding only; no signing material or credential is excluded.
+795726100d57aa947700855d3e72ce4da96317de:tests/database/postgresql-sandbox-discovery.test.sql:generic-api-key:17

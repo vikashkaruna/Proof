@@ -19,7 +19,7 @@ FROM python:3.14-alpine3.24@sha256:f6a589d43c42b9e7f7dc67a12d37132491f362859a5d7
 COPY --from=identity-client /spire-agent /usr/local/bin/spire-agent
 WORKDIR /worker
 RUN mkdir axiom && touch axiom/__init__.py
-COPY --chmod=0644 services/agent-runtime/src/axiom/process_lifetime.py services/agent-runtime/src/axiom/assessment_supervisor.py services/agent-runtime/src/axiom/assessment_worker.py services/agent-runtime/src/axiom/assessment_scoring.py services/agent-runtime/src/axiom/control_library_loader.py services/agent-runtime/src/axiom/enum_types.py ./axiom/
+COPY --chmod=0644 services/agent-runtime/src/axiom/process_lifetime.py services/agent-runtime/src/axiom/assessment_supervisor.py services/agent-runtime/src/axiom/assessment_worker.py services/agent-runtime/src/axiom/discovery_worker.py services/agent-runtime/src/axiom/discovery_supervisor.py services/agent-runtime/src/axiom/assessment_scoring.py services/agent-runtime/src/axiom/control_library_loader.py services/agent-runtime/src/axiom/enum_types.py ./axiom/
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 20003:20003
 # Default launch fails closed. A trusted controller must explicitly select the

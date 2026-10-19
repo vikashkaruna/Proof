@@ -1,5 +1,8 @@
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
-import { loadAssessmentSnapshot, loadAssessmentConfiguration } from '@/lib/assessment-snapshot';
+import {
+  loadAssessmentSnapshot,
+  loadAssessmentConfigurationDetails,
+} from '@/lib/assessment-snapshot';
 import { AssessmentClient } from './assessment-client';
 import { can } from '@axiom/types';
 import Link from 'next/link';
@@ -35,7 +38,7 @@ export default async function AssessmentPage({
   // Missing/unreadable saved results are never replaced with demo posture.
   const [snapshot, configuration] = await Promise.all([
     loadAssessmentSnapshot(supabase, tenantId, engagement),
-    loadAssessmentConfiguration(supabase, tenantId),
+    loadAssessmentConfigurationDetails(supabase, tenantId),
   ]);
   if (reviewRef && snapshot?.engagement?.id !== engagement)
     return (
@@ -50,7 +53,8 @@ export default async function AssessmentPage({
   return (
     <AssessmentClient
       reviewRef={reviewRef}
-      configuration={configuration}
+      configuration={configuration?.configuration ?? 'unknown'}
+      sourceRequirement={configuration?.sourceRequirement ?? 'unknown'}
       snapshot={snapshot}
       actorId={userId}
       canCreate={can(Capability.ENGAGEMENT_CREATE, { role })}

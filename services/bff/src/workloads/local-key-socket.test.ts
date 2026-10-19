@@ -196,24 +196,36 @@ it('closes a stalled peer verification at the original deadline and never execut
       release = resolve;
     },
   );
+  const verifyPeer = vi.fn(() => waiting);
   const server = await startLocalKeySocket({
     directory: await directory(),
     socketGroup: process.getgid!(),
     service,
-    verifyPeer: () => waiting,
+    verifyPeer,
   });
   sockets.push(server);
   const before = Date.now();
-  await expect(
-    call(
-      server.socketPath,
-      JSON.stringify({
-        operation: 'wrap',
-        context: context.toString('base64'),
-        key: Buffer.alloc(32).toString('base64'),
-      }),
-    ),
-  ).rejects.toThrow();
+  // Both deadline timers refuse the request. Depending on event-loop ordering,
+  // the client receives the explicit refusal or the socket closes first.
+  await call(
+    server.socketPath,
+    JSON.stringify({
+      operation: 'wrap',
+      context: context.toString('base64'),
+      key: Buffer.alloc(32).toString('base64'),
+    }),
+  ).then(
+    (response) => {
+      expect(response).toEqual({
+        status: 403,
+        text: '{"error":"local_key_refused"}',
+      });
+    },
+    (error: unknown) => {
+      expect(error).toMatchObject({ code: 'ECONNRESET' });
+    },
+  );
+  expect(verifyPeer).toHaveBeenCalledOnce();
   expect(Date.now() - before).toBeGreaterThanOrEqual(4900);
   release({ tenantId: tenant, workloadId: workload, role: 'producer' });
   await new Promise<void>((resolve) => setImmediate(resolve));

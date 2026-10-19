@@ -251,3 +251,208 @@ describe('DiscoveryService (W4.6/W4.7)', () => {
     expect(await refused.json()).toEqual({ error: 'discovery_refused' });
   });
 });
+
+describe('configured SQL descriptor fence', () => {
+  const binding = () => ({
+    tenantId: TENANT,
+    estateId: ESTATE,
+    connectorId: SQL_CONN,
+    systemId: '77777777-7777-4777-8777-777777777777',
+    descriptorId: SQL_DESCRIPTOR,
+    descriptorSha256: 'b'.repeat(64),
+    endpointRef: 'crm_sql',
+    targetBinding: 'production' as const,
+    connectorVersion: 1,
+  });
+  it.each(['tenantId', 'connectorId'] as const)(
+    'rejects inconsistent configured%s at construction',
+    (field) => {
+      expect(
+        () =>
+          new DiscoveryService(
+            {
+              sql: [
+                {
+                  ...config.sql[0]!,
+                  binding: { ...binding(), [field]: '99999999-9999-4999-8999-999999999999' },
+                },
+              ],
+            },
+            { identity, sqlSessions, client: () => fake.client as never },
+          ),
+      ).toThrow('SQL binding mismatch');
+    },
+  );
+  it.each([{ descriptorId: '41410000-0000-4000-8000-000000000002' }, { targetBinding: 'sandbox' }])(
+    'rejects a stored descriptor outside its reviewed configuration: %j',
+    async (delta) => {
+      const service = new DiscoveryService(
+        { sql: [{ ...config.sql[0]!, binding: { ...binding(), ...delta } }] },
+        { identity, sqlSessions, client: () => fake.client as never },
+      );
+      await expect(
+        service.run(
+          { tenantId: TENANT, estateId: ESTATE, connectorId: SQL_CONN, operation: 'enumerate' },
+          'svid',
+        ),
+      ).rejects.toMatchObject({ reason: 'descriptor_unreviewed' });
+      expect(identity.verify).not.toHaveBeenCalled();
+      expect(recorded).toHaveLength(0);
+    },
+  );
+});
+
+describe('composed PostgreSQL entry deadline', () => {
+  const request = {
+    tenantId: TENANT,
+    estateId: ESTATE,
+    connectorId: SQL_CONN,
+    operation: 'enumerate',
+  };
+  const composed = () =>
+    new DiscoveryService(config, {
+      identity,
+      sqlSessions,
+      postgresqlOnly: true,
+      client: () => fake.client as never,
+    });
+  it('aborts a never-settling manifest before any grant or session', async () => {
+    vi.useFakeTimers();
+    try {
+      let signal: AbortSignal | undefined;
+      const pending = Object.assign(new Promise<never>(() => {}), {
+        abortSignal(value: AbortSignal) {
+          signal = value;
+          return this;
+        },
+      });
+      const chain = {
+        select: () => chain,
+        eq: () => chain,
+        abortSignal: (value: AbortSignal) => {
+          signal = value;
+          return chain;
+        },
+        maybeSingle: () => pending,
+      };
+      fake.client.from = () => chain;
+      const result = composed().run(request, 'svid');
+      let failure: unknown;
+      void result.catch((error: unknown) => {
+        failure = error;
+      });
+      await vi.advanceTimersByTimeAsync(30_001);
+      expect(failure).toMatchObject({ reason: 'expired' });
+      expect(signal?.aborted).toBe(true);
+      expect(recorded).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it.each([0, 20_000])(
+    'withholds an uncertain record without a fresh window after %ims manifest time',
+    async (delay) => {
+      vi.useFakeTimers();
+      try {
+        const start = Date.now();
+        if (delay) {
+          const original = fake.client.from;
+          fake.client.from = (table) => {
+            const originalChain = original(table) as { select: (...args: unknown[]) => unknown };
+            if (table !== 'connectors') return originalChain;
+            const chain = {
+              select: () => chain,
+              eq: () => chain,
+              abortSignal: () => chain,
+              maybeSingle: () =>
+                Object.assign(
+                  new Promise((resolve) =>
+                    setTimeout(
+                      () =>
+                        resolve({
+                          data: { descriptor_id: SQL_DESCRIPTOR, status: 'active' },
+                          error: null,
+                        }),
+                      delay,
+                    ),
+                  ),
+                  {
+                    abortSignal() {
+                      return this;
+                    },
+                  },
+                ),
+            };
+            return chain;
+          };
+        }
+        let signal: AbortSignal | undefined;
+        const originalRpc = fake.client.rpc;
+        fake.client.rpc = (name, args) =>
+          name === 'record_connector_discovery'
+            ? Object.assign(new Promise<never>(() => {}), {
+                abortSignal(value: AbortSignal) {
+                  recorded.push(args);
+                  signal = value;
+                  return this;
+                },
+              })
+            : originalRpc(name, args);
+        const result = composed().run(request, 'svid');
+        let failure: unknown;
+        void result.catch((error: unknown) => {
+          failure = error;
+        });
+        await vi.advanceTimersByTimeAsync(29_999);
+        expect(recorded).toHaveLength(1);
+        expect(signal?.aborted).toBe(false);
+        await vi.advanceTimersByTimeAsync(2);
+        expect(failure).toMatchObject({ reason: 'expired' });
+        expect(signal?.aborted).toBe(true);
+        expect(Date.now() - start).toBe(30_001);
+        expect(recorded).toHaveLength(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+  it.each(['stop', 'revoked', 'connector_changed', 'identity_changed'])(
+    'withholds saved output when %s happens during terminal recording',
+    async (change) => {
+      const sessions = vi.fn(sqlSessions);
+      fake.onRpc('record_connector_discovery', (args) => {
+        recorded.push(args);
+        if (change === 'connector_changed')
+          fake.onRpc('resolve_sql_read_grant', () => ({
+            grantId: GRANT,
+            workloadId: '66666666-6666-4666-8666-666666666666',
+            agentName: 'drishti',
+            spiffeId: SPIFFE,
+            systemId: '77777777-7777-4777-8777-777777777777',
+            grantExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+            connectorVersion: 2,
+            descriptorSha256: 'b'.repeat(64),
+            endpointRef: 'crm_sql',
+            targetBinding: 'production',
+          }));
+        else if (change === 'identity_changed')
+          identity.verify.mockResolvedValue({
+            spiffeId: 'spiffe://axiom.test/agent/other',
+            expiresAt: Date.now() + 60_000,
+          });
+        else fake.onRpc('resolve_sql_read_grant', () => null);
+        return recordAnswer;
+      });
+      const service = new DiscoveryService(config, {
+        identity,
+        sqlSessions: sessions,
+        postgresqlOnly: true,
+        client: () => fake.client as never,
+      });
+      await expect(service.run(request, 'svid')).rejects.toThrow();
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]).toMatchObject({ p_grant_id: GRANT, p_spiffe_id: SPIFFE });
+      expect(sessions).toHaveBeenCalledTimes(1);
+    },
+  );
+});

@@ -105,7 +105,7 @@ export async function controllerBackendCredentials(
           const local =
             options.localHttp === true &&
             u.protocol === 'http:' &&
-            (['127.0.0.1', 'localhost'].includes(u.hostname) ||
+            (['127.0.0.1', 'localhost', 'host.docker.internal'].includes(u.hostname) ||
               /^[a-z0-9][a-z0-9_-]{0,62}$/.test(u.hostname));
           return (
             (u.protocol === 'https:' || local) && !u.username && !u.password && !u.search && !u.hash

@@ -23,7 +23,7 @@ export default async function ConnectorsPage() {
       .returns<ConnectorRow[]>(),
     ctx.supabase
       .from('estate_systems')
-      .select('id,name,status,estates!inner(name,status)')
+      .select('id,estate_id,name,status,estates!inner(name,status)')
       .eq('tenant_id', ctx.tenantId)
       .order('created_at')
       .returns<ConnectorSystem[]>(),
@@ -36,9 +36,10 @@ export default async function ConnectorsPage() {
         description="Check public website content or register access paths for estate systems. A registration does not grant agent access."
       />
       <p className="rounded border p-4 text-sm">
-        Private system connector execution is not yet available. The public website check below
-        fetches public HTML only; private credentials, live access grants and transport verification
-        remain separate steps.
+        Private production connector execution remains unavailable. Reviewed local PostgreSQL
+        sandbox discovery is available only for enrolled synthetic demo connections. The public
+        website check below fetches public HTML only; private credentials, live access grants and
+        transport verification remain separate steps.
       </p>
       <PublicWebsiteAssetInventory
         key={ctx.tenantId + ':' + ctx.userId}

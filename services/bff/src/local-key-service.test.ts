@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, realpath, rm, writeFile, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,6 +6,13 @@ import { join } from 'node:path';
 import { encodeLocalCustodyPolicy } from '@axiom/types';
 import { LocalKeyPolicy } from './workloads/local-key-policy.js';
 import { prepareLocalKeyService } from './local-key-service.js';
+
+const x509 = vi.hoisted(() => vi.fn());
+vi.mock('./workloads/local-x509-preflight.js', () => ({ requireLocalX509Material: x509 }));
+beforeEach(() => {
+  x509.mockReset();
+  x509.mockResolvedValue(undefined);
+});
 
 const tenant = '11111111-1111-4111-8111-111111111111',
   policyId = '22222222-2222-4222-8222-222222222222',
@@ -82,6 +89,17 @@ describe('local key service entrypoint', () => {
   it('passes --check for a policy-bound configuration', async () => {
     const prepared = await prepareLocalKeyService(['--check', await config()]);
     expect(prepared.mode).toBe('--check');
+  });
+  it('refuses --check when live own X509 material is invalid and creates no key', async () => {
+    x509.mockRejectedValueOnce(new Error('material refused'));
+    await expect(prepareLocalKeyService(['--check', await config()])).rejects.toThrow(
+      'startup refused',
+    );
+    expect(x509).toHaveBeenCalledWith(
+      expect.objectContaining({ spiffeId: 'spiffe://local.axiom/service/local-key-service' }),
+      'server',
+    );
+    expect(await readdir(join(root, 'keys'))).toEqual([]);
   });
   it('refuses a policy digest mismatch, unknown mode, or a peer outside the policy', async () => {
     await expect(

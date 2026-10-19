@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { verifyPublicControlSourceV2 } from './public-evidence-codec-v2.js';
 import {
-  PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT,
+  publicControlCatalogueManifestText,
   publicControlCatalogueV2Manifest,
   publicEvidenceCatalogueRowsMatchV2,
 } from '@axiom/control-library';
@@ -13,18 +13,16 @@ import {
   type PublicControlAssessmentV2,
 } from '@axiom/types';
 
-const canonicalText = PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT;
-const canonicalHash = createHash('sha256').update(canonicalText, 'utf8').digest('hex');
 const manifestSchema = z
   .object({
-    text: z.string().length(canonicalText.length),
+    text: z.string().min(2).max(1048576),
     sha256: z.string().regex(/^[a-f0-9]{64}$/),
   })
   .strict();
 const inputSchema = z
   .object({
     source: publicControlSourceV2Schema,
-    catalogueManifestText: z.string().length(canonicalText.length),
+    catalogueManifestText: z.string().min(2).max(1048576),
     catalogueManifestSha256: z.string().regex(/^[a-f0-9]{64}$/),
   })
   .strict();
@@ -103,6 +101,21 @@ export function evaluatePublicEvidenceV2(
   const request = inputSchema.safeParse(input);
   const retained = manifestSchema.safeParse(retainedPublishedManifest);
   if (!request.success || !retained.success) throw new Error('public_evidence_input_refused');
+  let libraryVersion: string;
+  try {
+    const parsed = JSON.parse(retained.data.text) as { provenance?: { libraryVersion?: unknown } };
+    if (typeof parsed.provenance?.libraryVersion !== 'string') throw Error();
+    libraryVersion = parsed.provenance.libraryVersion;
+  } catch {
+    throw new Error('public_evidence_catalogue_refused');
+  }
+  let canonicalText: string;
+  try {
+    canonicalText = publicControlCatalogueManifestText(libraryVersion);
+  } catch {
+    throw new Error('public_evidence_catalogue_refused');
+  }
+  const canonicalHash = createHash('sha256').update(canonicalText, 'utf8').digest('hex');
   if (
     request.data.catalogueManifestText !== retained.data.text ||
     request.data.catalogueManifestSha256 !== retained.data.sha256 ||
@@ -111,7 +124,7 @@ export function evaluatePublicEvidenceV2(
   )
     throw new Error('public_evidence_catalogue_refused');
   const source = verifyPublicControlSourceV2(request.data.source);
-  const manifest = publicControlCatalogueV2Manifest();
+  const manifest = publicControlCatalogueV2Manifest(libraryVersion);
   const result = publicControlAssessmentV2Schema.parse({
     version: 2,
     source,
@@ -140,7 +153,7 @@ export function evaluatePublicEvidenceV2(
     })),
     requiresHumanReview: true,
   });
-  if (!publicEvidenceCatalogueRowsMatchV2(result.controls))
+  if (!publicEvidenceCatalogueRowsMatchV2(result.controls, libraryVersion))
     throw new Error('public_evidence_catalogue_refused');
   freeze(result);
   return result;

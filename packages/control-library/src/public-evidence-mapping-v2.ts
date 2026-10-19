@@ -1,11 +1,4 @@
-import {
-  controls,
-  LIBRARY_VERSION,
-  LIBRARY_PUBLISHED_AT,
-  LIBRARY_PUBLISHER,
-  LIBRARY_BASELINE,
-  LIBRARY_DEFAULT_EFFECTIVE_FROM,
-} from './controls';
+import { resolveControlLibrary } from './library-versions';
 
 /** Schema-neutral catalogue foundation. The caller must validate its source using
  * the v2 public source codec, verify the published catalogue against this exact
@@ -101,7 +94,9 @@ const requirementFacets: Readonly<Record<string, readonly string[]>> = {
   'RTN-001/0': ['retention_statement'],
 };
 
-function createManifest() {
+export function createPublicControlCatalogueManifest(libraryVersion = '0.1.1') {
+  const library = resolveControlLibrary(libraryVersion);
+  const controls = library.controls;
   const controlIds = controls.map((c) => c.id.replace('DPDPA-', ''));
   if (
     controlIds.length !== 46 ||
@@ -128,11 +123,11 @@ function createManifest() {
     schemaVersion: 2,
     mappingVersion: 'public-evidence-1',
     provenance: {
-      libraryVersion: LIBRARY_VERSION,
-      publishedAt: LIBRARY_PUBLISHED_AT,
-      publisher: LIBRARY_PUBLISHER,
-      baseline: LIBRARY_BASELINE,
-      defaultEffectiveFrom: LIBRARY_DEFAULT_EFFECTIVE_FROM,
+      libraryVersion: library.version,
+      publishedAt: library.publishedAt,
+      publisher: library.publishedBy,
+      baseline: library.baseline,
+      defaultEffectiveFrom: library.defaultEffectiveFrom,
       perControlEffectiveDates: 'not_present_in_source',
       effectiveStatus: 'requires_assessment_date_and_legal_review',
       publicationVerification: 'requires_exact_published_catalogue_comparison',
@@ -165,7 +160,9 @@ function createManifest() {
 /** Codec: JSON.stringify of the construction above, UTF-8, no whitespace or newline.
  * This freezes full control rows, their order, questions and evidence requirements.
  * Consumers must not reserialize PostgreSQL JSONB and call that the same hash. */
-export const PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT = JSON.stringify(createManifest());
+export const PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT = JSON.stringify(
+  createPublicControlCatalogueManifest(),
+);
 
 export async function publicControlCatalogueV2ManifestSha256(): Promise<string> {
   const bytes = new TextEncoder().encode(PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT);
@@ -176,8 +173,12 @@ export async function publicControlCatalogueV2ManifestSha256(): Promise<string> 
 
 /** Fresh defensive copy: callers cannot mutate the frozen manifest text or
  * subsequently generated requirements. This is not a database publication proof. */
-export function publicControlCatalogueV2Manifest(): ReturnType<typeof createManifest> {
-  return JSON.parse(PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT) as ReturnType<typeof createManifest>;
+export function publicControlCatalogueV2Manifest(
+  libraryVersion = '0.1.1',
+): ReturnType<typeof createPublicControlCatalogueManifest> {
+  return JSON.parse(publicControlCatalogueManifestText(libraryVersion)) as ReturnType<
+    typeof createPublicControlCatalogueManifest
+  >;
 }
 
 /** Run after the strict v2 codec. Checks exact retained catalogue identities and
@@ -189,8 +190,9 @@ export function publicEvidenceCatalogueRowsMatchV2(
     questions: readonly { questionId: string }[];
     evidenceRequirements: readonly { index: number }[];
   }[],
+  libraryVersion = '0.1.1',
 ): boolean {
-  const expected = publicControlCatalogueV2Manifest().controls;
+  const expected = publicControlCatalogueV2Manifest(libraryVersion).controls;
   return (
     rows.length === expected.length &&
     rows.every((row, index) => {
@@ -208,4 +210,9 @@ export function publicEvidenceCatalogueRowsMatchV2(
       );
     })
   );
+}
+
+/** Exact versioned bytes; no publication or approval side effect. */
+export function publicControlCatalogueManifestText(libraryVersion: string): string {
+  return JSON.stringify(createPublicControlCatalogueManifest(libraryVersion));
 }

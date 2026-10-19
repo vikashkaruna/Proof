@@ -1,3 +1,4 @@
+import { ConnectorManifestSchema } from '../../../packages/types/src/connector-contracts';
 import { test, expect } from '@playwright/test';
 import { signIn, selectTenant, state, signInFreshOwner } from '../fixtures';
 
@@ -43,13 +44,20 @@ test('owner registers a connector without claiming connectivity and manages its 
       configurable: true,
     });
   });
+  const catalogueResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/bff/v1/connector-catalogue'),
+  );
   await page.goto('/connectors');
+  const catalogue = await catalogueResponse;
+  expect(catalogue.status()).toBe(200);
+  const catalogueBody = (await catalogue.json()) as { data?: unknown };
+  expect(ConnectorManifestSchema.array().safeParse(catalogueBody.data).success).toBe(true);
   await expect(page.getByRole('region', { name: 'Available connector options' })).toContainText(
     'postgresql',
   );
   const setup = page.getByRole('region', { name: 'Connection setup' });
   await expect(setup).toContainText(
-    'Private system connections are not available in this deployment.',
+    'Reviewed local PostgreSQL sandbox discovery appears on eligible registrations when configured.',
   );
   await expect(setup).toContainText('Connector registrations save setup records only');
   await expect(setup.getByRole('link', { name: 'Continue with manual evidence' })).toHaveAttribute(

@@ -28,6 +28,33 @@ const configuration = z
 const response = z.object({ bundles: z.record(z.string(), z.instanceof(Buffer)) }).strict();
 const freshnessMs = 10000;
 
+/** SPIRE may serialize its key map in a different order on every fetch. Bind
+ * the complete validated multiset, including duplicate count and all accepted
+ * key metadata, while ignoring only JSON field/key-array order and whitespace.
+ * A conflicting kid cannot unambiguously identify a trusted signing key.
+ */
+function bundleRevision(domain: string, bundle: z.output<typeof jwtPublicBundle>): string {
+  const byKid = new Map<string, string>();
+  const entries = bundle.keys.map((key) => {
+    const canonical = JSON.stringify(
+      Object.fromEntries(
+        Object.entries(key).sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+      ),
+    );
+    if (key.kid !== undefined) {
+      const prior = byKid.get(key.kid);
+      if (prior !== undefined && prior !== canonical) throw new Error('Ambiguous public key');
+      byKid.set(key.kid, canonical);
+    }
+    return canonical;
+  });
+  return createHash('sha256')
+    .update(domain)
+    .update('\0')
+    .update(JSON.stringify({ keys: entries.sort() }))
+    .digest('hex');
+}
+
 /** Explicit trusted VM-controller composition only. The local socket and its
  * parent/mount must be controlled by the trusted node, never by a job. Each
  * operation opens a bounded FetchJWTBundles stream and consumes its first full
@@ -78,10 +105,9 @@ export class WorkloadApiJwtTrust implements JwtTrustSource {
       const parsed = jwtPublicBundle.parse(
         JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)),
       );
-      // Byte fingerprint conservatively rejects even formatting-only changes.
       // Include the selected domain to prevent cross-domain receipt reuse.
       return Object.freeze({
-        revision: createHash('sha256').update(trustDomain).update('\0').update(bytes).digest('hex'),
+        revision: bundleRevision(trustDomain, parsed),
         validUntil: started + freshnessMs,
         jwks: parsed,
       });

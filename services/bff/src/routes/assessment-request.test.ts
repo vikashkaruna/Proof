@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import {
   UserRole,
   AssessmentRequestReceiptSchema,
+  AssessmentSourceRefusalSchema,
   ASSESSMENT_REQUEST_MAX_BYTES,
 } from '@axiom/types';
 import { assessmentRequestRoutes } from './assessment-request.js';
@@ -227,6 +228,7 @@ it.each([true, false, undefined])(
       configuration:
         configured === undefined ? 'unknown' : configured ? 'configured' : 'unconfigured',
       executionReadiness: 'not_verified',
+      sourceRequirement: 'unknown',
     });
     expect(producer.request).not.toHaveBeenCalled();
   },
@@ -244,6 +246,7 @@ it('reports absent producer without secrets and refuses agent configuration read
     tenantId: TENANT,
     configuration: 'unconfigured',
     executionReadiness: 'not_verified',
+    sourceRequirement: 'unknown',
   });
   const agent = new Hono<{ Variables: Variables }>();
   agent.use('*', async (c, next) => {
@@ -254,4 +257,49 @@ it('reports absent producer without secrets and refuses agent configuration read
   });
   agent.route('/v1', assessmentRequestRoutes());
   expect((await agent.request('/v1/assessment/configuration')).status).toBe(403);
+});
+
+it('returns an exact definite source refusal only when the trusted producer establishes it', async () => {
+  const { send } = fixture({
+    request: vi.fn(async () => {
+      throw new AssessmentContextRefused('assessment_public_control_review_required');
+    }),
+  });
+  const r = await send();
+  expect(r.status).toBe(409);
+  const v = await r.json();
+  expect(v).toMatchObject({
+    error: {
+      code: 'assessment_public_control_review_required',
+      tenantId: TENANT,
+      actorId: ACTOR,
+      engagementId: ENGAGEMENT,
+      operationKey: JOB,
+      dispatchState: 'not_recorded',
+      sourceRequirement: 'public_control_review_required',
+    },
+  });
+  expect(
+    AssessmentSourceRefusalSchema.parse((v as { error: unknown }).error).requestText,
+  ).toContain(JOB);
+});
+it('reads configured source requirement without implying execution readiness', async () => {
+  const producer = {
+    configurationForTenant: () => true,
+    sourceRequirementForTenant: async () => 'public_control_review_required' as const,
+    request: vi.fn(),
+  };
+  const app = new Hono<{ Variables: Variables }>();
+  app.use('*', async (c, next) => {
+    c.set('tenantId', TENANT as never);
+    c.set('role', UserRole.OWNER);
+    await next();
+  });
+  app.route('/v1', assessmentRequestRoutes(producer));
+  const r = await app.request('/v1/assessment/configuration');
+  expect(await r.json()).toMatchObject({
+    sourceRequirement: 'public_control_review_required',
+    executionReadiness: 'not_verified',
+  });
+  expect(producer.request).not.toHaveBeenCalled();
 });

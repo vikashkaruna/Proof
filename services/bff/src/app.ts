@@ -1,3 +1,4 @@
+import type { DiscoveryRequestController } from './routes/postgresql-discovery.js';
 import type { publicWebsiteCheckRoutes } from './routes/public-website-checks.js';
 import { createConfiguredOwnedSynthetic } from './services/owned-synthetic-composition.js';
 import type { OwnedSyntheticRouteDeps } from './routes/owned-synthetic-plans.js';
@@ -7,7 +8,6 @@ import {
   evidenceControllerRpc,
 } from './services/saakshi-staging-composition.js';
 import { discoveryRoutes } from './routes/discovery.js';
-import type { DiscoveryService } from './connectors/discovery.js';
 import { Hono } from 'hono';
 import { PUBLIC_CONTROL_REVIEW_MAX_BYTES } from '@axiom/types';
 import { logger } from 'hono/logger';
@@ -52,11 +52,12 @@ import { offlineLicenseGate } from './middleware/offline-license.js';
  */
 export function createApp(
   options: {
+    discoveryController?: DiscoveryRequestController;
     ownedSynthetic?: OwnedSyntheticRouteDeps | null;
     assessmentTools?: AssessmentTools;
     assessmentRequests?: AssessmentRequestProducer;
     publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
-    discovery?: Pick<DiscoveryService, 'run'>;
+    discovery?: NonNullable<Parameters<typeof discoveryRoutes>[0]>;
     licensePublicKeyPem?: string;
   } = {},
 ) {
@@ -203,6 +204,7 @@ export function createApp(
       mfa,
       realtime,
       assessmentRequests: options.assessmentRequests,
+      discoveryController: options.discoveryController,
       publicWebsiteCapture: options.publicWebsiteCapture,
       ownedSynthetic,
       stagedEvidence: {

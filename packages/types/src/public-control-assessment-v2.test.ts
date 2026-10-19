@@ -319,3 +319,13 @@ it('retains multilingual text and valid emoji without Unicode normalization', ()
     input.candidates[0]!.excerpt,
   );
 });
+
+it('binds each public-evidence baseline to its supported catalogue version', () => {
+  const candidate = assessment();
+  candidate.catalogue.libraryVersion = '0.2.0';
+  expect(publicControlAssessmentV2Schema.safeParse(candidate).success).toBe(false);
+  candidate.catalogue.baseline = 'IN-DPDP@2026-10-17';
+  expect(publicControlAssessmentV2Schema.safeParse(candidate).success).toBe(true);
+  candidate.catalogue.libraryVersion = '0.1.1';
+  expect(publicControlAssessmentV2Schema.safeParse(candidate).success).toBe(false);
+});

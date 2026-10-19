@@ -135,9 +135,32 @@ def plan(root: Path = ROOT) -> dict:
         "catalogue_registry159_suite_required",
     )
     need(
+        versions[-1] < 162 or "catalogue-current-version.test.sql" in files,
+        "catalogue_current162_suite_required",
+    )
+    need(
+        versions[-1] < 161 or "catalogue-founder-approval.test.sql" in files,
+        "catalogue_founder161_suite_required",
+    )
+    need(
         versions[-1] < 160 or "catalogue-dispatch-downstream.test.sql" in files,
         "catalogue_dispatch160_suite_required",
     )
+    for minimum, suites, code in (
+        (163, {"postgresql-sandbox-discovery.test.sql"}, "sandbox163_suite_required"),
+        (
+            164,
+            {"full-closure-lifecycle.test.sql", "full-closure-source-graph.test.sql"},
+            "closure164_suites_required",
+        ),
+        (
+            165,
+            {"postgresql-discovery-requests.test.sql"},
+            "discovery165_suite_required",
+        ),
+        (166, {"owned-postgres-target.test.sql"}, "owned_target166_suite_required"),
+    ):
+        need(versions[-1] < minimum or suites <= set(files), code)
     return {
         "currentVersion": versions[-1],
         "historical143": list(HISTORICAL),

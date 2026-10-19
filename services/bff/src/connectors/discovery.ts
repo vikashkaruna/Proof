@@ -7,7 +7,12 @@ import type { CredentialBroker } from './broker/broker.js';
 import { connectorRegistry } from './registry.js';
 import { GraphqlReadConnector } from './rest/graphql-read.js';
 import { RestEndpointSchema, RestReadConnector, type Fetch } from './rest/rest-read.js';
-import { SqlDiscoveryGate } from './sql/grant-gate.js';
+import {
+  SqlDiscoveryGate,
+  SqlDiscoveryBindingSchema,
+  type SqlDiscoveryBinding,
+} from './sql/grant-gate.js';
+import { PostgresDeadline, PostgresDeadlineExceeded } from './sql/postgres-deadline.js';
 import type { SqlSessionFactory } from './sql/postgres-read.js';
 import {
   SqlEndpointSchema,
@@ -50,7 +55,12 @@ export const DiscoveryConfigurationSchema = z
     sql: z
       .array(
         z
-          .object({ tenantId: z.uuid(), connectorId: z.uuid(), endpoint: SqlEndpointSchema })
+          .object({
+            tenantId: z.uuid(),
+            connectorId: z.uuid(),
+            endpoint: SqlEndpointSchema,
+            binding: SqlDiscoveryBindingSchema.optional(),
+          })
           .strict(),
       )
       .max(1000)
@@ -79,6 +89,7 @@ const key = (tenantId: string, connectorId: string) =>
  */
 export class DiscoveryService {
   readonly #sqlEndpoints = new Map<string, z.infer<typeof SqlEndpointSchema>>();
+  readonly #sqlBindings = new Map<string, SqlDiscoveryBinding>();
   readonly #httpEndpoints = new Map<string, z.infer<typeof RestEndpointSchema>>();
 
   constructor(
@@ -91,12 +102,23 @@ export class DiscoveryService {
       fetchImpl?: Fetch;
       client?: typeof createSupabaseAdmin;
       registry?: ReadonlyMap<string, ConnectorManifest>;
+      /** Trusted PostgreSQL composition only; never supplied by a request. */
+      postgresqlOnly?: true;
+      sandboxConfigurations?: ReadonlyMap<string, string>;
     },
   ) {
     const config = DiscoveryConfigurationSchema.parse(configuration);
     for (const entry of config.sql) {
       if (this.#sqlEndpoints.has(key(entry.tenantId, entry.connectorId)))
         throw new Error('duplicate endpoint');
+      if (entry.binding) {
+        if (
+          entry.binding.tenantId !== entry.tenantId.toLowerCase() ||
+          entry.binding.connectorId !== entry.connectorId.toLowerCase()
+        )
+          throw new Error('SQL binding mismatch');
+        this.#sqlBindings.set(key(entry.tenantId, entry.connectorId), Object.freeze(entry.binding));
+      }
       this.#sqlEndpoints.set(key(entry.tenantId, entry.connectorId), entry.endpoint);
     }
     for (const entry of config.http) {
@@ -110,13 +132,16 @@ export class DiscoveryService {
     return (this.deps.client ?? createSupabaseAdmin)();
   }
 
-  private async manifest(request: DiscoveryRequest): Promise<ConnectorManifest> {
-    const { data, error } = await this.db()
+  private async manifest(
+    request: DiscoveryRequest,
+    signal?: AbortSignal,
+  ): Promise<ConnectorManifest> {
+    const pending = this.db()
       .from('connectors')
       .select('descriptor_id,status')
       .eq('tenant_id', request.tenantId)
-      .eq('id', request.connectorId)
-      .maybeSingle();
+      .eq('id', request.connectorId);
+    const { data, error } = await (signal ? pending.abortSignal(signal) : pending).maybeSingle();
     if (error || !data || data.status !== 'active')
       throw new DiscoveryRefused('connector_unavailable');
     const manifest = (this.deps.registry ?? connectorRegistry).get(String(data.descriptor_id));
@@ -143,10 +168,45 @@ export class DiscoveryService {
     };
   }
 
-  async run(input: unknown, workloadProof: string) {
+  async run(
+    input: unknown,
+    workloadProof: string,
+    signal?: AbortSignal,
+    retainedCorrelationId?: string,
+  ) {
     const request = DiscoveryRequestSchema.parse(input);
-    const correlationId = randomUUID();
-    const manifest = await this.manifest(request);
+    const scope = this.deps.postgresqlOnly
+      ? new PostgresDeadline(Date.now() + 30_000, Date.now, signal)
+      : undefined;
+    try {
+      if (scope) {
+        const workload = await scope.run(() => this.deps.identity.verify(workloadProof));
+        scope.tighten(workload.expiresAt);
+      }
+      return await this.execute(request, workloadProof, scope, retainedCorrelationId);
+    } catch (error) {
+      if (error instanceof PostgresDeadlineExceeded) throw new DiscoveryRefused('expired');
+      throw error;
+    } finally {
+      scope?.abort();
+      scope?.dispose();
+    }
+  }
+
+  private async execute(
+    request: DiscoveryRequest,
+    workloadProof: string,
+    scope?: PostgresDeadline,
+    retainedCorrelationId?: string,
+  ) {
+    const wait = <T>(operation: () => PromiseLike<T>) =>
+      scope ? scope.run(operation) : Promise.resolve(operation());
+    const correlationId =
+      retainedCorrelationId === undefined ? randomUUID() : z.uuid().parse(retainedCorrelationId);
+    const manifest = await wait(() => this.manifest(request, scope?.signal));
+    if (scope && (manifest.transport !== 'sql' || manifest.target !== 'postgresql'))
+      throw new DiscoveryRefused('engine_unsupported');
+    let checkRelease: (() => Promise<void>) | undefined;
     let outcome: { result: ConnectorResult; grantId: string; spiffeId: string };
     if (manifest.transport === 'sql') {
       // The engine comes from the reviewed descriptor's target, never from the
@@ -160,6 +220,13 @@ export class DiscoveryService {
       if (!engine) throw new DiscoveryRefused('engine_unsupported');
       const endpoint = this.#sqlEndpoints.get(key(request.tenantId, request.connectorId));
       if (!endpoint) throw new DiscoveryRefused('endpoint_unconfigured');
+      const binding = this.#sqlBindings.get(key(request.tenantId, request.connectorId));
+      if (
+        binding &&
+        (manifest.id.toLowerCase() !== binding.descriptorId ||
+          manifest.targetBinding !== binding.targetBinding)
+      )
+        throw new DiscoveryRefused('descriptor_unreviewed');
       const sessions =
         this.deps.sqlSessions ??
         (engine === 'mysql'
@@ -174,14 +241,25 @@ export class DiscoveryService {
       const gate = new SqlDiscoveryGate(this.deps.identity, sessions, {
         client: this.deps.client,
         engine,
+        binding,
+        originalDeadline: scope?.expiresAt,
+        signal: scope?.signal,
+        operation: request.operation,
+        sandboxConfigurationSha256: this.deps.sandboxConfigurations?.get(
+          key(request.tenantId, request.connectorId),
+        ),
       });
-      const { result, grant } = await gate.discover(
+      const { result, grant, deadline } = await gate.discover(
         { ...request, correlationId, workloadProof },
         (connector, context) =>
           request.operation === 'enumerate'
             ? connector.enumerate(context, request.cursor)
             : connector.sample(context, request.resource!, request.limit!),
       );
+      scope?.tighten(deadline);
+      if (scope)
+        checkRelease = () =>
+          gate.revalidate({ ...request, correlationId, workloadProof }, grant, scope.expiresAt);
       outcome = { result, grantId: grant.grantId, spiffeId: grant.spiffeId };
     } else if (manifest.transport === 'rest' || manifest.transport === 'graphql') {
       const endpoint = this.#httpEndpoints.get(key(request.tenantId, request.connectorId));
@@ -226,7 +304,7 @@ export class DiscoveryService {
       outcome = { result, grantId: before.grantId, spiffeId: before.spiffeId };
     } else throw new DiscoveryRefused('transport_unsupported');
 
-    const { data, error } = await this.db().rpc('record_connector_discovery', {
+    const pendingRecord = this.db().rpc('record_connector_discovery', {
       p_tenant_id: request.tenantId,
       p_connector_id: request.connectorId,
       p_grant_id: outcome.grantId,
@@ -236,7 +314,13 @@ export class DiscoveryService {
       p_result: outcome.result.records,
       p_correlation_id: correlationId,
     });
+    const { data, error } = await wait(() =>
+      scope ? pendingRecord.abortSignal(scope.signal) : pendingRecord,
+    );
     if (error || !data || data.error || !data.run) throw new DiscoveryRefused('unrecorded');
+    // Recording can await a database roundtrip. Its durable receipt does not
+    // establish current stop/lifecycle/identity authority to release data.
+    if (checkRelease) await wait(checkRelease);
     return { run: data.run, records: outcome.result.records, cursor: outcome.result.cursor };
   }
 }

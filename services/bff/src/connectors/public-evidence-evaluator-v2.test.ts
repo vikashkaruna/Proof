@@ -313,3 +313,24 @@ it.each(['payload', 'hash'])('rejects a mutated actual projection %s', (mode) =>
     'public_evidence_codec_refused',
   );
 });
+
+it('evaluates the exact corrected-version manifest without substituting legacy controls', async () => {
+  const { publicControlCatalogueManifestText } = await import('@axiom/control-library');
+  const text = publicControlCatalogueManifestText('0.2.0');
+  const sha256 = createHash('sha256').update(text).digest('hex');
+  const result = evaluatePublicEvidenceV2(
+    { source: request().source, catalogueManifestText: text, catalogueManifestSha256: sha256 },
+    { text, sha256 },
+  );
+  expect(result.catalogue.libraryVersion).toBe('0.2.0');
+  expect(result.catalogue.manifestSha256).toBe(
+    '3bfc2044ceaab0275caf528c932a2a0a5f314fab776c03b51037a78ca812437e',
+  );
+  expect(result.controls).toHaveLength(46);
+  expect(() =>
+    evaluatePublicEvidenceV2(
+      { source: source(), catalogueManifestText: text, catalogueManifestSha256: sha256 },
+      { text: PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT, sha256 },
+    ),
+  ).toThrow('public_evidence_catalogue_refused');
+});

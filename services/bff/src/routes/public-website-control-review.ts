@@ -6,8 +6,8 @@ import { createSupabaseAdmin } from '@axiom/supabase';
 import { canonicalJson } from '@axiom/ledger';
 import { Capability } from '@axiom/types';
 import {
-  buildLibrarySeed,
-  PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT,
+  buildLibrarySeedForVersion,
+  publicControlCatalogueManifestText,
 } from '@axiom/control-library';
 import { readPublicEvidenceV2 } from '../connectors/public-evidence-codec-v2.js';
 import { evaluatePublicEvidenceV2 } from '../connectors/public-evidence-evaluator-v2.js';
@@ -69,7 +69,7 @@ export function decodeRetainedPublicWebsiteReview(
     data.checkId !== scope.checkId
   )
     throw new Error('scope');
-  const seed = buildLibrarySeed();
+  const seed = buildLibrarySeedForVersion(data.libraryVersion);
   if (
     data.libraryVersion !== seed.version ||
     data.library.published_by !== seed.publishedBy ||
@@ -106,7 +106,7 @@ export function decodeRetainedPublicWebsiteReview(
     )
       throw new Error('source');
   }
-  const text = PUBLIC_CONTROL_CATALOGUE_V2_MANIFEST_TEXT;
+  const text = publicControlCatalogueManifestText(data.libraryVersion);
   const sha256 = hash(text);
   const assessment = evaluatePublicEvidenceV2(
     { source, catalogueManifestText: text, catalogueManifestSha256: sha256 },

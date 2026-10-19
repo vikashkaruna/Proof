@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { AssessmentConfigurationSchema } from '../../../packages/types/src/assessment-request';
 /**
  * E2E: Agent ↔ UI communication.
  *
@@ -218,21 +218,47 @@ test('assessment waits for confirmation and never invents score improvements or 
     expect(response.status()).toBe(200);
     // Unknown/malformed metadata must fail this fixture contract, not silently
     // enter the unconfigured branch or simulate a working producer.
-    const configuration = z
-      .object({
-        tenantId: z.uuid(),
-        configuration: z.enum(['configured', 'unconfigured']),
-        executionReadiness: z.literal('not_verified'),
-      })
-      .strict()
-      .parse(await response.json());
+    const configuration = AssessmentConfigurationSchema.parse(await response.json());
+    expect(configuration.configuration).not.toBe('unknown');
     expect(configuration.tenantId).toBe(state.tenantA.id);
-    return configuration.configuration;
+    return configuration;
   };
   const configuration = await readConfiguration();
   await page.clock.install();
+  if (configuration.sourceRequirement !== 'questionnaire_or_public_review') {
+    const requestPanel = page.getByRole('region', { name: 'Request a saved assessment' });
+    const verifyWithheld = async () => {
+      await expect(requestPanel.getByRole('checkbox')).toHaveCount(0);
+      await expect(
+        requestPanel.getByRole('button', { name: 'Request unknown-answer assessment' }),
+      ).toHaveCount(0);
+      await expect(requestPanel.getByRole('link', { name: /Open Discovery/ })).toHaveAttribute(
+        'href',
+        '/discovery',
+      );
+      await expect(requestPanel).toContainText(
+        configuration.sourceRequirement === 'public_control_review_required'
+          ? 'This deployment accepts assessments only from a saved public-control human review.'
+          : 'The deployment’s accepted source requirement could not be verified.',
+      );
+      for (const agent of ['parikshan', 'drishti', 'vibhaag', 'saakshi', 'prativedan'])
+        await expect(page.getByTestId(`pipeline-${agent}`)).toHaveAttribute(
+          'data-state',
+          'not-run',
+        );
+      expect(await page.getByTestId('assessment-summary').innerText()).toBe(summary);
+      expect(posts).toBe(0);
+    };
+    await verifyWithheld();
+    await page.clock.fastForward(7000);
+    await verifyWithheld();
+    await page.reload();
+    expect(await readConfiguration()).toEqual(configuration);
+    await verifyWithheld();
+    return;
+  }
   await page.getByRole('checkbox', { name: /every answer and applicability flag/ }).check();
-  if (configuration === 'unconfigured') {
+  if (configuration.configuration === 'unconfigured') {
     // Production-container acceptance deliberately has no producer. Exercise
     // its real SSR/API refusal rather than claiming mocked job replies prove
     // dispatch. Local owned SSR metadata fixtures exercise the full configured
@@ -251,7 +277,7 @@ test('assessment waits for confirmation and never invents score improvements or 
     expect(await page.getByTestId('assessment-summary').innerText()).toBe(summary);
     expect(posts).toBe(0);
     await page.reload();
-    expect(await readConfiguration()).toBe('unconfigured');
+    expect((await readConfiguration()).configuration).toBe('unconfigured');
     await expect(button).toBeDisabled();
     await expect(
       page.getByText(/Assessment requests are not configured for this organisation\./),

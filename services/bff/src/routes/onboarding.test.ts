@@ -50,14 +50,16 @@ beforeEach(() => {
   state.rpc.mockImplementation(async (name: string) =>
     name === 'take_rate_limit'
       ? { data: { allowed: true, retry_after: 3600 }, error: null }
-      : {
-          data: {
-            tenant: { id: TENANT },
-            engagement: { id: ENGAGEMENT },
-            intake: { proposed_system_count: 1, status: 'pending_estate_setup' },
+      : name === 'read_current_catalogue_version'
+        ? { data: { version: LIBRARY_VERSION }, error: null }
+        : {
+            data: {
+              tenant: { id: TENANT },
+              engagement: { id: ENGAGEMENT },
+              intake: { proposed_system_count: 1, status: 'pending_estate_setup' },
+            },
+            error: null,
           },
-          error: null,
-        },
   );
 });
 describe('atomic entitled onboarding', () => {
@@ -76,7 +78,7 @@ describe('atomic entitled onboarding', () => {
       expect.objectContaining({ p_subject: USER }),
     );
     expect(state.rpc).toHaveBeenNthCalledWith(
-      2,
+      3,
       'onboard_organization',
       expect.objectContaining({
         p_user_id: USER,
@@ -98,6 +100,7 @@ describe('atomic entitled onboarding', () => {
   ] as const)('maps %s without creating partial records', async (error, status, message) => {
     state.rpc
       .mockResolvedValueOnce({ data: { allowed: true, retry_after: 3600 }, error: null })
+      .mockResolvedValueOnce({ data: { version: LIBRARY_VERSION }, error: null })
       .mockResolvedValueOnce({ data: { error }, error: null });
     const response = await request();
     expect(response.status).toBe(status);
@@ -119,6 +122,7 @@ describe('atomic entitled onboarding', () => {
   it('does not report creation when the database transaction fails', async () => {
     state.rpc
       .mockResolvedValueOnce({ data: { allowed: true, retry_after: 3600 }, error: null })
+      .mockResolvedValueOnce({ data: { version: LIBRARY_VERSION }, error: null })
       .mockResolvedValueOnce({ data: null, error: { code: 'P0001' } });
     expect((await request()).status).toBe(503);
   });
@@ -133,4 +137,22 @@ describe('atomic entitled onboarding', () => {
     ).toBe(400);
     expect(state.rpc).not.toHaveBeenCalled();
   });
+});
+
+it('pins new organization intake to the recorded approved current version', async () => {
+  state.rpc
+    .mockResolvedValueOnce({ data: { allowed: true, retry_after: 3600 }, error: null })
+    .mockResolvedValueOnce({ data: { version: '0.2.0' }, error: null });
+  expect((await request()).status).toBe(201);
+  expect(state.rpc).toHaveBeenLastCalledWith(
+    'onboard_organization',
+    expect.objectContaining({ p_library_version: '0.2.0' }),
+  );
+});
+it('refuses onboarding when the current approved catalogue cannot be read', async () => {
+  state.rpc
+    .mockResolvedValueOnce({ data: { allowed: true, retry_after: 3600 }, error: null })
+    .mockResolvedValueOnce({ data: null, error: { code: '23514' } });
+  expect((await request()).status).toBe(503);
+  expect(state.rpc.mock.calls.some(([name]) => name === 'onboard_organization')).toBe(false);
 });
