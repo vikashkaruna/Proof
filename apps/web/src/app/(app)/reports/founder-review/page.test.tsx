@@ -20,21 +20,17 @@ beforeEach(() => {
   state.internal = true;
   state.live = true;
   state.error = null;
-  state.rpc
-    .mockReset()
-    .mockImplementation(() => ({
-      abortSignal: async () => ({ data: state.live, error: state.error }),
-    }));
-  state.context
-    .mockReset()
-    .mockImplementation(async () => ({
-      tenantId: 'tenant',
-      userId: 'actor',
-      tenantName: 'Selected organization',
-      role: state.role,
-      isAxiomInternal: state.internal,
-      supabase: { rpc: state.rpc },
-    }));
+  state.rpc.mockReset().mockImplementation(() => ({
+    abortSignal: async () => ({ data: state.live, error: state.error }),
+  }));
+  state.context.mockReset().mockImplementation(async () => ({
+    tenantId: 'tenant',
+    userId: 'actor',
+    tenantName: 'Selected organization',
+    role: state.role,
+    isAxiomInternal: state.internal,
+    supabase: { rpc: state.rpc },
+  }));
 });
 it.each([
   UserRole.OWNER,
