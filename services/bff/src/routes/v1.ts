@@ -1,5 +1,8 @@
 import { monitoringReadScopeRoutes } from './monitoring-read-scopes.js';
-import { prativedanAccountedDraftRoutes, type PrativedanPrivateClient } from './prativedan-accounted-drafts.js';
+import {
+  prativedanAccountedDraftRoutes,
+  type PrativedanPrivateClient,
+} from './prativedan-accounted-drafts.js';
 import {
   postgresqlDiscoveryRoutes,
   type DiscoveryRequestController,
@@ -258,7 +261,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', evidenceRoutes());
   app.route('/', evidencePackRoutes());
   app.route('/', boardReportRoutes());
-  app.route('/', prativedanAccountedDraftRoutes({mfa:deps.mfa,client:deps.prativedan}));
+  app.route('/', prativedanAccountedDraftRoutes({ mfa: deps.mfa, client: deps.prativedan }));
   app.route('/', dpbReportRoutes());
   app.route('/', technicalReportRoutes());
   app.route('/', w2ParityRoutes());
