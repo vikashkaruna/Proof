@@ -215,3 +215,68 @@ it('offers explicit choose or create recovery for an unreadable selected assessm
   ).toBe('/engagements');
   expect(screen.queryByRole('button', { name: 'Submit reviewed questionnaire' })).toBeNull();
 });
+
+function scheduledSnapshot(): AssessmentSnapshot {
+  return {
+    ...snapshot,
+    exposureInr: null,
+    controls: snapshot.controls.map((control) => ({
+      ...control,
+      score: null,
+      status: 'unknown',
+      answerState: 'unknown',
+      applicabilityState: 'unknown',
+    })),
+    summary: { pass: 0, partial: 0, fail: 0, unassessed: 0, unknown: 2 },
+    scheduledCoverage: {
+      tenantId: snapshot.tenantId,
+      engagementId: snapshot.engagement!.id,
+      runId: '33333333-3333-4333-8333-333333333333',
+      fireId: '44444444-4444-4444-8444-444444444444',
+      scopeId: '55555555-5555-4555-8555-555555555555',
+      scopeReceiptId: '123',
+      discoveryId: '66666666-6666-4666-8666-666666666666',
+      discoveryResultSha256: 'a'.repeat(64),
+      basis: 'technical_provenance_only',
+      declarationPolicy: 'all_business_facts_unknown',
+    },
+  };
+}
+it('explains a matching trusted scheduled source without asserting business compliance', () => {
+  render(<AssessmentClient snapshot={scheduledSnapshot()} />);
+  const notice = screen.getByRole('region', { name: 'Scheduled technical coverage' });
+  expect(notice.textContent).toContain('technical observations only');
+  expect(notice.textContent).toContain('Unknown');
+  expect(notice.textContent).toContain('Scores and exposure are withheld');
+  expect(notice.textContent).toContain('not a compliance status');
+  expect(notice.textContent).not.toContain(snapshot.tenantId);
+  expect(screen.getByTestId('assessment-questionnaire-provenance').textContent).not.toContain(
+    'provisional estimates',
+  );
+});
+it('does not relabel an ordinary saved source as scheduled coverage', () => {
+  render(<AssessmentClient snapshot={snapshot} />);
+  expect(screen.queryByRole('region', { name: 'Scheduled technical coverage' })).toBeNull();
+  expect(screen.queryByText(/source basis for this saved result could not be verified/)).toBeNull();
+});
+it.each(['malformed', 'foreign_tenant', 'other_engagement'] as const)(
+  'refuses a technical-source claim for %s coverage metadata',
+  (kind) => {
+    const value = scheduledSnapshot();
+    const coverage = value.scheduledCoverage!;
+    if (kind === 'foreign_tenant') coverage.tenantId = '77777777-7777-4777-8777-777777777777';
+    if (kind === 'other_engagement') coverage.engagementId = '77777777-7777-4777-8777-777777777777';
+    const input =
+      kind === 'malformed'
+        ? ({
+            ...value,
+            scheduledCoverage: { ...coverage, basis: 'untrusted' },
+          } as unknown as AssessmentSnapshot)
+        : value;
+    render(<AssessmentClient snapshot={input} />);
+    expect(screen.queryByRole('region', { name: 'Scheduled technical coverage' })).toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain(
+      'source basis for this saved result could not be verified',
+    );
+  },
+);

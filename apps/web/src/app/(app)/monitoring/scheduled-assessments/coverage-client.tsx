@@ -720,6 +720,14 @@ export function CoverageClient({ tenantId, actorId }: { tenantId: string; actorI
                     business facts remain Unknown.
                   </p>
                 )}
+                {f.state === 'finalized' && f.resultDigest && f.runId && f.receiptId && (
+                  <Link
+                    href={`/assessment?engagement=${encodeURIComponent(f.engagementId)}`}
+                    className="inline-block font-medium text-teal-700 underline"
+                  >
+                    View saved assessment
+                  </Link>
+                )}
               </article>
             ))}
           </section>

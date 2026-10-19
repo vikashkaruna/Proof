@@ -392,3 +392,42 @@ it('refuses fresh requests without Web Locks before fetching or preparing author
     screen.queryByRole('button', { name: 'Retain owner assessment authorization' }),
   ).toBeNull();
 });
+
+it('links an exact finalized fire to its saved assessment without starting another request', async () => {
+  const { context } = fixture();
+  context.fires.push({
+    tenantId: id(3),
+    fireId: id(50),
+    state: 'finalized',
+    engagementId: id(51),
+    jobId: id(52),
+    runId: id(53),
+    receiptId: '123',
+    resultDigest: 'a'.repeat(64),
+  });
+  vi.mocked(requestCoverage).mockResolvedValue({ data: context });
+  mount();
+  const link = await screen.findByRole('link', { name: 'View saved assessment' });
+  expect(link.getAttribute('href')).toBe(`/assessment?engagement=${id(51)}`);
+  expect(requestCoverage).toHaveBeenCalledTimes(1);
+});
+it.each(['queued', 'handed_off', 'dispatched', 'refused', 'unconfirmed'] as const)(
+  'does not offer a saved result for a %s fire',
+  async (state) => {
+    const { context } = fixture();
+    context.fires.push({
+      tenantId: id(3),
+      fireId: id(50),
+      state,
+      engagementId: id(51),
+      jobId: id(52),
+      runId: state === 'dispatched' ? id(53) : null,
+      receiptId: state === 'dispatched' ? '123' : null,
+      resultDigest: null,
+    });
+    vi.mocked(requestCoverage).mockResolvedValue({ data: context });
+    mount();
+    await screen.findByText(`Recorded state: ${state}`);
+    expect(screen.queryByRole('link', { name: 'View saved assessment' })).toBeNull();
+  },
+);
