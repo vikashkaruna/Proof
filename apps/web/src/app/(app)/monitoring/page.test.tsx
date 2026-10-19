@@ -6,11 +6,12 @@ import MonitoringPage from './page';
 const state = vi.hoisted(() => ({
   results: {} as Record<string, { data: unknown[] | null; error: Error | null }>,
   calls: [] as Array<[string, string, unknown]>,
+  role: 'viewer',
 }));
 vi.mock('@/lib/tenant-context', () => ({
   requireCapabilityContext: async () => ({
     tenantId: 'tenant-1',
-    role: 'viewer',
+    role: state.role,
     supabase: {
       from: (table: string) => {
         const query = {
@@ -39,7 +40,25 @@ vi.mock('./alert-actions', () => ({
 beforeEach(() => {
   state.results = {};
   state.calls = [];
+  state.role = 'viewer';
   outcomeLoader.load.mockResolvedValue(null);
+});
+
+it('offers the owner-only scheduled assessment route without advertising it to other roles', async () => {
+  for (const role of ['viewer', 'reviewer', 'admin', 'founder', 'axiom_analyst']) {
+    state.role = role;
+    expect(renderToStaticMarkup(await MonitoringPage())).not.toContain(
+      'href="/monitoring/scheduled-assessments"',
+    );
+  }
+  state.role = 'owner';
+  expect(renderToStaticMarkup(await MonitoringPage())).toContain(
+    'href="/monitoring/scheduled-assessments"',
+  );
+  state.results.monitoring_schedules = { data: null, error: new Error('unavailable') };
+  expect(renderToStaticMarkup(await MonitoringPage())).toContain(
+    'href="/monitoring/scheduled-assessments"',
+  );
 });
 
 it('renders empty bounded monitoring lists without claiming full tenant health', async () => {
