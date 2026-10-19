@@ -732,6 +732,17 @@ class SharedControllerTests(unittest.TestCase):
             ],
         }
 
+        self.info["HostConfig"]["Tmpfs"] = {"/tmp": "rw,nosuid,nodev,size=64m,mode=1777"}
+        self.info["HostConfig"]["Mounts"] = [
+            {
+                "Type": mount["Type"],
+                "Source": mount.get("Name", mount.get("Source")),
+                "Target": mount["Destination"],
+                "ReadOnly": not mount["RW"],
+            }
+            for mount in self.info["Mounts"]
+        ]
+
     def run_command(self, argv, **kwargs):
         if argv[1:3] == ["container", "ls"]:
             output = "a" * 64
@@ -831,6 +842,30 @@ class SharedControllerTests(unittest.TestCase):
             self.observed = copy.deepcopy(original_config)
             mutate()
             with self.subTest(case=index), self.assertRaises(ValueError):
+                self.proof()
+
+    def test_desktop_daemon_normalization_is_allowlisted_and_frozen(self):
+        _, literal_digest = self.proof()
+        self.info["Mounts"][-1]["Source"] = "/run/host-services/docker.proxy.sock"
+        self.info["HostConfig"]["Mounts"][-1]["Source"] = "/run/host-services/docker.proxy.sock"
+        _, desktop_digest = self.proof()
+        self.assertNotEqual(literal_digest, desktop_digest)
+        self.info["HostConfig"]["Mounts"][-1]["Source"] = "/var/run/docker.sock"
+        with self.assertRaises(ValueError):
+            self.proof()
+        self.info["HostConfig"]["Mounts"][-1]["Source"] = "/foreign/daemon.sock"
+        self.info["Mounts"][-1]["Source"] = "/foreign/daemon.sock"
+        with self.assertRaises(ValueError):
+            self.proof()
+
+    def test_tmpfs_profile_is_bounded_and_exact(self):
+        for tmpfs in (
+            {},
+            {"/tmp": "rw,size=1g"},
+            {"/tmp": "rw,nosuid,nodev,size=64m,mode=1777", "/foreign": "rw"},
+        ):
+            self.info["HostConfig"]["Tmpfs"] = tmpfs
+            with self.subTest(tmpfs=tmpfs), self.assertRaises(ValueError):
                 self.proof()
 
     def test_first_install_creates_only_when_observation_was_absent(self):

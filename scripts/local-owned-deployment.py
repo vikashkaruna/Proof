@@ -774,6 +774,18 @@ def controller_proof(
     info = actual[0]
     host = info.get("HostConfig", {})
     config = info.get("Config", {})
+    daemon_mounts = [
+        mount
+        for mount in info.get("Mounts", [])
+        if mount.get("Type") == "bind" and mount.get("Destination") == "/var/run/docker.sock"
+    ]
+    if len(daemon_mounts) != 1 or daemon_mounts[0].get("Source") not in {
+        "/var/run/docker.sock",
+        "/run/host-services/docker.proxy.sock",
+    }:
+        raise ValueError("Unreviewed Docker daemon socket refused")
+    daemon_source = daemon_mounts[0]["Source"]
+    expected_tmpfs = {"/tmp": "rw,nosuid,nodev,size=64m,mode=1777"}
     expected_mounts = {
         (
             "volume",
@@ -787,7 +799,7 @@ def controller_proof(
             "/run/axiom-proof-local-owned-execution",
             True,
         ),
-        ("bind", "/var/run/docker.sock", "/var/run/docker.sock", True),
+        ("bind", daemon_source, "/var/run/docker.sock", True),
     }
     mounts = {
         (
@@ -797,6 +809,15 @@ def controller_proof(
             m.get("RW"),
         )
         for m in info.get("Mounts", [])
+    }
+    host_mounts = {
+        (
+            mount.get("Type"),
+            mount.get("Source"),
+            mount.get("Target"),
+            not mount.get("ReadOnly", False),
+        )
+        for mount in host.get("Mounts", [])
     }
     if (
         info.get("Id") != container
@@ -822,6 +843,8 @@ def controller_proof(
         or host.get("PidsLimit") != 128
         or host.get("Memory") != 512 * 1024 * 1024
         or mounts != expected_mounts
+        or host_mounts != expected_mounts
+        or host.get("Tmpfs") != expected_tmpfs
     ):
         raise ValueError("Owned controller isolation/readback refused")
     image = parse_json(
@@ -890,7 +913,15 @@ def controller_proof(
             "bffImage": configuration["bffImage"],
             "socketReady": True,
         },
-        hashlib.sha256(canonical(observed)).hexdigest(),
+        hashlib.sha256(
+            canonical(
+                {
+                    "configuration": observed,
+                    "daemonSocketSource": daemon_source,
+                    "tmpfs": expected_tmpfs,
+                }
+            )
+        ).hexdigest(),
     )
 
 
