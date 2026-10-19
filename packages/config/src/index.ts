@@ -136,6 +136,7 @@ const EnvFields = z.object({
   // Protected server-owned deployment mapping; never a browser-provided configuration.
   AXIOM_PRATIVEDAN_SOCKET_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_POSTGRESQL_DISCOVERY_SOCKET_CONFIG_FILE: z.string().min(1).max(4096).optional(),
+  AXIOM_STANDING_POLICY_COORDINATOR_ENABLED: z.enum(['true', 'false']).default('false'),
   AXIOM_POSTGRESQL_SANDBOX_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_ASSESSMENT_PRODUCER_SOCKET_CONFIG_FILE: z.string().min(1).max(4096).optional(),
@@ -398,6 +399,16 @@ const EnvSchema = EnvFields.superRefine((env, ctx) => {
   const hardened = env.ENVIRONMENT
     ? HARDENED_ENVIRONMENTS.has(env.ENVIRONMENT)
     : env.NODE_ENV === 'production';
+  if (
+    env.AXIOM_STANDING_POLICY_COORDINATOR_ENABLED === 'true' &&
+    (!['local', 'test'].includes(env.ENVIRONMENT ?? '') || env.AXIOM_AUTH_MODE !== 'strict')
+  )
+    ctx.addIssue({
+      code: 'custom',
+      path: ['AXIOM_STANDING_POLICY_COORDINATOR_ENABLED'],
+      message:
+        'Standing approval coordinator requires an explicitly reviewed strict local/test deployment',
+    });
   const planningKey = env.AXIOM_PLANNING_SOURCE_SIGNING_KEY;
   if (
     planningKey &&

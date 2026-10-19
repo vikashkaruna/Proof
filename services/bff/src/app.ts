@@ -14,6 +14,8 @@ import { ownedExecutionRoutes } from './routes/owned-execution.js';
 import { createConfiguredOwnedExecution } from './services/owned-execution-composition.js';
 import type { OwnedExecutionBroker } from './services/owned-execution-broker.js';
 import type { PrativedanPrivateClient } from './routes/prativedan-accounted-drafts.js';
+import { createConfiguredStandingCoordinator } from './services/standing-composition.js';
+import type { StandingCoordinator } from './services/standing-coordinator.js';
 import type { DiscoveryRequestController } from './routes/postgresql-discovery.js';
 import type { publicWebsiteCheckRoutes } from './routes/public-website-checks.js';
 import { createConfiguredOwnedSynthetic } from './services/owned-synthetic-composition.js';
@@ -69,6 +71,7 @@ import { offlineLicenseGate } from './middleware/offline-license.js';
 export function createApp(
   options: {
     prativedan?: PrativedanPrivateClient;
+    onStandingCoordinator?: (coordinator: StandingCoordinator | null) => void;
     discoveryController?: DiscoveryRequestController;
     ownedSynthetic?: OwnedSyntheticRouteDeps | null;
     ownedDeployment?: OwnedDeploymentRouteController | null;
@@ -126,6 +129,8 @@ export function createApp(
 
   // ─── Services (constructed once, attached to the app) ───────────────
   const approvalEngine = createApprovalEngine(env);
+  const standingCoordinator = createConfiguredStandingCoordinator(env, approvalEngine);
+  options.onStandingCoordinator?.(standingCoordinator);
   const killSwitch = createKillSwitchService();
   const ledger = createLedgerService();
   const mfa = createMfaService();
@@ -249,6 +254,10 @@ export function createApp(
       prativedan: options.prativedan,
       licensePublicKeyPem: options.licensePublicKeyPem,
       approvalEngine,
+      standingCoordinatorEnabled: standingCoordinator !== null,
+      standingCoordinatorStatus: standingCoordinator
+        ? () => standingCoordinator.health()
+        : undefined,
       killSwitch,
       ledger,
       mfa,

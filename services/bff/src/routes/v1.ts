@@ -1,3 +1,5 @@
+import type { StandingCoordinator } from '../services/standing-coordinator.js';
+import { standingApprovalRoutes } from './standing-approvals.js';
 import { monitoringReadScopeRoutes } from './monitoring-read-scopes.js';
 import {
   prativedanAccountedDraftRoutes,
@@ -243,6 +245,8 @@ interface Deps {
   stagedEvidence?: StagedEvidenceRoutesDeps;
   assessmentRequests?: AssessmentRequestProducer;
   publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
+  standingCoordinatorEnabled?: boolean;
+  standingCoordinatorStatus?: () => ReturnType<StandingCoordinator['health']>;
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
   ledger: LedgerService;
@@ -253,6 +257,14 @@ interface Deps {
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
   // Exact owned paths precede generic /plans/:id; middleware never escapes this source scope.
+  app.route(
+    '/',
+    standingApprovalRoutes({
+      mfa: deps.mfa,
+      enabled: deps.standingCoordinatorEnabled ?? false,
+      status: deps.standingCoordinatorStatus,
+    }),
+  );
   app.route('/', ownedSyntheticPlanRoutes(deps.ownedSynthetic));
   app.route('/', estateRoutes());
   app.route('/', consentRoutes());
