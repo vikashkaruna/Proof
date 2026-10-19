@@ -298,11 +298,140 @@ def main() -> None:
                 process.communicate(timeout=10)
             if created:
                 command(["dropdb", "-U", "postgres", "--force", database])
+    isolation_results = []
+    for isolation in ("repeatable read", "serializable"):
+        for mutation in ("designate", "revoke"):
+            database = "axiom_proof_local_onboard176_" + secrets.token_hex(6)
+            created = False
+            old_snapshot = None
+            try:
+                command(["createdb", "-U", "postgres", "-T", args.database, database])
+                created = True
+                sql(
+                    database,
+                    fixture_program(omit_other_designation=mutation == "designate"),
+                )
+                label = (
+                    "onboard176-isolation-"
+                    + isolation.replace(" ", "-")
+                    + "-"
+                    + mutation
+                )
+                argv = [
+                    docker,
+                    "exec",
+                    "-i",
+                    args.container,
+                    "psql",
+                    "-X",
+                    "-U",
+                    "supabase_admin",
+                    "-d",
+                    database,
+                    "-Atq",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-v",
+                    "VERBOSITY=verbose",
+                ]
+                owned()
+                old_snapshot = subprocess.Popen(
+                    argv,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )  # nosec B603 -- owned fixed fixture
+                assert old_snapshot.stdin is not None
+                old_snapshot.stdin.write(
+                    f"begin isolation level {isolation};set local application_name='{label}';select count(*)from public.platform_founders;select count(*)from public.tenants;select 'ONBOARD176_OLD_SNAPSHOT';\n"
+                )
+                old_snapshot.stdin.flush()
+                deadline = time.monotonic() + 15
+                while (
+                    sql(
+                        database,
+                        f"select exists(select 1 from pg_stat_activity where datname=current_database()and application_name='{label}'and state='idle in transaction'and query like '%ONBOARD176_OLD_SNAPSHOT%');",
+                    )
+                    != "t"
+                ):
+                    if time.monotonic() >= deadline or old_snapshot.poll() is not None:
+                        raise RuntimeError(
+                            "Pre-established higher-isolation snapshot barrier absent"
+                        )
+                    time.sleep(0.02)
+                change = (
+                    "select public.designate_platform_founder(onboarding176_race.u(2),'test','isolation designation176');"
+                    if mutation == "designate"
+                    else "select public.revoke_platform_founder(onboarding176_race.u(2),'test','isolation revoke176');"
+                )
+                sql(
+                    database,
+                    "begin;"
+                    + change
+                    + "insert into public.tenants(slug,name)values(gen_random_uuid()::text,'Synthetic newer snapshot176');commit;",
+                )
+                old_snapshot.stdin.write(
+                    "set local role human_action_writer;select public.onboard_organization(onboarding176_race.u(3),gen_random_uuid()::text,'Refused stale snapshot176','growth',false,false,false,null,null,'[]','onboarding-176',gen_random_uuid());commit;\n"
+                )
+                old_snapshot.stdin.close()
+                old_snapshot.stdin = None
+                _output, error = old_snapshot.communicate(timeout=15)
+                if (
+                    old_snapshot.returncode == 0
+                    or "25001" not in error
+                    or "require READ COMMITTED isolation" not in error
+                ):
+                    raise RuntimeError(
+                        "Higher-isolation stale writer was not explicitly refused"
+                    )
+                retained = json.loads(
+                    sql(
+                        database,
+                        "select jsonb_build_object('tenants',(select count(*)from public.tenants),'intakes',(select count(*)from public.tenant_onboarding_intakes),'live',public.is_live_platform_founder(onboarding176_race.u(2)),'derivedRows',(select count(*)from public.tenant_users where user_id=onboarding176_race.u(2)and membership_source='platform_founder'));",
+                    )
+                )
+                active = mutation == "designate"
+                if retained != {
+                    "tenants": 1,
+                    "intakes": 0,
+                    "live": active,
+                    "derivedRows": int(active),
+                }:
+                    raise RuntimeError(
+                        "Refused higher-isolation write changed retained fixture state"
+                    )
+                readonly = sql(
+                    database,
+                    f"begin isolation level {isolation} read only;select count(*)from public.tenants;commit;",
+                )
+                if readonly != "1":
+                    raise RuntimeError(
+                        "Higher-isolation read-only query unexpectedly changed"
+                    )
+                isolation_results.append(
+                    {
+                        "isolation": isolation,
+                        "concurrentMutation": mutation,
+                        "preEstablishedSnapshotObserved": True,
+                        "writeRefusedSqlstate": "25001",
+                        "higherIsolationReadonlyPassed": True,
+                        "outcome": retained,
+                    }
+                )
+            finally:
+                if old_snapshot is not None:
+                    if old_snapshot.poll() is None:
+                        old_snapshot.kill()
+                    old_snapshot.communicate(timeout=10)
+                if created:
+                    command(["dropdb", "-U", "postgres", "--force", database])
     print(
         json.dumps(
             {
                 "scope": "owned synthetic SQL lock ordering only",
                 "cases": results,
+                "isolationCases": isolation_results,
                 "ownedChildDatabasesRemoved": True,
             }
         )

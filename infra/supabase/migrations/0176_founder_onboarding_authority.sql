@@ -38,8 +38,17 @@ revoke all on function public.guard_onboarding_creation_authority() from public,
 -- only already-live rows misses concurrent designation/internal activation.
 -- Fixed namespace (176,151); no existing application lock uses this pair.
 create function public.lock_platform_founder_membership_authority()
-returns void language sql volatile security definer set search_path='' as $$
-  select pg_catalog.pg_advisory_xact_lock(176,151);
+returns void language plpgsql volatile security definer set search_path='' as $$
+begin
+  -- Waiting on a mutex cannot refresh a pre-established REPEATABLE READ
+  -- snapshot. Supported membership writes use READ COMMITTED only; never
+  -- silently change caller isolation or infer SERIALIZABLE/SSI protection.
+  if pg_catalog.current_setting('transaction_isolation') is distinct from 'read committed' then
+    raise exception 'platform founder membership writes require READ COMMITTED isolation'
+      using errcode='25001';
+  end if;
+  perform pg_catalog.pg_advisory_xact_lock(176,151);
+end;
 $$;
 revoke all on function public.lock_platform_founder_membership_authority()
   from public,anon,authenticated,service_role,human_action_writer;
