@@ -213,7 +213,7 @@ def operator_request(configuration: dict, path: str, body: dict) -> object:
             ).decode(),
         )
         return parse_json(reply.stdout.encode())
-    except ValueError, OSError, subprocess.SubprocessError:
+    except (ValueError, OSError, subprocess.SubprocessError):
         raise ValueError("Private operator request unconfirmed") from None
 
 
@@ -749,7 +749,7 @@ def fixed_effect(
         while True:
             try:
                 return controller_readback(configuration, manifest)
-            except ValueError, subprocess.SubprocessError:
+            except (ValueError, subprocess.SubprocessError):
                 if time.monotonic() >= deadline:
                     raise ValueError("Controller startup unconfirmed") from None
                 time.sleep(0.25)
@@ -879,7 +879,7 @@ def once(configuration_file: Path) -> str:
                         )
                     state["steps"][step]["confirmed"] = True
                     write_private(journal, state)
-                except ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError:
+                except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
                     state["state"] = "unconfirmed"
                     write_private(journal, state)
                     # The original journal retains uncertainty even if the
@@ -918,7 +918,7 @@ def main() -> None:
                 if args.command == "once":
                     break
                 time.sleep(args.interval)
-    except ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError:
+    except (ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError):
         raise SystemExit(
             "Owned deployment unconfirmed or refused; retained intent requires exact readback before retry."
         ) from None
