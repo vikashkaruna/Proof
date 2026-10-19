@@ -117,9 +117,16 @@ export function encodeStandingRevisionIntent(v: StandingRevisionIntent) {
 export function encodeStandingPolicyDelegation(v: StandingPolicyDelegation) {
   return canonicalLocalCustody(standingPolicyDelegation.parse(v));
 }
+const operationBinding = {
+  tenantId: uuid,
+  actorId: uuid,
+  phase: z.enum(['request', 'approve', 'revoke']),
+  operationKey: uuid,
+};
 export const standingRevisionOperation = z.discriminatedUnion('recorded', [
   z
     .object({
+      ...operationBinding,
       recorded: z.literal(false),
       requestSha256: hash,
       fenced: z.boolean(),
@@ -130,6 +137,7 @@ export const standingRevisionOperation = z.discriminatedUnion('recorded', [
     .refine((v) => v.fenced === Boolean(v.fenceReceiptId)),
   z
     .object({
+      ...operationBinding,
       recorded: z.literal(true),
       requestSha256: hash,
       revisionId: uuid,
