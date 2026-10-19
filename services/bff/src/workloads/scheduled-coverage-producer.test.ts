@@ -109,14 +109,12 @@ function setup(claim: unknown = assigned(), failedWrite = false) {
   return { producer, calls };
 }
 beforeEach(() =>
-  seal
-    .mockReset()
-    .mockResolvedValue({
-      key_ref: 'axiom-local-dispatch://fixture/key',
-      nonce: '01'.repeat(12),
-      ciphertext: '02'.repeat(32),
-      wrapped_key: '03'.repeat(48),
-    }),
+  seal.mockReset().mockResolvedValue({
+    key_ref: 'axiom-local-dispatch://fixture/key',
+    nonce: '01'.repeat(12),
+    ciphertext: '02'.repeat(32),
+    wrapped_key: '03'.repeat(48),
+  }),
 );
 it('uses only original server-derived identity, new engagement and unknown declarations', async () => {
   const { producer, calls } = setup();
