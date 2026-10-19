@@ -1725,13 +1725,13 @@ except Exception as error:
         },
       });
       outcomes[
-        'normal-auth-reviewed-source4-board5-auditor5-mfa-human-review-exact-provider-release-download'
+        'normal-auth-reviewed-source6-board7-auditor7-mfa-human-review-exact-provider-release-download'
       ] = true;
       if (withRegisteredBrowser) {
         writePublicReportBrowserHandoff(publicReportProof);
         assert(registeredBrowserCompletion);
         await registeredBrowserCompletion;
-        outcomes['normal-auth-registered-browser-source4-board5-auditor5-lost-response-recovery'] =
+        outcomes['normal-auth-registered-browser-source6-board7-auditor7-lost-response-recovery'] =
           true;
       }
     }

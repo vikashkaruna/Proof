@@ -25,6 +25,12 @@ import {
   CoverageFirstDocumentV5Schema,
   buildCoverageFirstReport,
 } from '../../packages/report-kit/src/coverage-first-report.js';
+import {
+  BrandedDocumentV7Schema,
+  BRANDED_PRESENTATION_V1,
+  buildBrandedReport,
+  verifyBrandedSource,
+} from '../../packages/report-kit/src/branded-report.js';
 import { canonicalJson } from '../../packages/ledger/src/index.js';
 
 const sha = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -213,8 +219,8 @@ export const publicReportBrowserHandoffSchema = z
     kind: z.literal('owned-reviewed-public-source-reports'),
     presentation: z
       .object({
-        sourceVersion: z.literal(4),
-        documentVersion: z.literal(5),
+        sourceVersion: z.literal(6),
+        documentVersion: z.literal(7),
         metrics: z.literal('withheld'),
         policySha256: z.literal(sha(canonicalJson(coverageFirstPolicy()))),
       })
@@ -259,6 +265,12 @@ export function reportAcceptanceCodeSha256(repositoryRoot = '.') {
       'infra/supabase/migrations/0141_public_control_review_asset_sources.sql',
       'infra/supabase/migrations/0142_public_control_asset_report_provenance.sql',
       'infra/supabase/migrations/0144_coverage_first_public_report_presentation.sql',
+      'infra/supabase/migrations/0177_branded_report_presentation.sql',
+      'packages/report-kit/src/branded-report.ts',
+      'packages/report-kit/src/branded-assets-v1.ts',
+      'packages/report-kit/src/branded-font-license-v1.ts',
+      'packages/report-kit/src/LICENSE-NotoSans.txt',
+      'packages/report-kit/src/branded-pdf-metadata.ts',
       'packages/report-kit/src/coverage-first-source.ts',
       'packages/report-kit/src/coverage-first-report.ts',
       'packages/report-kit/src/pramaan-archive.ts',
@@ -391,6 +403,51 @@ export function verifyCoverageFirstAcceptanceReport(input: {
     appendix,
     retainedSourceSha256: frozen.envelope.retained_source.sha256,
   };
+}
+
+/** Current mounted request policy is source6/document7; legacy source4/doc5
+ * remains separately strict above. Unwrap only after verifying every outer pin. */
+export function verifyBrandedAcceptanceReport(
+  input: Parameters<typeof verifyCoverageFirstAcceptanceReport>[0],
+) {
+  const source = sourceProofSchema.parse(input.source);
+  const scope = {
+    tenantId: input.tenantId,
+    requestId: input.requestId,
+    engagementId: source.engagementId,
+    assessmentRunId: source.runId,
+  };
+  assert.equal(sha(input.contentText), input.contentSha256);
+  const frozen = verifyBrandedSource(input.sourceText, input.sourceSha256, scope);
+  assert.equal(frozen.envelope.report_kind, input.kind);
+  assert.equal(frozen.version, 4); // This public-source acceptance must not adopt questionnaire-only provenance.
+  const content = BrandedDocumentV7Schema.parse(parseCoverageFirstJson(input.contentText, 4194304));
+  assert(content.underlying_document_version === 5);
+  const expected = buildBrandedReport({
+    ...scope,
+    title: input.title,
+    generatedAt: content.generated_at,
+    sourceText: input.sourceText,
+    sourceSha256: input.sourceSha256,
+  });
+  assert.deepEqual(content, expected);
+  assert.deepEqual(content.presentation, BRANDED_PRESENTATION_V1);
+  const inner = buildCoverageFirstReport({
+    ...scope,
+    title: input.title,
+    generatedAt: content.generated_at,
+    sourceText: frozen.inner.text,
+    sourceSha256: frozen.inner.sha256,
+  });
+  const innerText = JSON.stringify(inner);
+  const verified = verifyCoverageFirstAcceptanceReport({
+    ...input,
+    sourceText: frozen.inner.text,
+    sourceSha256: frozen.inner.sha256,
+    contentText: innerText,
+    contentSha256: sha(innerText),
+  });
+  return { ...verified, content };
 }
 
 type Request = (path: string, expected: number, options?: RequestInit) => Promise<Response>;
@@ -547,7 +604,7 @@ export async function verifyPublicControlReports(deps: {
         ),
       );
       assert.equal(sha(frozen.source_text), frozen.source_sha256);
-      const { parsed, content, appendix } = verifyCoverageFirstAcceptanceReport({
+      const { parsed, content, appendix } = verifyBrandedAcceptanceReport({
         kind,
         title: body.title,
         tenantId: deps.tenantId,
@@ -707,8 +764,8 @@ export async function verifyPublicControlReports(deps: {
     version: 2,
     kind: 'owned-reviewed-public-source-reports',
     presentation: {
-      sourceVersion: 4,
-      documentVersion: 5,
+      sourceVersion: 6,
+      documentVersion: 7,
       metrics: 'withheld',
       policySha256: sha(canonicalJson(coverageFirstPolicy())),
     },

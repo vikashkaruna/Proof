@@ -26,7 +26,7 @@ import { acceptanceTarget, repoRoot, tenantCookie } from '../target';
 import {
   reportAcceptanceRequested,
   readPublicReportBrowserHandoff,
-  verifyCoverageFirstAcceptanceReport,
+  verifyBrandedAcceptanceReport,
 } from '../../../scripts/lib/acceptance-public-control-reports';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
 import { unzipSync } from 'fflate';
@@ -655,7 +655,7 @@ test.describe('real-provider board report lifecycle', () => {
       )) as { source_text: string; source_sha256: string }[];
       expect(sources).toHaveLength(1);
       if (sourceHandoff) {
-        const { content: document } = verifyCoverageFirstAcceptanceReport({
+        const { content: document } = verifyBrandedAcceptanceReport({
           kind: 'board',
           title: request.title,
           tenantId,
@@ -667,7 +667,7 @@ test.describe('real-provider board report lifecycle', () => {
           contentText: row.content_text,
           contentSha256: row.content_sha256,
         });
-        expect(document.schema_version).toBe(5);
+        expect(document.schema_version).toBe(7);
         expect(document.presentation_policy.metrics).toBe('withheld');
         expect(document.provenance.reviewId).toBe(sourceHandoff.source.reviewId);
         expect(document.controls).toHaveLength(46);
@@ -677,11 +677,18 @@ test.describe('real-provider board report lifecycle', () => {
         if (sourceHandoff.source.asset)
           expect(document.asset_scope!.target.url).toBe('https://fixture.axiomproof.ai/');
       } else {
-        // A NEW questionnaire-only request is source5/doc6 with every estimate
+        // A NEW questionnaire-only request is source6/doc7 wrapping source5/doc6, with every estimate
         // withheld (0155); no permissive OR-version fallback.
-        expect(JSON.parse(sources[0]!.source_text).schema_version).toBe(5);
+        const outer = JSON.parse(sources[0]!.source_text);
+        expect(outer.schema_version).toBe(6);
+        expect(JSON.parse(outer.retained_source.text)).toMatchObject({
+          schema_version: 5,
+          report_kind: 'board',
+        });
         const document = JSON.parse(row.content_text);
-        expect(document.schema_version).toBe(6);
+        expect(document.schema_version).toBe(7);
+        expect(document.underlying_document_version).toBe(6);
+        expect(document.underlying_source_sha256).toBe(outer.retained_source.sha256);
         expect(document.metrics.state).toBe('withheld');
         for (const k of [
           'posture_score',
@@ -1002,7 +1009,7 @@ test.describe('real-provider board report lifecycle', () => {
         source.source_text,
       );
       expect(Buffer.from(retainedFiles['source/board-report.pdf']!)).toEqual(downloadedPdf);
-      expect(JSON.parse(source.source_text).schema_version).toBe(sourceHandoff ? 4 : 5);
+      expect(JSON.parse(source.source_text).schema_version).toBe(6);
       expect(retained.headers()['x-content-sha256']).toBe(dossier.archiveHash);
       expect(
         (
@@ -1247,8 +1254,8 @@ test.describe('real-provider board report lifecycle', () => {
       await expect(detail.getByRole('heading', { name: title, exact: true })).toBeVisible();
       await detail.getByText('Exact recorded content', { exact: true }).click();
       await expect(detail.locator('pre')).toContainText(unsafeText);
-      // The finding rationale is opaque provenance in document6, never shown.
-      await expect(detail.locator('pre')).toContainText('"schema_version":6');
+      // The finding rationale is opaque provenance in document7, never shown.
+      await expect(detail.locator('pre')).toContainText('"schema_version":7');
       await expect(detail.locator('img')).toHaveCount(0);
       await expect(detail.getByRole('button', { name: /Email/ })).toHaveCount(0);
       await detail
@@ -1403,6 +1410,8 @@ test.describe('real-provider board report lifecycle', () => {
       expect(sha(row.content_text)).toBe(row.content_sha256);
       const content = JSON.parse(row.content_text) as {
         schema_version: number;
+        underlying_document_version: number;
+        underlying_source_sha256: string;
         metrics?: { state: string };
       };
       const sources = (await database(
@@ -1410,7 +1419,7 @@ test.describe('real-provider board report lifecycle', () => {
       )) as Array<{ source_text: string; source_sha256: string }>;
       expect(sources).toHaveLength(1);
       if (sourceHandoff) {
-        const { content: qualified } = verifyCoverageFirstAcceptanceReport({
+        const { content: qualified } = verifyBrandedAcceptanceReport({
           kind: 'auditor',
           title: requestBody.title,
           tenantId,
@@ -1422,12 +1431,19 @@ test.describe('real-provider board report lifecycle', () => {
           contentText: row.content_text,
           contentSha256: row.content_sha256,
         });
-        expect(qualified.schema_version).toBe(5);
+        expect(qualified.schema_version).toBe(7);
         expect(qualified.presentation_policy.metrics).toBe('withheld');
         expect(qualified.controls).toHaveLength(46);
       } else {
-        expect(JSON.parse(sources[0]!.source_text).schema_version).toBe(5);
-        expect(content.schema_version).toBe(6);
+        const outer = JSON.parse(sources[0]!.source_text);
+        expect(outer.schema_version).toBe(6);
+        expect(JSON.parse(outer.retained_source.text)).toMatchObject({
+          schema_version: 5,
+          report_kind: 'auditor',
+        });
+        expect(content.schema_version).toBe(7);
+        expect(content.underlying_document_version).toBe(6);
+        expect(content.underlying_source_sha256).toBe(outer.retained_source.sha256);
         expect(content.metrics?.state).toBe('withheld');
         for (const k of ['posture_score', 'findings', 'risk_points'])
           expect(content).not.toHaveProperty(k);
@@ -1646,7 +1662,7 @@ test.describe('real-provider board report lifecycle', () => {
         sources[0]!.source_text,
       );
       expect(Buffer.from(files['source/auditor-review-pack.pdf']!)).toEqual(downloadedPdf);
-      expect(JSON.parse(sources[0]!.source_text).schema_version).toBe(sourceHandoff ? 4 : 5);
+      expect(JSON.parse(sources[0]!.source_text).schema_version).toBe(6);
       const manifest = JSON.parse(Buffer.from(files['manifest.json']!).toString()) as {
         kind: string;
         limitations: string[];
