@@ -28,7 +28,14 @@ export function readJournal(
   if (raw === null) return null;
   if (new TextEncoder().encode(raw).length > 24000)
     throw new Error('Retained request exceeds supported bounds. Preserve it for review.');
-  const value = journalSchema.parse(JSON.parse(raw));
+  let value: DataFlowJournal;
+  try {
+    value = journalSchema.parse(JSON.parse(raw));
+  } catch {
+    throw new Error(
+      'The retained declaration is malformed. Preserve it for review; no replacement was sent.',
+    );
+  }
   if (value.tenantId !== tenantId || value.actorId !== actorId || journalText(value) !== raw)
     throw new Error('Retained request changed scope or exact content. Preserve it for review.');
   return value;
@@ -62,7 +69,7 @@ export async function intentHash(v: DataFlowJournal) {
   ).join('');
 }
 export async function validateOperation(v: DataFlowJournal, raw: unknown) {
-  const proof = dataFlowOperation
+  const parsed = dataFlowOperation
     .and(
       z.object({
         tenantId: z.uuid(),
@@ -71,7 +78,10 @@ export async function validateOperation(v: DataFlowJournal, raw: unknown) {
         operationKey: z.uuid(),
       }),
     )
-    .parse(raw);
+    .safeParse(raw);
+  if (!parsed.success)
+    throw new Error('Original request has no matching recorded or fenced receipt. Preserve it.');
+  const proof = parsed.data;
   if (
     proof.tenantId !== v.tenantId ||
     proof.actorId !== v.actorId ||

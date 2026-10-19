@@ -288,3 +288,30 @@ it('read-only role retains historical recovery access without any mutation contr
     screen.queryByRole('button', { name: 'Fence original request against later recording' }),
   ).toBeNull();
 });
+it('shows a readable validation message instead of raw schema JSON and sends nothing', async () => {
+  const { context } = fixture();
+  vi.mocked(requestDataFlow).mockResolvedValue({ data: context });
+  render(<DataFlowClient tenantId={id(3)} actorId={id(1)} />);
+  fireEvent.change(await screen.findByLabelText('Origin system'), { target: { value: id(10) } });
+  fireEvent.change(screen.getByLabelText('Source note / reason for unknown destination'), {
+    target: { value: 'Synthetic metadata with unresolved destination.' },
+  });
+  fireEvent.click(screen.getByLabelText(/I reviewed the selected registered sources/));
+  fireEvent.click(
+    screen.getByRole('button', { name: 'Retain declaration for authenticator review' }),
+  );
+  await screen.findByText('Enter a review reason of at least 20 characters.');
+  expect(readJournal(localStorage, id(3), id(1))).toBeNull();
+  expect(vi.mocked(requestDataFlow).mock.calls.every(([, , p]) => p === '/data-flows')).toBe(true);
+});
+it('retries an unavailable context with Refresh without replacing the retained intent', async () => {
+  const { context } = fixture();
+  vi.mocked(requestDataFlow)
+    .mockRejectedValueOnce(new Error('Current source temporarily unavailable'))
+    .mockResolvedValue({ data: context });
+  render(<DataFlowClient tenantId={id(3)} actorId={id(1)} />);
+  await screen.findByText('Current source temporarily unavailable');
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh recorded revisions' }));
+  await screen.findByLabelText('Origin system');
+  expect(vi.mocked(requestDataFlow).mock.calls).toHaveLength(2);
+});

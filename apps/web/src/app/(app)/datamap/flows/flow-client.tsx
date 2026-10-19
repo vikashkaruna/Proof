@@ -85,16 +85,25 @@ export function DataFlowClient({
     return v;
   };
   const refresh = async () => {
-    const raw = await requestDataFlow(
-      tenantId,
-      actorId,
-      '/data-flows' + (initialRevisionId ? '/' + z.uuid().parse(initialRevisionId) : ''),
-    );
-    current();
-    const v = dataFlowContext.parse(z.object({ data: z.unknown() }).parse(raw).data);
-    if (v.tenantId !== tenantId || v.actorId !== actorId)
-      throw new Error('Current account or organization could not be confirmed.');
-    setContext(v);
+    try {
+      const raw = await requestDataFlow(
+        tenantId,
+        actorId,
+        '/data-flows' + (initialRevisionId ? '/' + z.uuid().parse(initialRevisionId) : ''),
+      );
+      current();
+      const v = dataFlowContext.parse(z.object({ data: z.unknown() }).parse(raw).data);
+      if (v.tenantId !== tenantId || v.actorId !== actorId)
+        throw new Error('Current account or organization could not be confirmed.');
+      setContext(v);
+    } catch (error) {
+      if (active.current === scope) {
+        setContext(null);
+        setCode('');
+        setVerified(false);
+      }
+      throw error;
+    }
   };
   useEffect(() => {
     let live = true;
@@ -104,8 +113,8 @@ export function DataFlowClient({
         observed.current = v ? journalText(v) : null;
         setJournal(v);
       }
-      await refresh();
       if (live) setReady(true);
+      await refresh();
     }).catch((e) => {
       if (live) setError(e instanceof Error ? e.message : 'Data flow declaration unavailable.');
     });
@@ -138,9 +147,11 @@ export function DataFlowClient({
     } catch (e) {
       if (active.current === scope)
         setError(
-          e instanceof Error
-            ? e.message
-            : 'Outcome uncertain. Preserve and recover the original request.',
+          e instanceof z.ZodError
+            ? 'The server reply could not be validated. Preserve the original request and refresh its recorded state.'
+            : e instanceof Error
+              ? e.message
+              : 'Outcome uncertain. Preserve and recover the original request.',
         );
     } finally {
       inFlight.current = false;
@@ -175,12 +186,23 @@ export function DataFlowClient({
     return result;
   };
   const prepare = (intent: unknown) => {
+    const parsed = dataFlowIntent.safeParse(intent);
+    if (!parsed.success) {
+      const key = parsed.error.issues[0]?.path[1];
+      throw new Error(
+        key === 'reason'
+          ? 'Enter a review reason of at least 20 characters.'
+          : key === 'sourceNote'
+            ? 'Enter a source note explaining the declared or unknown metadata.'
+            : 'Check the exact references, optional metadata and review validity before retaining this intent.',
+      );
+    }
     const v = save(
       {
         version: 1,
         tenantId,
         actorId,
-        intent: dataFlowIntent.parse(intent),
+        intent: parsed.data,
         challengeId: null,
         challengeExpiresAt: null,
       },
@@ -451,7 +473,11 @@ export function DataFlowClient({
       ) : context ? (
         <section className={panel}>
           <h2 className="font-semibold">
-            {amending ? 'Prepare a new immutable version' : 'Prepare an explicit declaration'}
+            {!context.canPrepare
+              ? 'Read-only declaration access'
+              : amending
+                ? 'Prepare a new immutable version'
+                : 'Prepare an explicit declaration'}
           </h2>
           {amending && (
             <p className="break-all">
@@ -469,6 +495,7 @@ export function DataFlowClient({
               <label>
                 Origin system
                 <select
+                  aria-label="Origin system"
                   className={field}
                   value={selected}
                   onChange={(e) => setSelected(e.target.value)}
@@ -484,6 +511,7 @@ export function DataFlowClient({
               <label>
                 Declared destination
                 <select
+                  aria-label="Declared destination"
                   className={field}
                   value={destination}
                   onChange={(e) => setDestination(e.target.value)}
@@ -520,6 +548,7 @@ export function DataFlowClient({
                   <label>
                     Declared party role
                     <select
+                      aria-label="Declared party role"
                       className={field}
                       value={partyRole}
                       onChange={(e) =>
@@ -533,6 +562,7 @@ export function DataFlowClient({
                   <label>
                     Explicit party reference being superseded, if any
                     <select
+                      aria-label="Explicit party reference being superseded, if any"
                       className={field}
                       value={supersedesParty}
                       onChange={(e) => setSupersedesParty(e.target.value)}
@@ -551,6 +581,7 @@ export function DataFlowClient({
                 <label>
                   Actual registered destination system, if explicitly known
                   <select
+                    aria-label="Actual registered destination system, if explicitly known"
                     className={field}
                     value={partySystem}
                     onChange={(e) => setPartySystem(e.target.value)}
@@ -592,6 +623,7 @@ export function DataFlowClient({
               <label>
                 Data category knowledge
                 <select
+                  aria-label="Data category knowledge"
                   className={field}
                   value={categoryState}
                   onChange={(e) => setCategoryState(e.target.value)}
@@ -624,6 +656,7 @@ export function DataFlowClient({
               <label>
                 Destination country knowledge
                 <select
+                  aria-label="Destination country knowledge"
                   className={field}
                   value={countryState}
                   onChange={(e) => setCountryState(e.target.value)}
@@ -647,6 +680,7 @@ export function DataFlowClient({
               <label>
                 Declared cross-border processing
                 <select
+                  aria-label="Declared cross-border processing"
                   className={field}
                   value={crossBorder}
                   onChange={(e) => setCrossBorder(e.target.value)}
