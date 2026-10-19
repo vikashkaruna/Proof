@@ -156,3 +156,26 @@ describe('tenantResolver — C-W1-3 · invitation acceptance exemption', () => {
     expect(await res.json()).toEqual({ tenantId: null, role: null });
   });
 });
+
+describe('exact onboarding operation tenantless boundary', () => {
+  it.each([
+    ['GET', '/v1/organizations/onboarding-operations/11111111-1111-4111-8111-111111111111'],
+    ['POST', '/v1/organizations/onboarding-operations/11111111-1111-4111-8111-111111111111/fence'],
+  ])('resolves %s %s without inventing owner role', async (method, path) => {
+    const app = await buildApp({ ENVIRONMENT: 'production' }, createSupabaseDouble({}));
+    app.on(method, path, (c) =>
+      c.json({ tenantId: c.get('tenantId') ?? null, role: c.get('role') ?? null }),
+    );
+    const response = await app.request(path, { method });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ tenantId: null, role: null });
+  });
+  it('does not exempt arbitrary organization action routes', async () => {
+    const app = await buildApp({ ENVIRONMENT: 'production' }, createSupabaseDouble({}));
+    const response = await app.request(
+      '/v1/organizations/onboarding-operations/11111111-1111-4111-8111-111111111111/execute',
+      { method: 'POST' },
+    );
+    expect(response.status).toBe(400);
+  });
+});

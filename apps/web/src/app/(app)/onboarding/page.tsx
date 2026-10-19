@@ -28,6 +28,7 @@ export default async function OnboardingPage() {
       />
 
       <OnboardingForm
+        userId={user.id}
         userEmail={user.email ?? ''}
         userFullName={user.user_metadata?.full_name ?? ''}
       />

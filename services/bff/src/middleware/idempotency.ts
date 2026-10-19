@@ -1,3 +1,4 @@
+import { onboardingCreate } from '@axiom/types';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { createMiddleware } from 'hono/factory';
@@ -28,6 +29,9 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   const durableLocalCustody =
     c.req.method === 'POST' &&
     /^\/v1\/local-custody-policy\/(?:challenge|verify|record|recover)$/.test(c.req.path);
+  const durableOnboardingFence =
+    c.req.method === 'POST' &&
+    /^\/v1\/organizations\/onboarding-operations\/[0-9a-f-]{36}\/fence$/.test(c.req.path);
   const durableIntake = c.req.method === 'POST' && c.req.path === '/v1/engagements';
   const durablePublicControlReviewSet =
     c.req.method === 'POST' &&
@@ -88,6 +92,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
         c.req.path,
       ));
   if (
+    durableOnboardingFence ||
     durableLocalCustody ||
     durableOwnedDeployment ||
     durableIntake ||
@@ -140,6 +145,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   // Cached responses would skip live authority/context and cancellation checks
   // or freeze structural-review currency. Keep key checks above.
   if (
+    durableOnboardingFence ||
     durableLocalCustody ||
     durableOwnedDeployment ||
     durableIntake ||
@@ -164,8 +170,21 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     auth: { persistSession: false },
   });
 
+  const rawRequest = await c.req.raw.clone().text();
+  let exactOnboarding = false;
+  if (
+    c.req.method === 'POST' &&
+    c.req.path === '/v1/organizations/onboard' &&
+    rawRequest.length <= 524288
+  ) {
+    try {
+      exactOnboarding = onboardingCreate.safeParse(JSON.parse(rawRequest)).success;
+    } catch {
+      /* Invalid input still follows ordinary refusal. */
+    }
+  }
   const requestHash = createHash('sha256')
-    .update(JSON.stringify([new URL(c.req.url).search, await c.req.raw.clone().text()]))
+    .update(JSON.stringify([new URL(c.req.url).search, rawRequest]))
     .digest('hex');
   // Do not replay privileged material after a role change or into a different
   // login session, even when the user presents the same key and body.
@@ -206,6 +225,13 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       503,
     );
   }
+  if (exactOnboarding && claim.data.decision !== 'claimed') {
+    // No generic cached authority/tenant disclosure for the NEW protocol.
+    // The handler can ONLY read the original atomic receipt under current auth.
+    c.set('onboardingReadbackOnly', true);
+    c.set('idempotencyKey', key);
+    return next();
+  }
   if (claim.data.decision === 'replay') {
     return new Response(
       [204, 205, 304].includes(claim.data.status) ? null : JSON.stringify(claim.data.body),
@@ -228,6 +254,12 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
     );
   }
   c.set('idempotencyKey', key);
+  c.set('requestClaim', {
+    id: claim.data.id,
+    key,
+    requestSha256: requestHash,
+    authoritySha256: authorityHash,
+  });
   // A crash/throw leaves an in-progress claim. Never automatically run a
   // potentially mutating handler again; reconcile its durable operation first.
   await next();

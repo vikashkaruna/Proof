@@ -1,3 +1,4 @@
+import { createExactOnboarding, readExactOnboarding } from '../services/onboarding-operation.js';
 import { dataFlowDeclarationRoutes } from './data-flow-declarations.js';
 import { scheduledCoverageRoutes } from './scheduled-coverage.js';
 import type { StandingCoordinator } from '../services/standing-coordinator.js';
@@ -3814,10 +3815,24 @@ export function v1Routes(deps: Deps) {
     return c.json({ tenants });
   });
 
+  app.get('/organizations/onboarding-operations/:operationKey', (c) => readExactOnboarding(c));
+  app.post('/organizations/onboarding-operations/:operationKey/fence', (c) =>
+    readExactOnboarding(c, true),
+  );
+
   // POST /v1/organizations/onboard — dynamic onboarding without hardcoded data
   app.post('/organizations/onboard', async (c) => {
     const user = c.get('user');
-    const body = await c.req.json().catch(() => ({}));
+    const rawBody = await c.req.text();
+    const body: unknown = (() => {
+      try {
+        return JSON.parse(rawBody) as unknown;
+      } catch {
+        return {};
+      }
+    })();
+    if (typeof body === 'object' && body !== null && 'operationKey' in body)
+      return createExactOnboarding(c, body, rawBody);
 
     const OnboardSchema = z.object({
       name: z.string().trim().min(2).max(100),

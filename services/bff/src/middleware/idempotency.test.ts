@@ -391,3 +391,79 @@ it.each(['challenge', 'verify', 'record', 'recover'])(
     ).toBe(400);
   },
 );
+
+describe('new exact onboarding never trusts generic cached authority', () => {
+  const operationKey = '11111111-1111-4111-8111-111111111111';
+  const request = {
+    name: 'Synthetic company',
+    slug: null,
+    tier: 'growth',
+    is_sdf: false,
+    processes_health_data: false,
+    processes_children_data: false,
+    dpo_name: null,
+    dpo_email: null,
+    systems: [],
+  };
+  it.each(['replay', 'in_progress', 'expired', 'conflict'])(
+    'nonclaimed %s permits only readback, never cached tenant disclosure or creation',
+    async (decision) => {
+      const double = createSupabaseDouble({});
+      double.state.failRpc = 'complete_request';
+      double.state.claimDecision =
+        decision === 'replay'
+          ? { decision, status: 201, body: { tenant: { id: TENANT_A }, private: 'old response' } }
+          : { decision };
+      const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+      app.post('/v1/organizations/onboard', (c) =>
+        c.json({
+          readbackOnly: c.get('onboardingReadbackOnly') === true,
+          hasCreationClaim: !!c.get('requestClaim'),
+        }),
+      );
+      const response = await app.request('/v1/organizations/onboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': operationKey },
+        body: JSON.stringify({ operationKey, request }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ readbackOnly: true, hasCreationClaim: false });
+      expect(double.createClient).toHaveBeenCalledTimes(1);
+    },
+  );
+  it('legacy onboarding replay retains original0017 behavior', async () => {
+    const double = createSupabaseDouble({});
+    double.state.claimDecision = { decision: 'replay', status: 201, body: { legacy: true } };
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    const handler = vi.fn();
+    app.post('/v1/organizations/onboard', (c) => {
+      handler();
+      return c.json({ legacy: false });
+    });
+    const response = await app.request('/v1/organizations/onboard', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': 'legacy-operation-key', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Synthetic legacy' }),
+    });
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ legacy: true });
+    expect(handler).not.toHaveBeenCalled();
+  });
+  it('new fence invokes its live SQL journal without generic replay', async () => {
+    const double = createSupabaseDouble({});
+    double.state.claimDecision = {
+      decision: 'replay',
+      status: 201,
+      body: { private: 'old outcome' },
+    };
+    const app = await buildApp({ ENVIRONMENT: 'production' }, double);
+    const path = `/v1/organizations/onboarding-operations/${operationKey}/fence`;
+    app.post(path, (c) => c.json({ liveReadback: true, key: c.get('idempotencyKey') }));
+    const response = await app.request(path, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': `${operationKey}:fence` },
+    });
+    expect(await response.json()).toEqual({ liveReadback: true, key: `${operationKey}:fence` });
+    expect(double.createClient).not.toHaveBeenCalled();
+  });
+});

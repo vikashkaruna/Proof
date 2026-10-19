@@ -56,3 +56,5 @@ export * from './owned-deployment';
 export * from './standing-delegation';
 export * from './data-flow-declarations';
 export * from './scheduled-coverage';
+
+export * from './onboarding-operation';

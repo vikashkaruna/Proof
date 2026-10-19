@@ -131,3 +131,15 @@ describe('browser BFF tenant resolution', () => {
     expect(state.fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('exact onboarding operation bridge scope', () => {
+  it('forwards original outcome GET before tenant selection without a tenant grant', async () => {
+    state.rows = [];
+    await call(
+      undefined,
+      'foreign-tenant',
+      'v1/organizations/onboarding-operations/11111111-1111-4111-8111-111111111111',
+    );
+    expect(forwardedHeaders().get('x-tenant-id')).toBeNull();
+  });
+});

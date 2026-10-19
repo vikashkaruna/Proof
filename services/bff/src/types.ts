@@ -16,6 +16,10 @@ export type Variables = {
    */
   approvalScopes: readonly string[];
   idempotencyKey: string;
+  /** Verified 0017 claim metadata, assigned only after the claim RPC admits work. */
+  /** New exact onboarding only: nonclaimed generic outcome permits SQL readback, never creation. */
+  onboardingReadbackOnly?: true;
+  requestClaim?: { id: string; key: string; requestSha256: string; authoritySha256: string };
   /**
    * GoTrue's `session_id` claim (W1 · SEC-8). What a login MFA attestation is
    * bound to — stable across access-token refresh, gone when the session ends.

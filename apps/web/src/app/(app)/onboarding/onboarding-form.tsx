@@ -2,15 +2,19 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import type { OnboardingOperation } from '@axiom/types';
+import { useOnboardingOperation } from './use-onboarding-operation';
 
 interface OnboardingFormProps {
+  userId: string;
   userEmail: string;
   userFullName: string;
 }
 
-export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps) {
+export function OnboardingForm({ userId, userEmail, userFullName }: OnboardingFormProps) {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
+  const operation = useOnboardingOperation(userId);
+  const loading = operation.busy;
   const [error, setError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
@@ -24,62 +28,92 @@ export function OnboardingForm({ userEmail, userFullName }: OnboardingFormProps)
     dpo_email: userEmail || 'dpo@enterprise.co.in',
   });
 
+  const acceptProof = (proof: OnboardingOperation | null) => {
+    if (!proof) return;
+    if (proof.state === 'recorded') {
+      document.cookie = `axiom_active_tenant=${proof.tenantId}; path=/; max-age=31536000; SameSite=Lax`;
+      router.push(`/assessment?engagement=${encodeURIComponent(proof.engagementId)}`);
+      router.refresh();
+    } else if (proof.state === 'fenced') {
+      setError(
+        'The original request is closed without creating an organization. You may now review the fields and prepare a new request.',
+      );
+    } else if (proof.state === 'recorded_access_withdrawn') {
+      setError(
+        'The original organization was recorded. Your current account no longer has access to it. No new organization was created.',
+      );
+    } else
+      setError(
+        'The original request is still unconfirmed. Keep it and check again, or close it safely before preparing another.',
+      );
+  };
+  const originalFields = () => ({
+    name: formData.name.trim(),
+    slug: formData.slug.trim() || null,
+    tier:
+      formData.tier === 'essential'
+        ? ('essential' as const)
+        : formData.tier === 'enterprise'
+          ? ('enterprise' as const)
+          : ('growth' as const),
+    is_sdf: formData.is_sdf,
+    processes_health_data: formData.processes_health_data,
+    processes_children_data: formData.processes_children_data,
+    dpo_name: formData.dpo_name.trim() || null,
+    dpo_email: formData.dpo_email.trim() || null,
+    systems: [],
+  });
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     if (!formData.name.trim()) {
       setError('Organization name is required.');
       return;
     }
-    setLoading(true);
-    setError(null);
-
-    try {
-      const payload = {
-        name: formData.name.trim(),
-        slug: formData.slug.trim() || undefined,
-        tier: formData.tier,
-        is_sdf: formData.is_sdf,
-        processes_health_data: formData.processes_health_data,
-        processes_children_data: formData.processes_children_data,
-        dpo_name: formData.dpo_name,
-        dpo_email: formData.dpo_email,
-      };
-
-      const res = await fetch('/api/bff/v1/organizations/onboard', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error?.message || 'Onboarding failed');
-      }
-
-      // Switch active tenant cookie to the new tenant's ID
-      if (data.tenant?.id) {
-        document.cookie = `axiom_active_tenant=${data.tenant.id}; path=/; max-age=31536000; SameSite=Lax`;
-      }
-
-      // Force refresh and redirect to dashboard
-      router.push('/dashboard');
-      router.refresh();
-    } catch (err: unknown) {
-      setError(
-        err instanceof Error ? err.message : 'An unexpected error occurred during onboarding.',
-      );
-      setLoading(false);
-    }
+    acceptProof(await operation.act('create', originalFields()));
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
-      {error && (
+      {(error || operation.error) && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-medium text-red-800 animate-shake">
-          {error}
+          {error || operation.error}
         </div>
       )}
 
+      {operation.retained && (
+        <section
+          className="rounded-xl border border-slate-300 bg-slate-50 p-4 text-sm"
+          aria-label="Original organization request"
+        >
+          <h2 className="font-semibold">Resolve your original organization request</h2>
+          <p className="mt-1">
+            Its reference is retained for this account. Check its saved outcome before preparing
+            another organization. Names, DPO details and inventory are not stored in this browser
+            journal.
+          </p>
+          <p className="mt-1">
+            To resume the same request, re-enter its original fields. Changed fields require closing
+            the original request first.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={async () => acceptProof(await operation.act('read'))}
+            >
+              Check saved outcome
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={async () => acceptProof(await operation.act('fence', originalFields()))}
+            >
+              Close original request safely
+            </button>
+          </div>
+        </section>
+      )}
       {/* 1. Entity Profile Card */}
       <div className="rounded-2xl border border-[#e4e8ee] bg-white p-6 shadow-sm space-y-4">
         <div className="flex items-center gap-2 border-b border-[#eef1f5] pb-3">

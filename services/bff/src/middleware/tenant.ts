@@ -46,7 +46,11 @@ const SEEDED_E2E_TENANTS = new Set([
  */
 export const tenantResolver = createMiddleware<{ Variables: Variables }>(async (c, next) => {
   const path = c.req.path;
-  if (TENANTLESS_ROUTES.some((route) => path.endsWith(route))) {
+  const onboardingOperation =
+    /^(?:\/v1)?\/organizations\/onboarding-operations\/[0-9a-f-]{36}(?:\/fence)?$/.test(path) &&
+    ((c.req.method === 'GET' && !path.endsWith('/fence')) ||
+      (c.req.method === 'POST' && path.endsWith('/fence')));
+  if (onboardingOperation || TENANTLESS_ROUTES.some((route) => path.endsWith(route))) {
     return next();
   }
 
