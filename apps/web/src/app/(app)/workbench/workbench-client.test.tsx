@@ -203,3 +203,25 @@ it('routes Parikshan to the assessment workflow without a generic invocation', (
   expect(screen.queryByRole('button', { name: 'Run parikshan' })).toBeNull();
   expect(invoke).not.toHaveBeenCalled();
 });
+
+it('opens the specific draft plan for inspection even when no actions are approval-ready', () => {
+  const id = '10000000-0000-4000-8000-000000000009';
+  render(
+    <AgentWorkbenchClient
+      {...props}
+      pendingPlans={[
+        {
+          id,
+          title: 'Draft DPIA plan',
+          version: 1,
+          status: 'draft',
+          created_at: '2026-10-19T00:00:00Z',
+        },
+      ]}
+    />,
+  );
+  expect(screen.getByRole('link', { name: 'Inspect plan →' }).getAttribute('href')).toBe(
+    `/plans/${id}`,
+  );
+  expect(screen.queryByRole('link', { name: 'Review →' })).toBeNull();
+});

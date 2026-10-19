@@ -2,7 +2,7 @@
 
 import json
 import os
-import subprocess
+import subprocess  # nosec B404  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
 import tempfile
 import unittest
 from pathlib import Path

@@ -3,6 +3,7 @@ import { cleanup, isInaccessible, render, screen, within } from '@testing-librar
 import { afterEach, expect, it } from 'vitest';
 import { CoverageFirstPreview } from './coverage-first-preview';
 import { detailSchema } from './report-contract';
+import { PREVIEW_BRANDED_PRESENTATION_V1 } from './report-preview-version';
 
 afterEach(cleanup);
 function visible(element: HTMLElement) {
@@ -100,6 +101,7 @@ it('leaves historical, mismatched, unsupported and malformed records to the orig
   const bad = [
     '{',
     JSON.stringify({ ...document(), schema_version: 4 }),
+    JSON.stringify({ ...document(), schema_version: 8 }),
     JSON.stringify({ ...document(), kind: 'auditor_pack' }),
     JSON.stringify({ ...document(), title: 'Different request' }),
     JSON.stringify({ ...document(), engagement_id: '22222222-2222-4222-8222-222222222222' }),
@@ -118,3 +120,24 @@ it('leaves historical, mismatched, unsupported and malformed records to the orig
     view.unmount();
   }
 });
+
+it.each(['board', 'auditor'] as const)(
+  'shows exact branded public %s doc7 through its original coverage projection',
+  (kind) => {
+    const content = {
+      ...document(),
+      schema_version: 7,
+      underlying_document_version: 5,
+      kind: kind === 'board' ? 'board_report' : 'auditor_pack',
+      organization_name: 'Synthetic company',
+      source_sha256: 'b'.repeat(64),
+      underlying_source_sha256: 'c'.repeat(64),
+      presentation: PREVIEW_BRANDED_PRESENTATION_V1,
+    };
+    render(
+      <CoverageFirstPreview report={record({ kind, contentText: JSON.stringify(content) })} />,
+    );
+    expect(screen.getByRole('region', { name: 'Website evidence coverage' })).toBeTruthy();
+    expect(screen.getByText('Scores and financial exposure estimates are withheld.')).toBeTruthy();
+  },
+);

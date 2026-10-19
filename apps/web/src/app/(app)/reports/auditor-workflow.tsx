@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { ReportRequestRecovery, useReportRequestRecovery } from './report-request-journal';
 import { prepareReportOperationKey, reportRequest } from './report-request';
-import { button, field, panel, failure } from './report-ui';
+import { button, primaryButton, approvalButton, field, panel, failure } from './report-ui';
 import { detailSchema } from './report-contract';
 
 const uuid = z.uuid();
@@ -334,7 +334,7 @@ function TenantAuditorWorkflow({
           </label>
           <button
             type="submit"
-            className={button}
+            className={primaryButton}
             disabled={busy || !chosen || !confirmed || !title.trim() || recovery.blocked}
           >
             Request review pack
@@ -370,13 +370,14 @@ function TenantAuditorWorkflow({
                   setError('');
                 }}
               >
-                <span className="block font-medium">Internal reference: {item.title}</span>
+                <span className="block font-medium">{item.title}</span>
                 <span className="block text-sm text-slate-600">
                   {item.status} · Requested {date(item.createdAt)}
                 </span>
                 {existingRequestsOnly && (
                   <span className="block text-sm text-slate-600">
                     Next: {requestReviewGuidance(item.status)}
+                    <span className="mt-1 block font-medium text-teal-700">View next action →</span>
                   </span>
                 )}
               </button>
@@ -407,14 +408,51 @@ function TenantAuditorWorkflow({
           aria-label="Selected auditor request"
           className="space-y-3 rounded-lg border border-slate-200 p-4"
         >
-          <h3 className="font-semibold">Internal reference: {selected.title}</h3>
-          <p className="text-sm text-slate-600">
-            Assessment run {selected.assessmentRunId} · Request {selected.id}
-          </p>
+          <h3 className="font-semibold">{selected.title}</h3>
+          <details className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+            <summary className="cursor-pointer font-medium focus-visible:outline-2 focus-visible:outline-teal-600">
+              Source and version details
+            </summary>
+            <div className="mt-3 space-y-2 [overflow-wrap:anywhere]">
+              <p>
+                Assessment run <code>{selected.assessmentRunId}</code>
+              </p>
+              <p>
+                Request <code>{selected.id}</code>
+              </p>
+              {selected.reportId && (
+                <p>
+                  Report <code>{selected.reportId}</code>
+                </p>
+              )}
+              {report?.contentHash && (
+                <p>
+                  Content SHA-256: <code>{report.contentHash}</code>
+                </p>
+              )}
+              {artifact?.operationKey && (
+                <p>
+                  Original operation <code>{artifact.operationKey}</code>
+                </p>
+              )}
+              {artifact?.source && (
+                <p>
+                  Source SHA-256: <code>{artifact.source.sha256}</code> · Version{' '}
+                  {artifact.source.versionId}
+                </p>
+              )}
+              {artifact?.pdf && (
+                <p>
+                  PDF SHA-256: <code>{artifact.pdf.sha256}</code> · Version {artifact.pdf.versionId}{' '}
+                  · Retain until {date(artifact.pdf.retainUntil)}
+                </p>
+              )}
+            </div>
+          </details>
           {canManage && !selected.reportId && selected.status === 'requested' && (
             <button
               type="button"
-              className={button}
+              className={primaryButton}
               disabled={busy}
               onClick={() =>
                 void act(`/reports/statutory/auditor/requests/${selected.id}/draft`, {})
@@ -428,7 +466,7 @@ function TenantAuditorWorkflow({
               {(canManage || artifact?.reportStatus === 'published') && (
                 <button
                   type="button"
-                  className={button}
+                  className={primaryButton}
                   onClick={() => onOpenReport(selected.reportId!)}
                 >
                   Open report for review
@@ -439,36 +477,28 @@ function TenantAuditorWorkflow({
                   The draft is private to the internal founder until release.
                 </p>
               )}
-              {report && (
-                <p className="text-sm">
-                  Report: {report.status} · Content SHA-256{' '}
-                  <code className="break-all">{report.contentHash}</code>
-                </p>
-              )}
+              {report && <p className="text-sm">Report: {report.status}</p>}
               {artifact && (
                 <div className="space-y-1 text-sm">
-                  <p>Retained artifact build: {artifact.status}</p>
+                  <p>
+                    Retention:{' '}
+                    {artifact.status === 'not_started'
+                      ? 'Not built yet'
+                      : artifact.status === 'pending'
+                        ? 'Outcome pending — reconcile original build'
+                        : artifact.source && artifact.pdf
+                          ? 'Source and PDF retained'
+                          : 'Build settled; source or PDF details unavailable'}
+                  </p>
                   {artifact.lastErrorCode && (
                     <p className="text-[#D9534F]">Storage outcome: {artifact.lastErrorCode}</p>
-                  )}
-                  {artifact.source && (
-                    <p>
-                      Source SHA-256 <code className="break-all">{artifact.source.sha256}</code> ·
-                      version {artifact.source.versionId}
-                    </p>
-                  )}
-                  {artifact.pdf && (
-                    <p>
-                      PDF SHA-256 <code className="break-all">{artifact.pdf.sha256}</code> · version{' '}
-                      {artifact.pdf.versionId} · retain until {date(artifact.pdf.retainUntil)}
-                    </p>
                   )}
                 </div>
               )}
               {canManage && report?.status === 'approved' && artifact?.status === 'not_started' && (
                 <button
                   type="button"
-                  className={button}
+                  className={primaryButton}
                   disabled={busy}
                   onClick={() => {
                     void act(`/reports/statutory/${selected.reportId}/artifacts`, () => {
@@ -510,7 +540,7 @@ function TenantAuditorWorkflow({
               )}
               {artifact?.status === 'settled' && artifact.pdf && (
                 <a
-                  className={button}
+                  className={primaryButton}
                   href={`/api/bff/v1/reports/statutory/${selected.reportId}/pdf`}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -536,7 +566,7 @@ function TenantAuditorWorkflow({
                     </label>
                     <button
                       type="button"
-                      className={button}
+                      className={approvalButton}
                       disabled={busy || !releaseConfirmed}
                       onClick={() =>
                         void act(`/reports/${selected.reportId}/release`, {

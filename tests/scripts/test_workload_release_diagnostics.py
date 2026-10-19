@@ -4,6 +4,7 @@ import ast
 import hashlib
 import io
 import json
+import re
 import subprocess
 import tarfile
 import tempfile
@@ -241,6 +242,64 @@ class ReleaseDiagnostics(unittest.TestCase):
         self.assertEqual(caught.exception.returncode, 60)
         self.assertEqual(str(caught.exception), "isolated command failed")
         self.assertNotIn("synthetic-secret", repr(caught.exception))
+
+
+class WorkerFailurePhaseDiagnostics(unittest.TestCase):
+    def setUp(self):
+        tree = ast.parse(SOURCE.read_text())
+        node = next(
+            n
+            for n in tree.body
+            if isinstance(n, ast.FunctionDef) and n.name == "worker_failure_phase"
+        )
+        env = {"re": re}
+        exec(  # noqa: S102 - fixed repository AST only; pure string parser.
+            compile(ast.Module(body=[node], type_ignores=[]), str(SOURCE), "exec"), env
+        )
+        self.parse = env["worker_failure_phase"]
+
+    def test_phase_survives_private_browser_diagnostics_and_no_private_output_escapes(
+        self,
+    ):
+        phase = "normal-auth-public-report-board-request"
+        stderr = (
+            "synthetic-private-token\nWorkload assessment failed at "
+            + phase
+            + ". Private output withheld.\nRegistered browser diagnostic: "
+            + '{"category":"child-signal-before-result","private":"synthetic-secret"}\n'
+        )
+        self.assertEqual(self.parse(stderr), phase)
+        self.assertNotIn("synthetic", self.parse(stderr))
+
+    def test_single_original_line_contract_still_accepted(self):
+        self.assertEqual(
+            self.parse(
+                "Workload assessment failed at report-test. Private output withheld.\n"
+            ),
+            "report-test",
+        )
+
+    def test_unsafe_nonanchored_missing_or_oversized_labels_refused(self):
+        for label in ["/private/path", "token=secret", "phase with spaces", "a" * 101]:
+            self.assertIsNone(
+                self.parse(
+                    "Workload assessment failed at "
+                    + label
+                    + ". Private output withheld.\n"
+                )
+            )
+        for value in [
+            "",
+            "prefix Workload assessment failed at phase. Private output withheld.",
+            "Workload assessment failed at phase. Private output withheld. suffix",
+            "x" * 1048577,
+        ]:
+            self.assertIsNone(self.parse(value))
+
+    def test_conflicting_phases_refused_without_forwarding_stderr(self):
+        line = "Workload assessment failed at {}. Private output withheld.\n"
+        self.assertIsNone(self.parse(line.format("one") + line.format("two")))
+        self.assertEqual(self.parse(line.format("one") * 2), "one")
 
 
 if __name__ == "__main__":

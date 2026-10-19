@@ -9,7 +9,7 @@ https://docs.docker.com/reference/cli/dockerd/#configuration-reload-behavior
 import json
 import os
 import platform
-import subprocess
+import subprocess  # nosec B404  # fixed disposable hosted-CI Docker/system commands, remote context stripped
 import tempfile
 import time
 from pathlib import Path
@@ -24,7 +24,7 @@ def run(argv):
     env = {
         key: value for key, value in os.environ.items() if not key.startswith("DOCKER_")
     }
-    return subprocess.run(
+    return subprocess.run(  # nosec B603  # fixed disposable hosted-CI Docker/system commands, remote context stripped
         argv, check=True, capture_output=True, text=True, timeout=30, env=env
     ).stdout
 

@@ -13,7 +13,7 @@ import hashlib
 import html
 import json
 import re
-import subprocess
+import subprocess  # nosec B404  # fixed read-only Git commands and local source paths; shell is never enabled
 from pathlib import Path
 from urllib.parse import urlsplit
 # Local SVGs reject DTD/entities and use a strict element allowlist.
@@ -143,7 +143,7 @@ def source_binding(root: Path, watched: dict[str, str], require_clean: bool = Fa
     # Git is local read-only evidence. Never invoke a shell or include private docs.
     paths = sorted(name for name in watched if not name.startswith("docs/private-"))
     def git(*args: str) -> str:
-        return subprocess.run(["git", "-C", str(root), *args], check=True,
+        return subprocess.run(["git", "-C", str(root), *args], check=True,  # nosec B603, B607  # fixed read-only Git commands and local source paths; shell is never enabled
                               capture_output=True, text=True, timeout=10).stdout.strip()
     try:
         if Path(git("rev-parse", "--show-toplevel")).resolve() != root.resolve():

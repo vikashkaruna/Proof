@@ -50,6 +50,12 @@ const progressStages = new Set([
   'human-review',
   'assessment-submit',
   'submission-retain',
+  'report-board-content',
+  'report-board-preview',
+  'report-board-retained',
+  'report-board-release',
+  'report-board-dossier',
+  'report-browser-cleanup',
 ]);
 /** Fixed checkpoint names plus HTTP status/equality booleans only. No request data. */
 function savedTargetSelectionEvidence(value: unknown) {

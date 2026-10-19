@@ -5,7 +5,7 @@ import importlib.util
 import io
 import os
 import runpy
-import subprocess
+import subprocess  # nosec B404  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
 import sys
 import tempfile
 import unittest
@@ -86,7 +86,7 @@ class FixtureImageTests(unittest.TestCase):
                 images.fixture_image(source)
 
     def test_public_startup_diagnostic_never_relays_stderr_or_arguments(self):
-        secret = "synthetic-do-not-print-token"
+        secret = "synthetic-do-not-print-token"  # nosec B105  # synthetic fixture sentinel only, never an authentication credential
         for stderr, category in (
             ("toomanyrequests " + secret, "registry rate limit"),
             ("manifest unknown " + secret, "registry manifest unavailable"),
@@ -108,7 +108,7 @@ class FixtureImageTests(unittest.TestCase):
     def test_public_startup_reports_transfer_certificate_integrity_and_storage_failures(
         self,
     ):
-        secret = "synthetic-private-token /private/path https://secret.example/token"
+        secret = "synthetic-private-token /private/path https://secret.example/token"  # nosec B105  # synthetic fixture sentinel only, never an authentication credential
         cases = (
             (
                 "failed to copy: unexpected status from GET request: 502 Bad Gateway",
@@ -292,7 +292,7 @@ esac
                 }
                 if override is not None:
                     env["AXIOM_TEST_INGRESS_IMAGE"] = override
-                result = subprocess.run(
+                result = subprocess.run(  # nosec B603  # fixed isolated CI fixture subprocess argv; synthetic inputs, no shell or provider credentials
                     [
                         "/bin/bash",
                         str(ROOT / "tests/deployment/selfhosted-supabase.sh"),

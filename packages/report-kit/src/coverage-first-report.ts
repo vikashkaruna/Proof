@@ -455,3 +455,11 @@ export function renderReviewedCoverageFirstReport(raw: z.infer<typeof reviewedIn
     throw Error('coverage_review_refused');
   }
 }
+
+/** Pure presentation for a separately validated versioned wrapper. No authority is granted. */
+export function renderCoverageFirstDocumentPresentation(
+  document: unknown,
+  review?: { displayName: string; actorId: string; reviewedAt: string },
+) {
+  return html(CoverageFirstDocumentV5Schema.parse(document), review);
+}

@@ -17,7 +17,7 @@ import json
 import os
 import re
 import secrets
-import subprocess  # nosec B404 - fixed psql/Python commands, no shell
+import subprocess  # nosec B404  # fixed psql/Python commands, no shell
 import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -27,9 +27,17 @@ PHASES = ("roles", "series", "inspect", "adopt")
 COMPONENT = re.compile(r"axiom-proof-preprod-[a-z0-9-]+\Z")
 SECRET_BINDINGS = {
     "SUPABASE_DB_URL": "ADMIN_DB_URL",
-    "GOTRUE_DB_PASSWORD": "GOTRUE_DB_PASSWORD",
-    "REST_DB_PASSWORD": "REST_DB_PASSWORD",
+    "GOTRUE_DB_PASSWORD": "GOTRUE_DB_PASSWORD",  # nosec B105  # configuration secret reference/key name or absent optional bearer, never a credential value
+    "REST_DB_PASSWORD": "REST_DB_PASSWORD",  # nosec B105  # configuration secret reference/key name or absent optional bearer, never a credential value
 }
+
+
+
+def postgres_literal(value: str) -> str:
+    """Encode a PostgreSQL E literal independently of standard_conforming_strings."""
+    if "\x00" in value:
+        raise ValueError("NUL in SQL literal refused")
+    return "E'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
 def required(source: dict[str, str], key: str) -> str:
@@ -284,7 +292,7 @@ def runtime_environment(source: dict[str, str]) -> dict[str, str]:
 
 
 def run_sql(sql: str, env: dict[str, str]) -> None:
-    result = subprocess.run(  # nosec B603 B607 - fixed psql argv; SQL via stdin, secrets absent from argv
+    result = subprocess.run(  # nosec B603, B607  # fixed psql argv; SQL via stdin, secrets absent from argv
         ["psql", "-X", "-q", "-w", "-v", "ON_ERROR_STOP=1"],
         input=sql,
         text=True,
@@ -314,7 +322,7 @@ do $$begin
  if exists(select 1 from information_schema.tables where table_schema='auth') then
   raise exception 'roles phase requires empty auth before GoTrue';end if;
 end $$;
-"""
+"""  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
         + bootstrap
         + f"""
 do $$begin
@@ -330,7 +338,7 @@ alter schema auth owner to supabase_auth_admin;
 grant usage,create on schema auth to supabase_auth_admin;
 grant usage on schema public to supabase_auth_admin;
 commit;
-"""
+"""  # nosec B608  # frozen roles/names/hex pins; JSON payloads use explicit E literals
     )
 
 
@@ -364,7 +372,7 @@ def role_posture_sql(role: str) -> str:
  or exists(select 1 from pg_roles where rolname='{role}' and (rolsuper or rolbypassrls)) then
   raise exception 'managed role requires existing NOSUPERUSER NOBYPASSRLS posture' using errcode='42501';end if;
 end $managed_role_posture$;
-"""
+"""  # nosec B608  # frozen roles/names/hex pins; JSON payloads use explicit E literals
 
 
 def managed_adapter_manifest() -> dict:
@@ -450,23 +458,23 @@ create trigger adapter_receipt_no_truncate before truncate on axiom_migrations.d
         if program.count(original) != 1:
             raise ValueError("Exact reviewed migration body unavailable in runner")
         # No secrets: all interpolated identifiers/hashes/clauses are frozen constants.
-        changes = json.dumps(entry["changes"], sort_keys=True).replace("'", "''")
+        changes = postgres_literal(json.dumps(entry["changes"], sort_keys=True))
         receipt = f"""
 insert into axiom_migrations.deployment_adapters(migration_name,original_sha256,effective_body_sha256,manifest_sha256,changes)
- values('{name}','{entry["original_sha256"]}','{entry["effective_body_sha256"]}','{manifest["manifest_sha256"]}','{changes}'::jsonb);
-"""
+ values('{name}','{entry["original_sha256"]}','{entry["effective_body_sha256"]}','{manifest["manifest_sha256"]}',{changes}::jsonb);
+"""  # nosec B608  # frozen roles/names/hex pins; JSON payloads use explicit E literals
         program = program.replace(original, effective + receipt)
         existing_check = f"""do $adapter_check$ begin
  if exists(select 1 from axiom_migrations.applied where name='{name}')
  and not exists(select 1 from axiom_migrations.deployment_adapters where migration_name='{name}'
  and original_sha256='{entry["original_sha256"]}' and effective_body_sha256='{entry["effective_body_sha256"]}'
- and manifest_sha256='{manifest["manifest_sha256"]}' and changes='{changes}'::jsonb) then
+ and manifest_sha256='{manifest["manifest_sha256"]}' and changes={changes}::jsonb) then
   raise exception 'recorded managed migration adapter provenance absent or changed';end if;
 end $adapter_check$;
-"""
+"""  # nosec B608  # frozen roles/names/hex pins; JSON payloads use explicit E literals
         start = (
             "do $migration_check$ begin\n"
-            + f"  if exists (select 1 from axiom_migrations.applied where name='{name}'"
+            + f"  if exists (select 1 from axiom_migrations.applied where name='{name}'"  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
         )
         if start not in program:
             raise ValueError("Reviewed migration checkpoint unavailable")
@@ -477,29 +485,29 @@ end $adapter_check$;
 def series_program() -> str:
     # Fail before migration0000 can create a hand-rolled auth.users.
     before = (
-        "do $$begin\n"
+        "do $$begin\n"  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
         + "\n".join(
-            f"if exists(select 1 from pg_roles where rolname='{role}' and (rolsuper or rolbypassrls)) then raise exception 'managed role unsafe before series';end if;"
+            f"if exists(select 1 from pg_roles where rolname='{role}' and (rolsuper or rolbypassrls)) then raise exception 'managed role unsafe before series';end if;"  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
             for entry in MANAGED_ROLE_ADAPTERS.values()
             for role in entry["roles"]
         )
-        + "\nend $$;\n"
+        + "\nend $$;\n"  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
         + """do $$begin
  if to_regclass('auth.schema_migrations') is null or to_regclass('auth.users') is null then
   raise exception 'GoTrue own migrations must complete before application series';end if;
  if not exists(select 1 from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='auth' and t.typname='factor_type') then
   raise exception 'GoTrue auth search_path/migrations unconfirmed';end if;
 end $$;
-"""
+"""  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
     )
     after = (
-        "do $$begin\n"
+        "do $$begin\n"  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
         + "\n".join(
-            f"if not exists(select 1 from pg_roles where rolname='{role}' and not rolsuper and not rolbypassrls and not rolcanlogin and not rolinherit) then raise exception 'managed role unsafe after series';end if;"
+            f"if not exists(select 1 from pg_roles where rolname='{role}' and not rolsuper and not rolbypassrls and not rolcanlogin and not rolinherit) then raise exception 'managed role unsafe after series';end if;"  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
             for entry in MANAGED_ROLE_ADAPTERS.values()
             for role in entry["roles"]
         )
-        + "\nend $$;\n"
+        + "\nend $$;\n"  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
         + """
 begin;
 -- Narrow marketing-only grants. Never regrant product tables or BYPASSRLS.
@@ -521,7 +529,7 @@ do $$begin
   raise exception 'marketing bootstrap must not rely on BYPASSRLS';end if;
 end $$;
 commit;
-"""
+"""  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
     )
     return before + managed_migration_program() + after
 
@@ -551,14 +559,14 @@ def library_seed_program(path: Path, release: str) -> str:
         )
     ):
         raise ValueError("Exact validated library artifact refused")
-    body = compact.replace("'", "''")
+    body = postgres_literal(compact)
     artifact_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     return f"""
 begin;
 select pg_advisory_xact_lock(hashtextextended('axiom-marketing-library-seed',0));
 lock table public.control_libraries,public.controls in share row exclusive mode;
 do $library$ declare
- s jsonb := '{body}'::jsonb; v text := s->>'version'; expected public.controls; actual public.controls;
+ s jsonb := {body}::jsonb; v text := s->>'version'; expected public.controls; actual public.controls;
  n integer := jsonb_array_length(s->'controls'); c jsonb;
 begin
  if exists(select 1 from public.control_libraries where is_current and version<>v) then
@@ -601,7 +609,7 @@ end $$;
 insert into axiom_migrations.marketing_library_builds(release_sha,artifact_sha256,seed_sha256)
  values('{release}','{artifact_hash}','{digest}') on conflict do nothing;
 commit;
-"""
+"""  # nosec B608  # frozen roles/names/hex pins; JSON payloads use explicit E literals
 
 
 def run_phase(source: dict[str, str], phase: str) -> None:
@@ -681,17 +689,17 @@ def admission_programs(database: str) -> dict[str, str]:
  'database_oid',oid::bigint,'database_name',datname,'allow_connections',datallowconn,
  'owner_capable',(select rolsuper from pg_roles where rolname=current_user) or pg_has_role(datdba,'usage'),
  'shared_preloads',current_setting('shared_preload_libraries'))
- from pg_database where datname=""" + value + ";"
+ from pg_database where datname=""" + value + ";"  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
     return {
         'identity': identity,
         'close': "begin;set local lock_timeout='5s';set local statement_timeout='10s';alter database " + name + " allow_connections false;commit;" + identity,
-        'startup_locks': "select pg_stat_clear_snapshot();select json_build_object('pid',pg_backend_pid(),'startup_locks',(select count(*) from pg_locks where locktype='object' and classid='pg_database'::regclass and objid=(select oid from pg_database where datname=" + value + ") and objsubid=0 and mode='RowExclusiveLock'));",
-        'clients': "select pg_stat_clear_snapshot();select json_build_object('pid',pg_backend_pid(),'clients',coalesce((select json_agg(json_build_object('pid',pid,'role',usename,'backend_type',backend_type,'state',state)) from pg_stat_activity where datname=" + value + " and backend_type='client backend'),'[]'::json),'unknown_workers',coalesce((select json_agg(json_build_object('pid',pid,'backend_type',backend_type)) from pg_stat_activity where datname=" + value + " and backend_type not in ('client backend','autovacuum worker')),'[]'::json),'maintenance_clients',(select count(*) from pg_stat_activity where backend_type='client backend' and usename=current_user and pid<>pg_backend_pid()),'prepared_transactions',(select count(*) from pg_prepared_xacts where database=" + value + "));",
+        'startup_locks': "select pg_stat_clear_snapshot();select json_build_object('pid',pg_backend_pid(),'startup_locks',(select count(*) from pg_locks where locktype='object' and classid='pg_database'::regclass and objid=(select oid from pg_database where datname=" + value + ") and objsubid=0 and mode='RowExclusiveLock'));",  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
+        'clients': "select pg_stat_clear_snapshot();select json_build_object('pid',pg_backend_pid(),'clients',coalesce((select json_agg(json_build_object('pid',pid,'role',usename,'backend_type',backend_type,'state',state)) from pg_stat_activity where datname=" + value + " and backend_type='client backend'),'[]'::json),'unknown_workers',coalesce((select json_agg(json_build_object('pid',pid,'backend_type',backend_type)) from pg_stat_activity where datname=" + value + " and backend_type not in ('client backend','autovacuum worker')),'[]'::json),'maintenance_clients',(select count(*) from pg_stat_activity where backend_type='client backend' and usename=current_user and pid<>pg_backend_pid()),'prepared_transactions',(select count(*) from pg_prepared_xacts where database=" + value + "));",  # nosec B608  # immutable adapter roles/names and computed hex pins; JSON uses explicit E literals
         'open': "begin;set local lock_timeout='5s';set local statement_timeout='10s';alter database " + name + " allow_connections true;commit;" + identity,
     }
 
 def inspect_clients(source: dict[str, str], env: dict[str, str]) -> None:
-    result = subprocess.run(  # nosec B603 B607 - fixed read-only psql, TLS env, no query text or credentials in output
+    result = subprocess.run(  # nosec B603, B607  # fixed read-only psql, TLS env, no query text or credentials in output
         ["psql", "-X", "-q", "-A", "-t", "-w", "-v", "ON_ERROR_STOP=1"],
         input=inspection_program(),
         text=True,

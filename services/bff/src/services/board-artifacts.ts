@@ -1,3 +1,4 @@
+import { renderReviewedBrandedReport } from '@axiom/report-kit/branded-report';
 import { renderReviewedCoverageFirstReport } from '@axiom/report-kit/coverage-first-report';
 import { renderReviewedQuestionnaireEvidenceReport } from '@axiom/report-kit/questionnaire-evidence-report';
 /** Exact-version, reviewed board publication. Provider uncertainty stays pending. */
@@ -358,16 +359,20 @@ export class BoardArtifactService {
     try {
       const header = JSON.parse(source.source_text);
       if (
-        (header.schema_version === 4 || header.schema_version === 5) &&
+        (header.schema_version === 4 ||
+          header.schema_version === 5 ||
+          header.schema_version === 6) &&
         header.report_kind !== 'board'
       )
         throw Error();
       html = (
-        header.schema_version === 5
-          ? renderReviewedQuestionnaireEvidenceReport
-          : header.schema_version === 4
-            ? renderReviewedCoverageFirstReport
-            : renderReviewedBoardHtml
+        header.schema_version === 6
+          ? renderReviewedBrandedReport
+          : header.schema_version === 5
+            ? renderReviewedQuestionnaireEvidenceReport
+            : header.schema_version === 4
+              ? renderReviewedCoverageFirstReport
+              : renderReviewedBoardHtml
       )({
         sourceText: source.source_text,
         sourceSha256: source.source_sha256,
@@ -393,6 +398,14 @@ export class BoardArtifactService {
         requireChromium: true,
         timeoutMs: 30_000,
         documentDate: review.reviewed_at,
+        ...(JSON.parse(source.source_text).schema_version === 6
+          ? {
+              brandedPresentation: {
+                revision: 'axiom-report-brand-1' as const,
+                title: report.title,
+              },
+            }
+          : {}),
       });
     } catch (cause) {
       // The client sees only the code; the operator needs the cause.
@@ -594,11 +607,13 @@ export class BoardArtifactService {
           content_sha256: report.content_sha256,
           review_sha256: review.review_sha256,
           renderer_version:
-            JSON.parse(source.source_text).schema_version === 5
-              ? 'chromium-board-questionnaire-evidence-v6'
-              : JSON.parse(source.source_text).schema_version === 4
-                ? 'chromium-board-evidence-v5'
-                : 'chromium-board-v1',
+            JSON.parse(source.source_text).schema_version === 6
+              ? 'chromium-board-brand-v7'
+              : JSON.parse(source.source_text).schema_version === 5
+                ? 'chromium-board-questionnaire-evidence-v6'
+                : JSON.parse(source.source_text).schema_version === 4
+                  ? 'chromium-board-evidence-v5'
+                  : 'chromium-board-v1',
           artifacts,
         },
         p_correlation_id: randomUUID(),

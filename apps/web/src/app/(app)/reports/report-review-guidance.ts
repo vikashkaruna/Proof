@@ -6,7 +6,7 @@ export function requestReviewGuidance(status: RequestStatus): string {
     case 'drafted':
       return 'Open the exact draft and record its review decision.';
     case 'reviewed':
-      return 'Inspect the retained build, preview its exact PDF and review release readiness.';
+      return 'Build or inspect retained artifacts, then preview the exact PDF before release.';
     case 'released':
       return 'Read or download the original released PDF.';
     case 'rejected':

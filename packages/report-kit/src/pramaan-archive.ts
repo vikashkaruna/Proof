@@ -1,3 +1,4 @@
+import { BrandedSourceV6Schema, verifyBrandedSource } from './branded-report';
 import {
   CoverageFirstSourceV4Schema,
   parseCoverageFirstJson,
@@ -46,9 +47,38 @@ function archiveValidationSource(
   kind: 'board' | 'auditor',
   input: PramaanSourceArchiveInput,
   scope: z.infer<typeof inputSchema>,
-) {
+): string {
   const text = Buffer.from(input.sourceBytes).toString('utf8');
   const version = JSON.parse(text).schema_version;
+  if (version === 6) {
+    const envelope = BrandedSourceV6Schema.parse(parseCoverageFirstJson(text, 4 * 1024 * 1024));
+    if (
+      envelope.report_kind !== kind ||
+      ![4, 5].includes(
+        Number(
+          (
+            parseCoverageFirstJson(envelope.retained_source.text, 4 * 1024 * 1024) as {
+              schema_version?: unknown;
+            }
+          ).schema_version,
+        ),
+      )
+    )
+      throw Error('Branded archive kind refused');
+    const validation = archiveValidationSource(
+      kind,
+      { ...input, sourceBytes: Buffer.from(envelope.retained_source.text) },
+      { ...scope, source: { ...scope.source, sha256: envelope.retained_source.sha256 } },
+    );
+    const original = z.object({ assessment_run_id: z.uuid() }).parse(JSON.parse(validation));
+    verifyBrandedSource(text, scope.source.sha256, {
+      tenantId: scope.tenantId,
+      engagementId: scope.engagementId,
+      requestId: scope.requestId,
+      assessmentRunId: original.assessment_run_id,
+    });
+    return validation;
+  }
   if (version === 5) {
     const envelope = QuestionnaireEvidenceSourceV5Schema.parse(
       parseCoverageFirstJson(text, 4 * 1024 * 1024),

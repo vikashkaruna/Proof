@@ -7,7 +7,7 @@ https://github.com/supabase/cli/blob/v2.116.0/apps/cli-go/internal/utils/docker.
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404  # fixed hosted-CI/local Docker argv; exact project/container/startup command validated
 import threading
 import time
 import tomllib
@@ -203,7 +203,7 @@ def inspect(trace, identity):
     ):
         return
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603  # fixed hosted-CI/local Docker argv; exact project/container/startup command validated
             BASE
             + ["inspect", "--type", "container", "--format", INSPECT_FORMAT, identity],
             capture_output=True,
@@ -237,7 +237,7 @@ def observe_during(wait_cli, project, evidence):
     started = time.monotonic()
     since = str(trace.start_nano // 10**9)
     try:
-        watcher = subprocess.Popen(
+        watcher = subprocess.Popen(  # nosec B603  # fixed hosted-CI/local Docker argv; exact project/container/startup command validated
             BASE
             + [
                 "events",
@@ -323,7 +323,7 @@ def hosted_guard():
         "SUPABASE_PROJECT_ID"
     ):
         raise ValueError("Docker or project context override refused")
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603, B607  # fixed hosted-CI/local Docker argv; exact project/container/startup command validated
         ["uname", "-s"], capture_output=True, text=True, check=False, timeout=2
     )
     if result.returncode or result.stdout.strip() != "Linux":
@@ -453,7 +453,7 @@ def main(argv):
         if tomllib.load(stream).get("project_id") != project:
             raise ValueError("Owned startup config required")
     result = observe_during(
-        lambda: subprocess.run(command, check=False).returncode, project, path
+        lambda: subprocess.run(command, check=False).returncode, project, path  # nosec B603  # fixed hosted-CI/local Docker argv; exact project/container/startup command validated
     )
     return result if result >= 0 else 128 - result
 

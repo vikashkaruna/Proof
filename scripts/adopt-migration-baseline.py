@@ -22,12 +22,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import re
-import subprocess  # nosec B404 - docker exec with a validated list argv, no shell
+import subprocess  # nosec B404  # docker exec with a validated list argv, no shell
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CREATE_TABLE = re.compile(r"create\s+table\s+(?:if\s+not\s+exists\s+)?([\w.\"]+)", re.I)
+
+
+
+def postgres_literal(value: str) -> str:
+    """Encode a PostgreSQL E literal independently of standard_conforming_strings."""
+    if "\x00" in value:
+        raise ValueError("NUL in SQL literal refused")
+    return "E'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
 def created_tables(sql: str) -> list[str]:
@@ -54,7 +62,7 @@ def plan(files: list[tuple[str, str]], existing: set[str], recorded: set[str], h
 
 
 def psql(container: str, sql: str) -> str:
-    r = subprocess.run(  # nosec B603 B607 - fixed docker/psql argv, container name validated by the caller
+    r = subprocess.run(  # nosec B603, B607  # fixed docker/psql argv, container name validated by the caller
         ["docker", "exec", "-i", container, "psql", "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-Atq"],
         input=sql,
         capture_output=True,
@@ -100,12 +108,12 @@ def main(argv: list[str] | None = None) -> int:
         print("Refusing --apply with an unverified migration gap.", file=sys.stderr)
         return 2
     digests = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
-    values = ",".join(f"('{name}','{digests[name]}')" for name in adopt)  # nosec B608 - validated filenames and computed hex digests
+    values = ",".join(f"({postgres_literal(name)},{postgres_literal(digests[name])})" for name in adopt)  # nosec B608  # validated filenames and computed hex digests
     psql(
         args.container,
         "create schema if not exists axiom_migrations;"
         "create table if not exists axiom_migrations.applied (name text primary key, sha256 text not null, applied_at timestamptz not null default now());"
-        f"insert into axiom_migrations.applied(name,sha256) values {values} on conflict(name) do nothing;",
+        f"insert into axiom_migrations.applied(name,sha256) values {values} on conflict(name) do nothing;",  # nosec B608  # JSON/filename data is encoded with explicit PostgreSQL E-string escaping
     )
     print(f"Recorded {len(adopt)} verified migrations.")
     return 0

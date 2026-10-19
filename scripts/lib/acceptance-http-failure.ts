@@ -1,6 +1,10 @@
 /** Private harness diagnostics only. Never retain a raw response or arbitrary error text. */
 const codes = new Set([
   'validation_failed',
+  'report_storage_unavailable',
+  'report_persistence_unconfirmed',
+  'invalid_report_source',
+  'invalid_request',
   'invalid_assessment_request',
   'expected_actor_required',
   'assessment_actor_changed',
@@ -39,5 +43,25 @@ export function acceptanceHttpFailure(expected: number, actual: number, body: un
     expectedStatus: expected,
     actualStatus: actual,
     errorCode: typeof code === 'string' && codes.has(code) ? code : 'unrecognized',
+  });
+}
+
+/** Public fixture artifact: explicit safe fields only, never raw response data. */
+export function acceptanceHttpFailureArtifact(
+  revision: string,
+  phase: string,
+  failure: ReturnType<typeof acceptanceHttpFailure>,
+) {
+  if (!/^[a-f0-9]{40}$/.test(revision) || !/^[a-z0-9-]{1,100}$/.test(phase))
+    throw new Error('Invalid diagnostic context');
+  return Object.freeze({
+    schemaVersion: 1,
+    kind: 'sanitized-acceptance-http-failure',
+    revision,
+    phase,
+    ...acceptanceHttpFailure(failure.expectedStatus, failure.actualStatus, {
+      error: { code: failure.errorCode },
+    }),
+    accepted: false,
   });
 }

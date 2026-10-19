@@ -33,7 +33,10 @@ import {
  * frame, token, service key, subprocess stderr or raw exception is emitted. */
 import assert from 'node:assert/strict';
 import { loadParityFixture, guardedParitySql } from './lib/parity-fixture-target.js';
-import { acceptanceHttpFailure } from './lib/acceptance-http-failure.js';
+import {
+  acceptanceHttpFailure,
+  acceptanceHttpFailureArtifact,
+} from './lib/acceptance-http-failure.js';
 import { createServer } from 'node:http';
 import { canonicalJson } from '../packages/ledger/src/canonicalise.js';
 import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
@@ -132,6 +135,9 @@ async function stopOwnedBrowserChildren() {
   ownedBrowserChildren.clear();
 }
 async function main() {
+  assertRegisteredDiagnosticDestinationAbsent(
+    '.axiom-runtime/workload-assessment/http-failure.json',
+  );
   const withPublicReports = reportAcceptanceRequested();
   const withRegisteredBrowser = registeredBrowserRequested();
   if (withRegisteredBrowser) {
@@ -1725,13 +1731,13 @@ except Exception as error:
         },
       });
       outcomes[
-        'normal-auth-reviewed-source4-board5-auditor5-mfa-human-review-exact-provider-release-download'
+        'normal-auth-reviewed-source6-board7-auditor7-mfa-human-review-exact-provider-release-download'
       ] = true;
       if (withRegisteredBrowser) {
         writePublicReportBrowserHandoff(publicReportProof);
         assert(registeredBrowserCompletion);
         await registeredBrowserCompletion;
-        outcomes['normal-auth-registered-browser-source4-board5-auditor5-lost-response-recovery'] =
+        outcomes['normal-auth-registered-browser-source6-board7-auditor7-lost-response-recovery'] =
           true;
       }
     }
@@ -2688,6 +2694,12 @@ main()
         `${directory}/actual-http-failure-${revision.slice(0, 12)}-${Date.now()}.private.json`,
         JSON.stringify({ revision, phase, ...httpFailure, accepted: false }, null, 2) + '\n',
         { mode: 0o600 },
+      );
+      mkdirSync('.axiom-runtime/workload-assessment', { recursive: true, mode: 0o700 });
+      writeFileSync(
+        '.axiom-runtime/workload-assessment/http-failure.json',
+        JSON.stringify(acceptanceHttpFailureArtifact(revision, phase, httpFailure)) + '\n',
+        { mode: 0o600, flag: 'wx' },
       );
     }
     process.stderr.write(`Workload assessment failed at ${phase}. Private output withheld.\n`);

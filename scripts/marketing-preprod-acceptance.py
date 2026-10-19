@@ -16,7 +16,7 @@ import importlib.util
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404  # fixed reviewed local CLI argv; bounded protected evidence logs
 from pathlib import Path
 from urllib.parse import quote, urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -70,7 +70,7 @@ def command(argv, log: Path, *, timeout=1800, env=None):
         log, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600
     )
     with os.fdopen(descriptor, "wb") as stream:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603  # fixed reviewed local CLI argv; bounded protected evidence logs
             argv,
             cwd=ROOT,
             env=env,
@@ -84,7 +84,7 @@ def command(argv, log: Path, *, timeout=1800, env=None):
 
 
 def clean_source(release_sha):
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603, B607  # fixed reviewed local CLI argv; bounded protected evidence logs
         ["git", "rev-parse", "HEAD"],
         cwd=ROOT,
         capture_output=True,
@@ -92,7 +92,7 @@ def clean_source(release_sha):
         timeout=10,
         check=True,
     )
-    dirty = subprocess.run(
+    dirty = subprocess.run(  # nosec B603, B607  # fixed reviewed local CLI argv; bounded protected evidence logs
         ["git", "status", "--porcelain", "--untracked-files=normal"],
         cwd=ROOT,
         capture_output=True,
@@ -179,7 +179,7 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def get(url, token="", *, limit=MAX_BODY):
+def get(url, token="", *, limit=MAX_BODY):  # nosec B107  # configuration secret reference/key name or absent optional bearer, never a credential value
     parsed = urlparse(url)
     if (
         parsed.scheme != "https"

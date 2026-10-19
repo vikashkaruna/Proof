@@ -19,7 +19,7 @@ import json
 import os
 import re
 import stat
-import subprocess  # nosec B404 - fixed argv, no shell and no credential argv
+import subprocess  # nosec B404  # fixed argv, no shell and no credential argv
 import time
 import uuid
 from datetime import datetime
@@ -129,7 +129,7 @@ def run(
     remaining = 30.0 if deadline is None else min(30.0, deadline - time.monotonic())
     if remaining <= 0:
         raise ValueError("Protected operator deadline elapsed")
-    return subprocess.run(
+    return subprocess.run(  # nosec B603  # owned deployment/identity selectors and fixed CLI list argv
         arguments,
         check=True,
         capture_output=True,
@@ -611,7 +611,7 @@ def child(
     if controller is not None:
         environment["AXIOM_OWNED_EXECUTION_CONTROLLER_NAME"] = controller
     # No credentials in argv/env. Source helpers are fixed and bundle-pinned.
-    return subprocess.run(
+    return subprocess.run(  # nosec B603  # owned deployment/identity selectors and fixed CLI list argv
         [configuration["pythonExecutable"], "-I", str(ROOT / script), *arguments],
         env=environment,
         capture_output=True,
@@ -785,7 +785,7 @@ def controller_proof(
     }:
         raise ValueError("Unreviewed Docker daemon socket refused")
     daemon_source = daemon_mounts[0]["Source"]
-    expected_tmpfs = {"/tmp": "rw,nosuid,nodev,size=64m,mode=1777"}
+    expected_tmpfs = {"/tmp": "rw,nosuid,nodev,size=64m,mode=1777"}  # nosec B108  # container-only bounded tmpfs mount/spec, not a host temporary file
     expected_mounts = {
         (
             "volume",

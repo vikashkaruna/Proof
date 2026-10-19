@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, expect, it } from 'vitest';
 import { QuestionnaireEvidencePreview } from './questionnaire-evidence-preview';
 import { detailSchema } from './report-contract';
+import { PREVIEW_BRANDED_PRESENTATION_V1 } from './report-preview-version';
 
 afterEach(cleanup);
 const id = '11111111-1111-4111-8111-111111111111';
@@ -65,6 +66,7 @@ it('shows withheld metrics and qualitative coverage counts for document6', () =>
 it('renders nothing for other documents, mismatched identity or a grafted metric state', () => {
   for (const content of [
     doc6({ schema_version: 5 }),
+    doc6({ schema_version: 8 }),
     doc6({ title: 'Other' }),
     doc6({ metrics: { state: 'published', compliance_conclusion: 'not_determined' } }),
     doc6({ kind: 'auditor_pack' }),
@@ -74,3 +76,23 @@ it('renders nothing for other documents, mismatched identity or a grafted metric
     cleanup();
   }
 });
+
+it.each(['board', 'auditor'] as const)(
+  'shows exact branded questionnaire %s doc7 with unknown-only coverage',
+  (kind) => {
+    const content = doc6({
+      schema_version: 7,
+      underlying_document_version: 6,
+      kind: kind === 'board' ? 'board_report' : 'auditor_pack',
+      organization_name: 'Synthetic company',
+      source_sha256: 'b'.repeat(64),
+      underlying_source_sha256: 'c'.repeat(64),
+      presentation: PREVIEW_BRANDED_PRESENTATION_V1,
+    });
+    render(<QuestionnaireEvidencePreview report={record(content, { kind })} />);
+    expect(screen.getByRole('region', { name: 'Questionnaire evidence coverage' })).toBeTruthy();
+    expect(
+      screen.getByText('Scores, score bands and financial exposure estimates are withheld.'),
+    ).toBeTruthy();
+  },
+);

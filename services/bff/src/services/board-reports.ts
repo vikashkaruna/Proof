@@ -1,3 +1,8 @@
+import {
+  buildBrandedReport,
+  renderBrandedDraft,
+  verifyBrandedSource,
+} from '@axiom/report-kit/branded-report';
 /**
  * Board Report Generation Service.
  * Implements manager-initiated request binding, deterministic draft synthesis,
@@ -55,6 +60,7 @@ export class BoardReportService {
   constructor(
     private readonly db: EvidenceDatabase,
     private readonly writerDb?: EvidenceDatabase,
+    private readonly requestWriterDb?: EvidenceDatabase,
   ) {}
 
   private async readRole(tenantId: string, actorId: string, signal?: AbortSignal) {
@@ -107,9 +113,15 @@ export class BoardReportService {
     if (userResult.data?.is_axiom_internal !== true) throw new EvidenceError('forbidden', 403);
   }
 
-  private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    if (!this.writerDb) throw new EvidenceError('report_persistence_unconfirmed', 503);
-    const query = this.writerDb.rpc(name, args);
+  private async rpc(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    humanRequest = false,
+  ) {
+    const writer = humanRequest ? this.requestWriterDb : this.writerDb;
+    if (!writer) throw new EvidenceError('report_persistence_unconfirmed', 503);
+    const query = writer.rpc(name, args);
     const { data, error } = signal ? await query.abortSignal(signal) : await query;
     if (error) {
       throw new EvidenceError('report_storage_unavailable', 503);
@@ -126,7 +138,7 @@ export class BoardReportService {
   ) {
     const operationKey = input.operationKey ?? randomUUID();
     const result = await this.rpc(
-      'request_board_report',
+      'request_branded_board_report',
       {
         p_tenant_id: tenantId,
         p_actor_id: actorId,
@@ -137,6 +149,7 @@ export class BoardReportService {
         p_correlation_id: correlationId,
       },
       signal,
+      true,
     );
 
     if (result.error) {
@@ -213,19 +226,28 @@ export class BoardReportService {
       throw new EvidenceError('assessment_source_incomplete', 409);
     }
     const frozenVersion = (frozenJson as { schema_version?: unknown })?.schema_version;
-    if (frozenVersion === 4 || frozenVersion === 5) {
+    if (frozenVersion === 4 || frozenVersion === 5 || frozenVersion === 6) {
       // Source4 (reviewed public evidence) → document5; source5 (questionnaire
       // only, 0155) → document6. Both withhold metrics and are recomputed by SQL.
       const questionnaireOnly = frozenVersion === 5;
-      const verifySource = questionnaireOnly
-        ? verifyQuestionnaireEvidenceSource
-        : verifyCoverageFirstSource;
-      const buildDocument = questionnaireOnly
-        ? buildQuestionnaireEvidenceReport
-        : buildCoverageFirstReport;
-      const renderDraft = questionnaireOnly
-        ? renderQuestionnaireEvidenceDraft
-        : renderCoverageFirstDraft;
+      const verifySource =
+        frozenVersion === 6
+          ? verifyBrandedSource
+          : questionnaireOnly
+            ? verifyQuestionnaireEvidenceSource
+            : verifyCoverageFirstSource;
+      const buildDocument =
+        frozenVersion === 6
+          ? buildBrandedReport
+          : questionnaireOnly
+            ? buildQuestionnaireEvidenceReport
+            : buildCoverageFirstReport;
+      const renderDraft =
+        frozenVersion === 6
+          ? renderBrandedDraft
+          : questionnaireOnly
+            ? renderQuestionnaireEvidenceDraft
+            : renderCoverageFirstDraft;
       let content;
       const input = {
         requestId,

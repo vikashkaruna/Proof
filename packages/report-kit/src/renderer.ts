@@ -1,3 +1,4 @@
+import { addBrandedPdfMetadata } from './branded-pdf-metadata';
 /**
  * Stateless PDF renderer for report-kit.
  * Uses local headless Chromium / chrome-headless-shell when available,
@@ -72,6 +73,8 @@ export interface RenderPdfOptions {
   requireChromium?: boolean;
   /** Immutable review time used as the PDF metadata date for reproducible retries. */
   documentDate?: string;
+  /** Version7 only; legacy and retained bytes are never postprocessed. */
+  brandedPresentation?: { revision: 'axiom-report-brand-1'; title: string };
 }
 
 export interface RenderPdfResult {
@@ -457,6 +460,13 @@ export async function renderHtmlToPdf(
   htmlContent: string,
   options: RenderPdfOptions = {},
 ): Promise<RenderPdfResult> {
+  if (
+    options.brandedPresentation &&
+    (options.brandedPresentation.revision !== 'axiom-report-brand-1' ||
+      !options.requireChromium ||
+      !options.documentDate)
+  )
+    throw Error('Branded PDF requires immutable Chromium presentation');
   const timeoutMs = options.timeoutMs ?? 10000;
   const preferChromium = options.preferChromium ?? true;
   if (options.requireChromium && !preferChromium) {
@@ -520,9 +530,16 @@ export async function renderHtmlToPdf(
       }
 
       const rawPdf = await fs.readFile(outPdfPath);
-      const pdfBuffer = options.documentDate
+      const normalizedPdf = options.documentDate
         ? normalizeChromiumPdfMetadata(rawPdf, options.documentDate)
         : rawPdf;
+      const pdfBuffer = options.brandedPresentation
+        ? addBrandedPdfMetadata(
+            normalizedPdf,
+            options.brandedPresentation.title,
+            options.documentDate!,
+          )
+        : normalizedPdf;
       if (pdfBuffer.length < 500 || pdfBuffer.toString('ascii', 0, 5) !== '%PDF-') {
         throw new Error('Chromium produced invalid PDF bytes');
       }

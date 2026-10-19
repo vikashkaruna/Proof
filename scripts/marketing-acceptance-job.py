@@ -13,7 +13,7 @@ import importlib.util
 import json
 import os
 import re
-import subprocess
+import subprocess  # nosec B404  # fixed psql commands, SQL via stdin; no shell
 from datetime import datetime
 from pathlib import Path
 
