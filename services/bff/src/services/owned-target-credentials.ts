@@ -93,7 +93,7 @@ export async function withOwnedTargetCredential<T>(
   filename: string,
   expectedSha256: string,
   expected: OwnedTargetScope,
-  use: (accessToken: string) => Promise<T>,
+  consume: (accessToken: string) => Promise<T>,
 ): Promise<T> {
   let bytes: Buffer | undefined;
   let accessToken: string;
@@ -115,5 +115,5 @@ export async function withOwnedTargetCredential<T>(
   }
   // Provider errors are handled by the existing broker; never include this
   // configuration or bearer in error context/logs. No process.env assignment.
-  return use(accessToken);
+  return consume(accessToken);
 }
