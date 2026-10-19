@@ -31,7 +31,7 @@ class PolicyPhases(unittest.TestCase):
         self.assertEqual(len(plan["all"]), len(set(plan["all"])))
         self.assertEqual(sorted(plan["historical143"] + plan["current"]), plan["all"])
         self.assertIn(PHASES.CURRENT, plan["current"])
-        self.assertEqual(plan["currentVersion"], 175)
+        self.assertEqual(plan["currentVersion"], 176)
         self.assertIn(
             "local-public-control-assessment-dispatch.test.sql", plan["current"]
         )
@@ -40,6 +40,19 @@ class PolicyPhases(unittest.TestCase):
         self.assertIn(
             "local-custody-credential-issuance-demo.test.sql", plan["current"]
         )
+
+    def test_current_onboarding_suite_and_five_case_race_program_are_registered_once(self):
+        inventory = PHASES.plan()
+        suite = "founder-onboarding-authority.test.sql"
+        self.assertEqual(inventory["all"].count(suite), 1)
+        self.assertEqual(inventory["current"].count(suite), 1)
+        self.assertNotIn(suite, inventory["historical143"])
+        runner = (PHASES.ROOT / "scripts/test-database.sh").read_text()
+        for program in ("explicit-data-flow-races.py", "scheduled-coverage-races.py", "founder-onboarding-races.py"):
+            invocation = 'python3 tests/database/lib/' + program + ' --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test'
+            self.assertEqual(runner.count(invocation), 1, program)
+        self.assertIn('"$suite" = scheduled-coverage-reassessment.test.sql', runner)
+        self.assertIn('"$suite" = explicit-data-flow-declarations.test.sql', runner)
 
     def test_latest_phase_refuses_missing145_suite_or_noncanonical_migration_inventory(
         self,
@@ -55,7 +68,7 @@ class PolicyPhases(unittest.TestCase):
             (root / "infra/supabase/migrations" / source.name).write_text(
                 "-- offline inventory only"
             )
-        self.assertEqual(PHASES.plan(root)["currentVersion"], 175)
+        self.assertEqual(PHASES.plan(root)["currentVersion"], 176)
         custody = root / "tests/database/local-custody-operator-context.test.sql"
         custody.unlink()
         with self.assertRaisesRegex(ValueError, "custody148_context_suite_required"):
@@ -112,6 +125,7 @@ class PolicyPhases(unittest.TestCase):
             ("standing-approval-coordinator.test.sql", "standing173_suite_required"),
             ("explicit-data-flow-declarations.test.sql","data_flow174_suite_required"),
             ("scheduled-coverage-reassessment.test.sql", "scheduled_coverage175_suite_required"),
+            ("founder-onboarding-authority.test.sql", "founder_onboarding176_suite_required"),
         ):
             with self.subTest(suite=suite), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)

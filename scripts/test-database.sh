@@ -110,6 +110,7 @@ standing173_race_image=$(docker image inspect --format '{{.Id}}' "$image")
 python3 tests/database/lib/standing-approval-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
 python3 tests/database/lib/explicit-data-flow-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
 python3 tests/database/lib/scheduled-coverage-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
+python3 tests/database/lib/founder-onboarding-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
 python3 tests/database/sudhaar-review-adoption-fixture.py | sql
 bash tests/database/operator-workflows-public-source.sh "$container"
 bash tests/database/concurrent-operator-workflows.sh "$container"
