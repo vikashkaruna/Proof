@@ -74,7 +74,7 @@ def parse_json(value: bytes) -> object:
     return json.loads(value.decode("utf-8", errors="strict"), object_pairs_hook=pairs)
 
 
-def protected_bytes(path: Path, *, source: bool = False) -> bytes:
+def protected_ancestors(path: Path) -> None:
     if not path.is_absolute() or path.resolve(strict=True) != path:
         raise ValueError("Protected operator file refused")
     for directory in (path.parent, *path.parent.parents):
@@ -86,6 +86,10 @@ def protected_bytes(path: Path, *, source: bool = False) -> bytes:
             or (info.st_mode & 0o022 and not sticky_root)
         ):
             raise ValueError("Protected operator directory refused")
+
+
+def protected_bytes(path: Path, *, source: bool = False) -> bytes:
+    protected_ancestors(path)
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         info = os.fstat(descriptor)
@@ -185,6 +189,7 @@ def operator_request(configuration: dict, path: str, body: dict) -> object:
     if (
         not isinstance(credential, dict)
         or set(credential) != {"schemaVersion", "purpose", "existingOperatorAccessToken"}
+        or type(credential.get("schemaVersion")) is not int
         or credential.get("schemaVersion") != 1
         or credential.get("purpose") != "owned_synthetic_installer_transport"
         or not isinstance(credential.get("existingOperatorAccessToken"), str)
@@ -430,6 +435,22 @@ finally{fs.closeSync(fd);data.fill(0);}
 const directory=fs.openSync(root+'/'+x.bindingId+'/'+x.credentialId,fs.constants.O_RDONLY);try{fs.fsyncSync(directory);}finally{fs.closeSync(directory);}
 process.stdout.write(JSON.stringify({credentialId:x.credentialId,credentialSha256:x.sha256,filePublished:true}));
 """
+BFF_CONFIGURATION = r"""
+import fs from 'node:fs';import crypto from 'node:crypto';
+let raw='';for await(const part of process.stdin){raw+=part;if(Buffer.byteLength(raw)>131072)throw Error('refused');}
+const x=JSON.parse(raw),root='/etc/axiom/owned-deployment';if(process.getuid()!==0)throw Error('refused');
+for(const directory of ['/etc/axiom',root]){if(!fs.existsSync(directory))fs.mkdirSync(directory,{mode:0o700});const st=fs.lstatSync(directory);if(!st.isDirectory()||st.isSymbolicLink()||st.uid!==0||(st.mode&0o022)||(directory===root&&(st.mode&0o777)!==0o700))throw Error('refused');}
+if(fs.readdirSync(root).some(name=>!['manifests.json','transport.json'].includes(name)))throw Error('refused');
+const result={};for(const name of ['manifests.json','transport.json']){
+ const entry=x[name],bytes=Buffer.from(entry.base64,'base64');if(bytes.length>65536||crypto.createHash('sha256').update(bytes).digest('hex')!==entry.sha256)throw Error('refused');JSON.parse(bytes.toString('utf8'));
+ const target=root+'/'+name;
+ try{const fd=fs.openSync(target,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|fs.constants.O_NOFOLLOW,0o600);try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}}
+ catch(error){if(error.code!=='EEXIST')throw error;}
+ const fd=fs.openSync(target,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);try{const st=fs.fstatSync(fd);if(!st.isFile()||st.uid!==0||(st.mode&0o777)!==0o600||st.size!==bytes.length||crypto.createHash('sha256').update(fs.readFileSync(fd)).digest('hex')!==entry.sha256)throw Error('refused');}finally{fs.closeSync(fd);bytes.fill(0);}
+ result[name]=entry.sha256;
+}
+const fd=fs.openSync(root,fs.constants.O_RDONLY);try{fs.fsyncSync(fd);}finally{fs.closeSync(fd);}process.stdout.write(JSON.stringify(result));
+"""
 BFF_ROOT = r"""
 import fs from 'node:fs';
 const path='/var/lib/axiom/owned-target-credentials';const st=fs.lstatSync(path);
@@ -518,20 +539,30 @@ def load_configuration(path: Path) -> dict:
         "pythonExecutable",
         "dockerGid",
         "runtimeContainer",
+        "manifestRegistryFile",
     }
-    if not isinstance(value, dict) or set(value) != required or value.get("schemaVersion") != 1:
+    if (
+        not isinstance(value, dict)
+        or set(value) != required
+        or type(value.get("schemaVersion")) is not int
+        or value.get("schemaVersion") != 1
+    ):
         raise ValueError("Protected host configuration refused")
     if value.get("enabled") is not True or value.get("hostInstallerSha256") != host_source_sha256():
         raise ValueError("Reviewed host operator is disabled or changed")
     if type(value["dockerGid"]) is not int or not 0 <= value["dockerGid"] <= 2147483647:
         raise ValueError("Reviewed Docker group refused")
-    for key in ("transportFile", "issuerConfigurationFile", "pythonExecutable"):
+    for key in (
+        "transportFile",
+        "issuerConfigurationFile",
+        "pythonExecutable",
+        "manifestRegistryFile",
+    ):
         if not isinstance(value[key], str):
             raise ValueError("Protected host path refused")
         path = Path(value[key])
         if key == "pythonExecutable":
-            if not path.is_absolute() or path.resolve(strict=True) != path:
-                raise ValueError("Fixed Python executable refused")
+            protected_ancestors(path)
             info = path.lstat()
             if (
                 not stat.S_ISREG(info.st_mode)
@@ -553,7 +584,7 @@ def call(configuration: dict, path: str, body: dict) -> object:
 
 
 def child(configuration: dict, script: str, arguments: list[str], *, controller: str | None = None):
-    if configuration["hostInstallerSha256"] != host_source_sha256():
+    if script not in HOST_SOURCES or configuration["hostInstallerSha256"] != host_source_sha256():
         raise ValueError("Reviewed helper bundle changed")
     environment = {
         "PATH": "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin",
@@ -570,6 +601,65 @@ def child(configuration: dict, script: str, arguments: list[str], *, controller:
         timeout=180,
         check=True,
     )
+
+
+def prepare_configuration(configuration: dict) -> dict:
+    registry_raw = protected_bytes(Path(configuration["manifestRegistryFile"]))
+    registry = parse_json(registry_raw)
+    if (
+        not isinstance(registry, dict)
+        or set(registry) != {"schemaVersion", "manifests"}
+        or type(registry["schemaVersion"]) is not int
+        or registry["schemaVersion"] != 1
+        or not isinstance(registry["manifests"], list)
+        or not 1 <= len(registry["manifests"]) <= 32
+    ):
+        raise ValueError("Reviewed enrollment registry refused")
+    for manifest in registry["manifests"]:
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("purpose") != "owned_synthetic_enrollment_v1"
+            or manifest.get("source", {}).get("hostInstallerSha256") != host_source_sha256()
+            or manifest.get("deployment", {}).get("bffContainerId")
+            != configuration["bffContainerId"]
+            or manifest.get("deployment", {}).get("bffImage") != configuration["bffImage"]
+        ):
+            raise ValueError("Reviewed enrollment registry pins refused")
+    transport_raw = protected_bytes(Path(configuration["transportFile"]))
+    transport = parse_json(transport_raw)
+    if (
+        not isinstance(transport, dict)
+        or set(transport) != {"schemaVersion", "purpose", "existingOperatorAccessToken"}
+        or type(transport.get("schemaVersion")) is not int
+        or transport.get("schemaVersion") != 1
+        or transport.get("purpose") != "owned_synthetic_installer_transport"
+        or not isinstance(transport.get("existingOperatorAccessToken"), str)
+        or not re.fullmatch(r"[A-Za-z0-9._~-]{32,8192}", transport["existingOperatorAccessToken"])
+    ):
+        raise ValueError("Existing protected transport refused")
+    payload = {
+        name: {"base64": base64.b64encode(raw).decode(), "sha256": hashlib.sha256(raw).hexdigest()}
+        for name, raw in (("manifests.json", registry_raw), ("transport.json", transport_raw))
+    }
+    result = parse_json(
+        run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                bff_container(configuration),
+                "node",
+                "--input-type=module",
+                "-e",
+                BFF_CONFIGURATION,
+            ],
+            private_input=canonical(payload).decode(),
+        ).stdout.encode()
+    )
+    expected = {name: entry["sha256"] for name, entry in payload.items()}
+    if result != expected:
+        raise ValueError("Protected BFF configuration publication unconfirmed")
+    return {"state": "prepared", "files": result}
 
 
 def publish_credential(configuration: dict, scope: dict, file: Path) -> dict:
@@ -991,7 +1081,9 @@ def renew_due(configuration_file: Path, *, now: float | None = None) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("init-state", "once", "serve", "status", "renew-due"))
+    parser.add_argument(
+        "command", choices=("init-state", "prepare-config", "once", "serve", "status", "renew-due")
+    )
     parser.add_argument("configuration", type=Path)
     parser.add_argument("--interval", type=int, default=15)
     args = parser.parse_args()
@@ -1001,6 +1093,8 @@ def main() -> None:
         directory = Path(configuration["stateDirectory"])
         if args.command == "init-state":
             owned_directory(directory, create=True)
+        elif args.command == "prepare-config":
+            print(json.dumps(prepare_configuration(configuration)))
         elif args.command == "renew-due":
             print(json.dumps(renew_due(args.configuration)))
         elif args.command == "status":

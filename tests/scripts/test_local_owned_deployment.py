@@ -182,6 +182,55 @@ class OwnedDeploymentTests(unittest.TestCase):
             self.assertTrue(run.call_args.kwargs["capture_output"])
             self.assertNotIn("shell", run.call_args.kwargs)
 
+    def test_prepare_config_stages_only_reviewed_registry_and_existing_transport_over_private_stdin(
+        self,
+    ):
+        config = self.config()
+        registry = {
+            "schemaVersion": 1,
+            "manifests": [
+                {
+                    "purpose": "owned_synthetic_enrollment_v1",
+                    "source": {"hostInstallerSha256": config["hostInstallerSha256"]},
+                    "deployment": {
+                        "bffContainerId": config["bffContainerId"],
+                        "bffImage": config["bffImage"],
+                    },
+                }
+            ],
+        }
+        file = self.private("registry.json", registry)
+        config["manifestRegistryFile"] = str(file)
+
+        def spawn(arguments, **kwargs):
+            if arguments[:2] == ["docker", "inspect"]:
+                return subprocess.CompletedProcess(
+                    arguments, 0, json.dumps(self.inspection(config)), ""
+                )
+            self.assertEqual(arguments[:4], ["docker", "exec", "-i", config["bffContainerId"]])
+            self.assertNotIn("existing-operator-transport-fixture-only", str(arguments))
+            payload = MODULE.parse_json(kwargs["private_input"].encode())
+            self.assertEqual(set(payload), {"manifests.json", "transport.json"})
+            self.assertIn(
+                "existing-operator-transport-fixture-only",
+                MODULE.base64.b64decode(payload["transport.json"]["base64"]).decode(),
+            )
+            return subprocess.CompletedProcess(
+                arguments,
+                0,
+                json.dumps({name: value["sha256"] for name, value in payload.items()}),
+                "",
+            )
+
+        with patch.object(MODULE, "run", side_effect=spawn):
+            self.assertEqual(MODULE.prepare_configuration(config)["state"], "prepared")
+        registry["manifests"][0]["deployment"]["bffContainerId"] = "foreign"
+        file.write_text(json.dumps(registry))
+        with patch.object(MODULE, "run") as run:
+            with self.assertRaisesRegex(ValueError, "pins refused"):
+                MODULE.prepare_configuration(config)
+            run.assert_not_called()
+
 
 class OwnedPollerTests(unittest.TestCase):
     def setUp(self):
