@@ -395,7 +395,7 @@ test.describe('retained evidence pack acceptance', () => {
       await detail.getByRole('button', { name: 'Refresh report detail' }).click();
       const sourceDetails = detail
         .locator('details')
-        .filter({ has: detail.getByText('Source and version details', { exact: true }) });
+        .filter({ has: founderPage.getByText('Source and version details', { exact: true }) });
       if ((await sourceDetails.getAttribute('open')) === null)
         await sourceDetails.getByText('Source and version details', { exact: true }).click();
       await expect(sourceDetails.getByText(/Archive SHA-256:/)).toBeVisible();
