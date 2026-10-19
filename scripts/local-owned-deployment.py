@@ -18,10 +18,9 @@ import json
 import os
 import re
 import stat
-import sys
-import uuid
 import subprocess  # nosec B404 - fixed argv, no shell and no credential argv
 import time
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,8 +82,7 @@ def protected_bytes(path: Path, *, source: bool = False) -> bytes:
         if (
             not stat.S_ISDIR(info.st_mode)
             or info.st_uid not in (0, os.getuid())
-            or info.st_mode & 0o022
-            and not sticky_root
+            or (info.st_mode & 0o022 and not sticky_root)
         ):
             raise ValueError("Protected operator directory refused")
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -884,10 +882,10 @@ def once(configuration_file: Path) -> str:
                 except ValueError, KeyError, TypeError, OSError, subprocess.SubprocessError:
                     state["state"] = "unconfirmed"
                     write_private(journal, state)
-                    try:
+                    # The original journal retains uncertainty even if the
+                    # private publication is unavailable or scope has expired.
+                    with contextlib.suppress(ValueError, OSError, subprocess.SubprocessError):
                         call(configuration, "tasks/" + task["requestId"] + "/unconfirmed", body)
-                    except ValueError, OSError, subprocess.SubprocessError:
-                        pass  # The original local journal remains authoritative uncertainty.
                     raise ValueError("Retained deployment step unconfirmed") from None
         state["state"] = "completed"
         write_private(journal, state)
