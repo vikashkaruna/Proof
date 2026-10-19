@@ -12,6 +12,7 @@ import importlib.util
 import json
 import os
 import re
+import select
 import shutil
 import subprocess
 import tempfile
@@ -76,6 +77,46 @@ def validate_fixture_inputs(container: str, image: str) -> None:
         "sha256:[a-f0-9]{64}", image
     ):
         raise Refused("Immutable owned fixture ID and image required")
+
+
+def barrier_failure_diagnostic(stderr: str, exit_code: int | None) -> dict[str, object]:
+    """Allowlisted diagnostic facts only; raw synthetic SQL stays private."""
+    match = re.search(r"(?:ERROR|FATAL):\s+([0-9A-Z]{5})(?:[:\s]|$)", stderr)
+    allowed = {
+        "42501",
+        "55P03",
+        "57014",
+        "40P01",
+        "40001",
+        "25001",
+        "P0175",
+        "23505",
+        "23503",
+        "22023",
+        "XX000",
+    }
+    return {
+        "category": "child-exit-before-barrier"
+        if exit_code is not None
+        else "barrier-unavailable-live-child",
+        "exitCode": exit_code
+        if type(exit_code) is int and -255 <= exit_code <= 255
+        else None,
+        "sqlstate": match.group(1)
+        if match and match.group(1) in allowed
+        else "unknown",
+    }
+
+
+def retain_barrier_failure(
+    evidence: Path, number: int, stdout: str, stderr: str, exit_code: int | None
+) -> str:
+    """Bound both protected streams; return only safe public diagnostic JSON."""
+    for label, value in (("stdout", stdout), ("stderr", stderr)):
+        path = evidence / f"barrier-failure-{number}.{label}.log"
+        path.write_text(value[:65536])
+        path.chmod(0o600)
+    return json.dumps(barrier_failure_diagnostic(stderr, exit_code), sort_keys=True)
 
 
 def main() -> None:
@@ -155,6 +196,8 @@ def main() -> None:
                 database,
                 "-v",
                 "ON_ERROR_STOP=1",
+                "-v",
+                "VERBOSITY=sqlstate",
                 "-Atq",
             ],
             stdin=subprocess.PIPE,
@@ -177,7 +220,23 @@ def main() -> None:
             if line == "READY175":
                 return "\n".join(lines)
             lines.append(line)
-        raise Refused("Native175 barrier unavailable")
+        # Read only bytes currently available: diagnostics never wait on or
+        # terminate a live holder and never alter the existing SQL deadline.
+        stderr = bytearray()
+        assert child.stderr is not None
+        while len(stderr) < 65536 and select.select([child.stderr], [], [], 0)[0]:
+            chunk = os.read(child.stderr.fileno(), min(4096, 65536 - len(stderr)))
+            if not chunk:
+                break
+            stderr.extend(chunk)
+        diagnostic = retain_barrier_failure(
+            evidence,
+            len(clients),
+            "\n".join(lines),
+            stderr.decode("utf-8", errors="replace"),
+            child.poll(),
+        )
+        raise Refused("Native175 barrier unavailable: " + diagnostic)
 
     def finish(child: subprocess.Popen[str], name: str, prior: str = "") -> str:
         stdout, stderr = child.communicate(timeout=15)
