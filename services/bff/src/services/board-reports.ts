@@ -60,6 +60,7 @@ export class BoardReportService {
   constructor(
     private readonly db: EvidenceDatabase,
     private readonly writerDb?: EvidenceDatabase,
+    private readonly requestWriterDb?: EvidenceDatabase,
   ) {}
 
   private async readRole(tenantId: string, actorId: string, signal?: AbortSignal) {
@@ -112,9 +113,15 @@ export class BoardReportService {
     if (userResult.data?.is_axiom_internal !== true) throw new EvidenceError('forbidden', 403);
   }
 
-  private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    if (!this.writerDb) throw new EvidenceError('report_persistence_unconfirmed', 503);
-    const query = this.writerDb.rpc(name, args);
+  private async rpc(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    humanRequest = false,
+  ) {
+    const writer = humanRequest ? this.requestWriterDb : this.writerDb;
+    if (!writer) throw new EvidenceError('report_persistence_unconfirmed', 503);
+    const query = writer.rpc(name, args);
     const { data, error } = signal ? await query.abortSignal(signal) : await query;
     if (error) {
       throw new EvidenceError('report_storage_unavailable', 503);
@@ -142,6 +149,7 @@ export class BoardReportService {
         p_correlation_id: correlationId,
       },
       signal,
+      true,
     );
 
     if (result.error) {

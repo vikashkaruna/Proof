@@ -84,6 +84,7 @@ export class StatutoryReportService {
   constructor(
     private readonly db: EvidenceDatabase,
     private readonly writerDb?: EvidenceDatabase,
+    private readonly requestWriterDb?: EvidenceDatabase,
   ) {}
 
   private async assertLiveFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
@@ -103,9 +104,15 @@ export class StatutoryReportService {
     if (profile.data?.is_axiom_internal !== true) throw new EvidenceError('forbidden', 403);
   }
 
-  private async rpc(name: string, args: Record<string, unknown>, signal?: AbortSignal) {
-    if (!this.writerDb) throw new EvidenceError('report_persistence_unconfirmed', 503);
-    let query = this.writerDb.rpc(name, args);
+  private async rpc(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal,
+    humanRequest = false,
+  ) {
+    const writer = humanRequest ? this.requestWriterDb : this.writerDb;
+    if (!writer) throw new EvidenceError('report_persistence_unconfirmed', 503);
+    let query = writer.rpc(name, args);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
     if (error) throw new EvidenceError('report_persistence_unconfirmed', 503);
@@ -144,6 +151,7 @@ export class StatutoryReportService {
         p_correlation_id: correlationId,
       },
       signal,
+      true,
     );
   }
 

@@ -64,13 +64,18 @@ function fixture(kind: 'board' | 'auditor', asset = true) {
       }),
     );
   }) as never;
-  const board = new BoardReportService(base.db, base.db),
-    statutory = new StatutoryReportService(base.db, base.db);
+  const humanRequestWriter = {
+    rpc: vi.fn(() => {
+      throw Error('Human request writer cannot record drafts');
+    }),
+  };
+  const board = new BoardReportService(base.db, base.db, humanRequestWriter as never),
+    statutory = new StatutoryReportService(base.db, base.db, humanRequestWriter as never);
   const generate = () =>
     kind === 'board'
       ? board.generateDraft(ids.tenant, ids.actor, ids.request)
       : statutory.generateAuditorDraft(ids.tenant, ids.actor, ids.request);
-  return { base, input, document, request, source, calls, generate, statutory };
+  return { base, input, document, request, source, calls, generate, statutory, humanRequestWriter };
 }
 function report(f: ReturnType<typeof fixture>, kind: 'board' | 'auditor', status = 'draft') {
   const text = JSON.stringify(f.document);
@@ -98,6 +103,7 @@ describe.each(['board', 'auditor'] as const)('branded source6 %s integration', (
       const f = fixture(kind, asset);
       await f.generate();
       expect(f.calls).toHaveLength(1);
+      expect(f.humanRequestWriter.rpc).not.toHaveBeenCalled();
       const content = JSON.parse(String(f.calls[0]!.args.p_content_text));
       expect(content.schema_version).toBe(7);
       expect(content.metrics.state).toBe('withheld');
