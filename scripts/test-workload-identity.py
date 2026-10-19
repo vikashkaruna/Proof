@@ -367,6 +367,21 @@ def run(
     return result
 
 
+def worker_failure_phase(stderr: str) -> str | None:
+    """Extract one fixed phase label, never relay surrounding private output."""
+    if len(stderr) > 1048576:
+        return None
+    phases = set()
+    for line in stderr.splitlines():
+        label = re.fullmatch(
+            r"Workload assessment failed at ([a-z0-9-]{1,100})\. Private output withheld\.",
+            line,
+        )
+        if label:
+            phases.add(label[1])
+    return next(iter(phases)) if len(phases) == 1 else None
+
+
 def main() -> None:
     os.umask(0o077)
     state = ROOT / ".axiom-runtime" / "workload-identity"
@@ -694,10 +709,9 @@ plugins {
                 }), timeout=360, required=False,
             )
             if worker_check.returncode:
-                import re
-                label = re.fullmatch(r"Workload assessment failed at ([a-z0-9-]{1,100})\. Private output withheld\.\n", worker_check.stderr)
+                label = worker_failure_phase(worker_check.stderr)
                 if label:
-                    print("Worker acceptance failure phase: " + label[1], flush=True)
+                    print("Worker acceptance failure phase: " + label, flush=True)
                 raise RuntimeError("worker acceptance failed")
             verified_worker = json.loads(worker_check.stdout)
             if verified_worker.get("passed") is not True:
