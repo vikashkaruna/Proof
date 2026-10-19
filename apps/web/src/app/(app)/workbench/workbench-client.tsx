@@ -588,10 +588,10 @@ export function AgentWorkbenchClient({
                         </div>
                       </div>
                       <Link
-                        href="/approval"
+                        href={`/plans/${encodeURIComponent(p.id)}`}
                         className="shrink-0 ml-2 rounded bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-100"
                       >
-                        Review →
+                        Inspect plan →
                       </Link>
                     </div>
                   ))}

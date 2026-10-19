@@ -563,9 +563,7 @@ test.describe('real-provider board report lifecycle', () => {
     page,
     browser,
   }) => {
-    // Registered journey adds bounded onboarding/submission (180s) and handoff
-    // waiting (90s) before the existing 300s lifecycle; keep the whole test finite.
-    test.setTimeout(registeredBrowserRequested() ? 600_000 : 300_000);
+    test.setTimeout(300_000);
     const checkpoint = (stage: string) => {
       if (registeredBrowserRequested()) console.log(`[registered-website-stage] ${stage}`);
     };
@@ -748,8 +746,10 @@ test.describe('real-provider board report lifecycle', () => {
         }
 
         await review
-          .getByRole('checkbox', { name: 'I reviewed the exact content and SHA-256 shown above.' })
-          .check();
+          .getByRole('checkbox', {
+            name: 'I reviewed the exact content and its SHA-256 in Source and version details.',
+          })
+          .check({ timeout: 15_000 });
         const response = founder.waitForResponse(
           (r) =>
             new URL(r.url()).pathname === `/api/bff/v1/reports/${draft.reportId}/review` &&
@@ -757,7 +757,10 @@ test.describe('real-provider board report lifecycle', () => {
         );
         await review.getByRole('button', { name: 'Approve reviewed content' }).click();
         expect((await response).status()).toBe(200);
-        await expect(review.getByText(/^approved · [^·]+ · Library /)).toBeVisible();
+        await expect(review.getByText(/^approved · (board|auditor)$/)).toBeVisible();
+        await expect(
+          review.locator('details').filter({ hasText: 'Source and version details' }),
+        ).toContainText('Library ');
       } else {
         const reviewed = await post(founder, `/reports/${draft.reportId}/review`, {
           decision: 'approved',
@@ -1253,9 +1256,9 @@ test.describe('real-provider board report lifecycle', () => {
       await expect(detail.getByRole('button', { name: /Email/ })).toHaveCount(0);
       await detail
         .getByRole('checkbox', {
-          name: 'I reviewed the exact content and SHA-256 shown above.',
+          name: 'I reviewed the exact content and its SHA-256 in Source and version details.',
         })
-        .check();
+        .check({ timeout: 15_000 });
       // The raw draft contains approved_by:null, so a broad text check can pass
       // before review commits. Hold the real POST to prove draft is not readiness.
       let releaseReview = () => {};
@@ -1280,8 +1283,8 @@ test.describe('real-provider board report lifecycle', () => {
       try {
         await detail.getByRole('button', { name: 'Approve reviewed content' }).click();
         await started;
-        await expect(detail.getByText(/^draft · [^·]+ · Library /)).toBeVisible();
-        await expect(detail.getByText(/^approved · [^·]+ · Library /)).toHaveCount(0);
+        await expect(detail.getByText(/^draft · (board|auditor)$/)).toBeVisible();
+        await expect(detail.getByText(/^approved · (board|auditor)$/)).toHaveCount(0);
       } finally {
         releaseReview();
       }
@@ -1290,7 +1293,7 @@ test.describe('real-provider board report lifecycle', () => {
       expect(((await reviewed.json()) as { data: { status: string } }).data.status).toBe(
         'approved',
       );
-      await expect(detail.getByText(/^approved · [^·]+ · Library /)).toBeVisible();
+      await expect(detail.getByText(/^approved · (board|auditor)$/)).toBeVisible();
       await founder.unroute(reviewPath);
       await board.getByRole('button', { name: 'Refresh board state' }).click();
       await expect(
@@ -1480,8 +1483,10 @@ test.describe('real-provider board report lifecycle', () => {
             .parse(JSON.parse(row.content_text)).underlying_source_sha256,
         });
         await review
-          .getByRole('checkbox', { name: 'I reviewed the exact content and SHA-256 shown above.' })
-          .check();
+          .getByRole('checkbox', {
+            name: 'I reviewed the exact content and its SHA-256 in Source and version details.',
+          })
+          .check({ timeout: 15_000 });
         const response = founder.waitForResponse(
           (r) =>
             new URL(r.url()).pathname === `/api/bff/v1/reports/${draft.reportId}/review` &&
@@ -1489,7 +1494,10 @@ test.describe('real-provider board report lifecycle', () => {
         );
         await review.getByRole('button', { name: 'Approve reviewed content' }).click();
         expect((await response).status()).toBe(200);
-        await expect(review.getByText(/^approved · [^·]+ · Library /)).toBeVisible();
+        await expect(review.getByText(/^approved · (board|auditor)$/)).toBeVisible();
+        await expect(
+          review.locator('details').filter({ hasText: 'Source and version details' }),
+        ).toContainText('Library ');
       } else {
         const reviewed = await post(founder, `/reports/${draft.reportId}/review`, {
           decision: 'approved',

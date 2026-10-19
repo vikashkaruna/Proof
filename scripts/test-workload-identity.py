@@ -706,7 +706,7 @@ plugins {
                         "image": run(["docker", "image", "inspect", selected_image, "--format", "{{.Id}}"]).stdout.strip(),
                         "workloadApiVolume": api_volume,
                     },
-                }), timeout=900 if os.environ.get("AXIOM_REGISTERED_WEBSITE_BROWSER") == "true" else 360, required=False,
+                }), timeout=360, required=False,
             )
             if worker_check.returncode:
                 label = worker_failure_phase(worker_check.stderr)
