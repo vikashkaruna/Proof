@@ -65,6 +65,7 @@ ENV PORT=4000
 COPY --from=build /app /app
 # The native TypeScript compiler is needed only by the build, not TSX execution.
 RUN rm -rf /app/node_modules/.pnpm/@typescript+typescript-linux-*
+RUN mkdir -p /var/lib/axiom/owned-target-credentials && chmod 700 /var/lib/axiom/owned-target-credentials
 WORKDIR /app/services/bff
 EXPOSE 4000
 ENTRYPOINT ["/sbin/tini", "--"]
@@ -82,6 +83,7 @@ COPY --from=build /app /app
 # These lockfile entries are build-only dependencies of the linter/compiler,
 # not imports in the marketing service's runtime graph.
 RUN rm -rf /app/node_modules/.pnpm/@typescript+typescript-linux-* /app/node_modules/.pnpm/braces@*
+RUN mkdir -p /var/lib/axiom/owned-target-credentials && chmod 700 /var/lib/axiom/owned-target-credentials
 WORKDIR /app/services/bff
 EXPOSE 4000
 USER node

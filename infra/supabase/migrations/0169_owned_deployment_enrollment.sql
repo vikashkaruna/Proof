@@ -787,14 +787,25 @@ begin
  or h.approval_id is not null or h.installation_key is not null or task.manifest_sha256<>r.manifest_sha256
  or not exists(select 1 from owned_synthetic.deployment_preflight_claims where(task_id,claim_id)=(task.id,p_claim_id))
  then raise exception 'owned deployment observation current source refused' using errcode='42501';end if;
- if jsonb_typeof(p_host) is distinct from 'object' or not(p_host?&array['hostInstallerSha256','images','bffContainerId','workloadApiVolume','nodeId','karyaIdentity','persistentMutations'])
- or p_host-array['hostInstallerSha256','images','bffContainerId','workloadApiVolume','nodeId','karyaIdentity','persistentMutations']<>'{}'::jsonb
+ if jsonb_typeof(p_host) is distinct from 'object' or not(p_host?&array['hostInstallerSha256','images','bffContainerId','workloadApiVolume','nodeId','karyaIdentity','persistentMutations','runtime','credentialRoot'])
+ or p_host-array['hostInstallerSha256','images','bffContainerId','workloadApiVolume','nodeId','karyaIdentity','persistentMutations','runtime','credentialRoot']<>'{}'::jsonb
  or p_host->>'hostInstallerSha256' is distinct from r.manifest#>>'{source,hostInstallerSha256}'
  or p_host->'images' is distinct from jsonb_build_object('controllerImage',r.manifest#>'{deployment,controllerImage}','workerImage',r.manifest#>'{deployment,workerImage}','bffImage',r.manifest#>'{deployment,bffImage}')
  or p_host->'bffContainerId' is distinct from r.manifest#>'{deployment,bffContainerId}'
  or p_host->'workloadApiVolume' is distinct from r.manifest#>'{deployment,workloadApiVolume}'
  or p_host->'nodeId' is distinct from r.manifest#>'{deployment,nodeId}' or p_host->'persistentMutations' is distinct from '0'::jsonb
  then raise exception 'owned deployment host observation refused' using errcode='42501';end if;
+ if jsonb_typeof(p_host->'runtime') is distinct from 'object'
+ or not((p_host->'runtime')?&array['containerId','image','socketVolume','socketGroup','adapterEnabled'])
+ or(p_host->'runtime')-array['containerId','image','socketVolume','socketGroup','adapterEnabled']<>'{}'::jsonb
+ or jsonb_typeof(p_host#>'{runtime,containerId}') is distinct from 'string'
+ or jsonb_typeof(p_host#>'{runtime,image}') is distinct from 'string'
+ or p_host#>>'{runtime,containerId}' !~ '^[a-f0-9]{64}$'
+ or p_host#>>'{runtime,image}' !~ '^sha256:[a-f0-9]{64}$'
+ or p_host#>>'{runtime,socketVolume}' is distinct from(r.manifest#>>'{deployment,controllerName}')||'-socket'
+ or p_host#>'{runtime,socketGroup}' is distinct from '20113'::jsonb or p_host#>'{runtime,adapterEnabled}' is distinct from 'true'::jsonb
+ or p_host->'credentialRoot' is distinct from jsonb_build_object('path','/var/lib/axiom/owned-target-credentials','ownerUid',0,'mode','0700','storage','container_layer')
+ then raise exception 'owned deployment runtime observation refused' using errcode='42501';end if;
  identity:=p_host->'karyaIdentity';
  if identity is distinct from 'null'::jsonb and(jsonb_typeof(identity) is distinct from 'object'
  or not(identity?&array['entryId','spiffeId','parentId','workerUid']) or identity-array['entryId','spiffeId','parentId','workerUid']<>'{}'::jsonb
@@ -1753,3 +1764,19 @@ end $$;
 revoke all on all functions in schema owned_synthetic from public,anon,authenticated,service_role,human_action_writer,agent_ledger_writer,owned_target_controller;
 revoke all on function public.record_owned_deployment_revocation_mfa_phase(uuid,uuid,uuid,uuid,text,jsonb,uuid),public.record_owned_deployment_revocation(uuid,uuid,uuid,uuid,jsonb,uuid) from public,anon,authenticated,service_role,agent_ledger_writer,owned_target_controller;
 grant execute on function public.record_owned_deployment_revocation_mfa_phase(uuid,uuid,uuid,uuid,text,jsonb,uuid),public.record_owned_deployment_revocation(uuid,uuid,uuid,uuid,jsonb,uuid) to human_action_writer;
+
+-- Private read-only copy of exactly the host facts covered by the founder's
+-- preflight digest. A current local configuration can never substitute them.
+create function public.read_owned_deployment_reviewed_host(p_tenant_id uuid,p_request_id uuid) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare approved owned_synthetic.deployment_approvals;answer jsonb;begin
+ if current_setting('role',true) is distinct from 'service_role' then raise exception 'owned deployment host readback transport refused' using errcode='42501';end if;
+ approved:=owned_synthetic.deployment_current_approval(p_tenant_id,p_request_id);
+ select o.host_observation into strict answer from owned_synthetic.deployment_observations o
+ join owned_synthetic.deployment_heads h on h.preflight_key=o.task_id
+ where h.request_id=p_request_id and o.preflight->>'sha256'=approved.preflight_sha256
+ and o.preflight->>'rollbackSha256'=approved.rollback_sha256;
+ return answer;
+end $$;
+revoke all on function public.read_owned_deployment_reviewed_host(uuid,uuid) from public,anon,authenticated,human_action_writer,agent_ledger_writer,owned_target_controller;
+grant execute on function public.read_owned_deployment_reviewed_host(uuid,uuid) to service_role;

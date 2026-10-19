@@ -13,13 +13,14 @@ select set_config('axiom.platform_founder_sync','off',true);
 select pg_temp.ok(not exists(select 1 from public.tenant_users where tenant_id=pg_temp.pg_id(1) and user_id=pg_temp.id(2)),'founder fixture actually has no tenant membership');
 create temporary table enrollment169_saved(name text primary key,v jsonb);
 grant select,insert,update on enrollment169_saved to human_action_writer,service_role,owned_target_controller;
-insert into enrollment169_saved select 'host',jsonb_build_object('hostInstallerSha256',manifest#>>'{source,hostInstallerSha256}','images',jsonb_build_object('controllerImage',manifest#>'{deployment,controllerImage}','workerImage',manifest#>'{deployment,workerImage}','bffImage',manifest#>'{deployment,bffImage}'),'bffContainerId',manifest#>'{deployment,bffContainerId}','workloadApiVolume',manifest#>'{deployment,workloadApiVolume}','nodeId',manifest#>'{deployment,nodeId}','karyaIdentity',null,'persistentMutations',0) from deployment169_saved where n=1;
+insert into enrollment169_saved select 'host',jsonb_build_object('hostInstallerSha256',manifest#>>'{source,hostInstallerSha256}','images',jsonb_build_object('controllerImage',manifest#>'{deployment,controllerImage}','workerImage',manifest#>'{deployment,workerImage}','bffImage',manifest#>'{deployment,bffImage}'),'bffContainerId',manifest#>'{deployment,bffContainerId}','workloadApiVolume',manifest#>'{deployment,workloadApiVolume}','nodeId',manifest#>'{deployment,nodeId}','karyaIdentity',null,'persistentMutations',0,'runtime',jsonb_build_object('containerId',repeat('c',64),'image','sha256:'||repeat('d',64),'socketVolume',(manifest#>>'{deployment,controllerName}')||'-socket','socketGroup',20113,'adapterEnabled',true),'credentialRoot',jsonb_build_object('path','/var/lib/axiom/owned-target-credentials','ownerUid',0,'mode','0700','storage','container_layer')) from deployment169_saved where n=1;
 set local role human_action_writer;
 select public.prepare_owned_deployment_preflight(pg_temp.pg_id(1),pg_temp.id(1),pg_temp.id(101),pg_temp.pg_id(301),jsonb_build_object('operationKey',pg_temp.pg_id(341),'expectedManifestSha256',(select request->>'manifestSha256' from deployment169_saved where n=1)));
 reset role;
 set local role service_role;
 select public.claim_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351));
 select pg_temp.deployment169_refused('select public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select v||''{"bffContainerId":"foreign"}''::jsonb from enrollment169_saved where name=''host''))');
+select pg_temp.deployment169_refused('select public.record_owned_deployment_preflight(pg_temp.pg_id(341),pg_temp.pg_id(351),(select jsonb_set(v,''{runtime,containerId}'',''null''::jsonb) from enrollment169_saved where name=''host''))');
 reset role;
 -- Ordinary/shared backend principals cannot gain target RPC authority. Refusal
 -- preserves the unsafe edge for review instead of automatically repairing it.
@@ -64,6 +65,7 @@ select public.prepare_owned_deployment_install(pg_temp.pg_id(1),pg_temp.id(1),pg
 reset role;
 set local role service_role;
 select public.claim_next_owned_deployment_task(pg_temp.pg_id(381));
+select pg_temp.ok(public.read_owned_deployment_reviewed_host(pg_temp.pg_id(1),pg_temp.pg_id(301))=(select v from enrollment169_saved where name='host'),'installer reads exactly the host/runtime facts bound into founder-reviewed preflight');
 select public.authorize_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'enroll_synthetic_resource',(select v from enrollment169_saved where name='token'));
 select public.authorize_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'enroll_synthetic_resource',(select v from enrollment169_saved where name='token'));
 select public.authorize_owned_deployment_step(pg_temp.pg_id(1),pg_temp.pg_id(301),'authorize_role_switch',(select v from enrollment169_saved where name='token'));

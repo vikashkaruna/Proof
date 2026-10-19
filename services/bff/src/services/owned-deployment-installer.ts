@@ -178,8 +178,16 @@ export class OwnedDeploymentInstaller {
       Date.parse(task.expiresAt) <= Date.now()
     )
       throw Error('Owned deployment task source refused');
-    if (result.kind === 'installation')
+    if (result.kind === 'installation') {
       await this.source(task.tenantId, task.requestId, 'enroll_synthetic_resource', claimId);
+      const reviewedHost = z.record(z.string(), z.unknown()).parse(
+        await this.ports.serviceRpc('read_owned_deployment_reviewed_host', {
+          p_tenant_id: task.tenantId,
+          p_request_id: task.requestId,
+        }),
+      );
+      return { ...result, task: { ...task, reviewedHost } };
+    }
     return { ...result, task };
   }
   async preflight(taskId: string, raw: unknown) {

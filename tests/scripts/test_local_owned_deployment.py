@@ -60,9 +60,7 @@ class OwnedDeploymentTests(unittest.TestCase):
 
     def test_actual_private_file_and_source_integrity(self):
         path = self.private("private.json", {"example": True})
-        self.assertEqual(
-            MODULE.parse_json(MODULE.protected_bytes(path)), {"example": True}
-        )
+        self.assertEqual(MODULE.parse_json(MODULE.protected_bytes(path)), {"example": True})
         path.chmod(0o644)
         with self.assertRaises(ValueError):
             MODULE.protected_bytes(path)
@@ -99,24 +97,16 @@ class OwnedDeploymentTests(unittest.TestCase):
 
         def fake(args, **kwargs):
             if args[:2] == ["docker", "inspect"]:
-                return subprocess.CompletedProcess(
-                    args, 0, json.dumps(self.inspection(config)), ""
-                )
+                return subprocess.CompletedProcess(args, 0, json.dumps(self.inspection(config)), "")
             self.assertEqual(args[:4], ["docker", "exec", "-i", "b" * 64])
             self.assertNotIn("existing-operator-transport-fixture-only", str(args))
-            self.assertNotIn(
-                "existing-operator-transport-fixture-only", str(kwargs.get("env"))
-            )
-            self.assertIn(
-                "existing-operator-transport-fixture-only", kwargs["private_input"]
-            )
+            self.assertNotIn("existing-operator-transport-fixture-only", str(kwargs.get("env")))
+            self.assertIn("existing-operator-transport-fixture-only", kwargs["private_input"])
             return subprocess.CompletedProcess(args, 0, '{"data":{"task":null}}', "")
 
         with patch.object(MODULE, "run", side_effect=fake):
             self.assertEqual(
-                MODULE.operator_request(
-                    config, "/internal/owned-deployments/tasks/claim", {}
-                ),
+                MODULE.operator_request(config, "/internal/owned-deployments/tasks/claim", {}),
                 {"data": {"task": None}},
             )
 
@@ -139,9 +129,7 @@ class OwnedDeploymentTests(unittest.TestCase):
                 return_value=subprocess.CompletedProcess([], 0, json.dumps(info), ""),
             ) as run:
                 with self.assertRaises(ValueError):
-                    MODULE.operator_request(
-                        config, "/internal/owned-deployments/tasks/claim", {}
-                    )
+                    MODULE.operator_request(config, "/internal/owned-deployments/tasks/claim", {})
                 self.assertEqual(run.call_count, 1)
 
     def test_off_by_default_and_no_arbitrary_endpoint(self):
@@ -152,9 +140,7 @@ class OwnedDeploymentTests(unittest.TestCase):
         ]:
             with patch.object(MODULE, "run") as run:
                 with self.assertRaises(ValueError):
-                    MODULE.operator_request(
-                        changed, "/internal/owned-deployments/tasks/claim", {}
-                    )
+                    MODULE.operator_request(changed, "/internal/owned-deployments/tasks/claim", {})
                 run.assert_not_called()
         with patch.object(MODULE, "run") as run:
             with self.assertRaises(ValueError):
@@ -195,6 +181,161 @@ class OwnedDeploymentTests(unittest.TestCase):
             self.assertEqual(run.call_args.kwargs["input"], "private-fixture")
             self.assertTrue(run.call_args.kwargs["capture_output"])
             self.assertNotIn("shell", run.call_args.kwargs)
+
+
+class OwnedPollerTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.directory = Path(self.temporary.name).resolve()
+        self.directory.chmod(0o700)
+        self.state = self.directory / "state"
+        MODULE.owned_directory(self.state, create=True)
+        self.configuration_file = self.directory / "config.json"
+        MODULE.write_private(self.configuration_file, {"reviewed": True}, exclusive=True)
+        self.config = {
+            "stateDirectory": str(self.state),
+            "hostInstallerSha256": MODULE.host_source_sha256(),
+        }
+
+    def test_actual_owner_marker_lock_overlap_and_foreign_directory_refusal(self):
+        with MODULE.journal_lock(self.state):
+            with self.assertRaises(BlockingIOError):
+                with MODULE.journal_lock(self.state):
+                    pass
+        (self.state / "owner.json").write_text("{}")
+        with self.assertRaises(ValueError):
+            with MODULE.journal_lock(self.state):
+                pass
+
+    def task(self, claim_id):
+        manifest = {"deployment": {}, "tenantId": "89110000-0000-4000-8000-000000000001"}
+        return {
+            "taskId": "89110000-0000-4000-8000-000000000002",
+            "tenantId": manifest["tenantId"],
+            "requestId": "89110000-0000-4000-8000-000000000003",
+            "claimId": claim_id,
+            "manifest": manifest,
+            "manifestSha256": MODULE.hashlib.sha256(MODULE.canonical(manifest)).hexdigest(),
+            "reviewedHost": {"runtime": {"containerId": "reviewed-runtime"}},
+        }
+
+    def test_lost_effect_reply_retains_journal_and_never_reexecutes(self):
+        calls = []
+
+        def api(config, path, body):
+            calls.append(path)
+            if path == "tasks/claim":
+                return {"kind": "installation", "task": self.task(body["claimId"])}
+            if path.endswith("/authorize"):
+                return {
+                    "authorization": {
+                        "step": body["step"],
+                        "state": "confirmed",
+                        "readback": {"actual": True},
+                    }
+                }
+            return None
+
+        effects = []
+
+        def effect(config, file, directory, task, step, authorization, prior):
+            effects.append(step)
+            if step == "publish_scoped_credential":
+                raise ValueError("uncertain child reply")
+            return {"actual": True}
+
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call", side_effect=api),
+            patch.object(MODULE, "fixed_effect", side_effect=effect),
+            patch.object(
+                MODULE,
+                "readonly_host_preflight",
+                return_value={"runtime": {"containerId": "reviewed-runtime"}},
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "unconfirmed"):
+                MODULE.once(self.configuration_file)
+            before = len(calls)
+            with self.assertRaisesRegex(ValueError, "requires exact readback"):
+                MODULE.once(self.configuration_file)
+            self.assertEqual(len(calls), before)
+        saved = MODULE.parse_json(MODULE.protected_bytes(self.state / "current.json"))
+        self.assertEqual(saved["state"], "unconfirmed")
+        self.assertEqual(effects.count("publish_scoped_credential"), 1)
+        self.assertTrue(calls[-1].endswith("/unconfirmed"))
+        self.assertEqual((self.state / "current.json").stat().st_mode & 0o777, 0o600)
+
+    def test_replacement_runtime_refused_before_first_authorization_or_effect(self):
+        def api(config, path, body):
+            if path == "tasks/claim":
+                return {"kind": "installation", "task": self.task(body["claimId"])}
+            if path.endswith("/unconfirmed"):
+                return None
+            self.fail("Changed runtime reached authorization")
+
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call", side_effect=api),
+            patch.object(MODULE, "fixed_effect") as effect,
+            patch.object(
+                MODULE,
+                "readonly_host_preflight",
+                return_value={"runtime": {"containerId": "replacement-runtime"}},
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "unconfirmed"):
+                MODULE.once(self.configuration_file)
+            effect.assert_not_called()
+
+    def test_readonly_preflight_publishes_actual_observation_and_retains_receipt(self):
+        def api(config, path, body):
+            if path == "tasks/claim":
+                return {"kind": "preflight", "task": self.task(body["claimId"])}
+            self.assertEqual(body["observation"], {"actual": "read-only"})
+            return {"state": "preflight_ready"}
+
+        with (
+            patch.object(MODULE, "load_configuration", return_value=self.config),
+            patch.object(MODULE, "call", side_effect=api),
+            patch.object(MODULE, "readonly_host_preflight", return_value={"actual": "read-only"}),
+            patch.object(MODULE, "fixed_effect") as effect,
+        ):
+            self.assertEqual(MODULE.once(self.configuration_file), "completed")
+            effect.assert_not_called()
+        self.assertEqual(
+            MODULE.parse_json(MODULE.protected_bytes(self.state / "current.json"))["state"],
+            "completed",
+        )
+
+    def test_fixed_publish_uses_private_stdin_and_exact_full_container(self):
+        file = self.directory / "backend.key"
+        scope = {
+            key: "89110000-0000-4000-8000-000000000001"
+            for key in ("bindingId", "credentialId", "tenantId", "enrollmentId")
+        }
+        MODULE.write_private(
+            file, {**scope, "accessToken": "private-fixture-token"}, exclusive=True
+        )
+
+        def spawn(arguments, **kwargs):
+            self.assertEqual(arguments[:4], ["docker", "exec", "-i", "a" * 64])
+            self.assertNotIn("private-fixture-token", str(arguments))
+            payload = MODULE.parse_json(kwargs["private_input"].encode())
+            self.assertNotIn("private-fixture-token", kwargs["private_input"])
+            self.assertIn(
+                "private-fixture-token", MODULE.base64.b64decode(payload["base64"]).decode()
+            )
+            return subprocess.CompletedProcess(arguments, 0, '{"filePublished":true}', "")
+
+        with (
+            patch.object(MODULE, "bff_container", return_value="a" * 64),
+            patch.object(MODULE, "run", side_effect=spawn),
+        ):
+            self.assertEqual(
+                MODULE.publish_credential(self.config, scope, file), {"filePublished": True}
+            )
 
 
 if __name__ == "__main__":
