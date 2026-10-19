@@ -119,6 +119,8 @@ describe('immutable branded report source6/document7', () => {
       'app.axiomproof.ai',
       'hello@axiomminds.ai',
       '+919757281284',
+      '@top-left',
+      '@bottom-center',
       'counter(page)',
       'counter(pages)',
       'data:image/png;base64',
@@ -129,6 +131,8 @@ describe('immutable branded report source6/document7', () => {
       expect(html).toContain(value);
     expect(html).not.toMatch(/(?:src|href)=["']https?:|url\(["']?https?:|<script|<iframe|<canvas/i);
     expect(html).toContain('human review pending');
+    expect(/(?:top|bottom):-\d+mm/.test(html)).toBe(false);
+    expect(html).toContain('.brand-header,.brand-footer{display:none}');
     expect(/\bQR\b/.test(html.replace(/base64,[A-Za-z0-9+/=]+/g, ''))).toBe(false);
     expect(Buffer.byteLength(html)).toBeLessThan(5 * 1024 * 1024);
   });
