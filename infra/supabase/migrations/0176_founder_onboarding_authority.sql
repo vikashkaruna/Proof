@@ -239,4 +239,11 @@ revoke all on function public.onboard_organization(uuid,text,text,public.tenant_
   from public,anon,authenticated,service_role;
 grant execute on function public.onboard_organization(uuid,text,text,public.tenant_tier,boolean,boolean,boolean,text,text,jsonb,text,uuid)
   to human_action_writer;
+-- Reconcile the existing derived projection as part of this upgrade, not
+-- only future events. Genuine pre-176 races can leave stale revoked/flagged
+-- rows or omit a live founder from a concurrently created tenant. The private
+-- sync withdraws only stale platform_founder rows, preserves every explicit
+-- membership and existing valid derived receipt, and adds missing live rows.
+-- No designation, intake, accepted explicit ownership, or ledger is rewritten.
+select public.sync_platform_founder_memberships(null,null);
 commit;
