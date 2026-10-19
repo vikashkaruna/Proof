@@ -20,6 +20,7 @@ export const localProducerServiceConfiguration = z
       })
       .strict(),
     backendFile: controllerFilePath,
+    agentWriterFile: controllerFilePath.optional(),
   })
   .strict();
 
@@ -50,6 +51,7 @@ const backendConfiguration = z
 export async function prepareLocalProducer(args: string[], env: NodeJS.ProcessEnv) {
   let configBytes: Buffer | undefined;
   let backendBytes: Buffer | undefined;
+  let agentBytes: Buffer | undefined;
   try {
     if (args.length !== 2 || !['--check', '--serve'].includes(args[0]!)) throw new Error();
     const allowed = new Set([
@@ -98,7 +100,39 @@ export async function prepareLocalProducer(args: string[], env: NodeJS.ProcessEn
       });
     const db = client(backend.serviceKey);
     const writer = client(backend.humanWriterKey);
-    const producer = await composeAssessmentProducer(config.producer, db, { writer: () => writer });
+    if (Boolean(config.agentWriterFile) !== config.producer.scheduledCoverageEnabled)
+      throw new Error();
+    let agent: ReturnType<typeof client> | undefined;
+    if (config.agentWriterFile) {
+      agentBytes = await readControllerFile(config.agentWriterFile);
+      const key = agentBytes.toString('utf8').trim(),
+        claims = decodeJwt(key);
+      if (
+        key.length > 4096 ||
+        claims.role !== 'agent_ledger_writer' ||
+        typeof claims.exp !== 'number' ||
+        claims.exp <= Date.now() / 1000 ||
+        key === backend.serviceKey ||
+        key === backend.humanWriterKey
+      )
+        throw new Error();
+      agent = client(key);
+      const checked = await agent
+        .rpc('scheduled_coverage_writer_check', {})
+        .abortSignal(AbortSignal.timeout(5000));
+      if (checked.error) throw new Error();
+      z.object({
+        schemaVersion: z.literal(1),
+        authority: z.literal('explicit_owner_scope_required'),
+        taskScopes: z.tuple([z.literal('control_library.read'), z.literal('findings.write')]),
+      })
+        .strict()
+        .parse(checked.data);
+    }
+    const producer = await composeAssessmentProducer(config.producer, db, {
+      writer: () => writer,
+      ...(agent ? { agentWriter: () => agent! } : {}),
+    });
     if (args[0] === '--check')
       for (const tenant of config.producer.tenants) {
         if (tenant.keys.provider !== 'local') throw new Error();
@@ -106,6 +140,7 @@ export async function prepareLocalProducer(args: string[], env: NodeJS.ProcessEn
       }
     return {
       mode: args[0] as '--check' | '--serve',
+      coverage: producer.scheduledCoverage,
       serve: () => startAssessmentProducerSocket({ ...config.socket, producer }),
     };
   } catch {
@@ -113,6 +148,7 @@ export async function prepareLocalProducer(args: string[], env: NodeJS.ProcessEn
   } finally {
     configBytes?.fill(0);
     backendBytes?.fill(0);
+    agentBytes?.fill(0);
   }
 }
 
@@ -123,9 +159,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       process.stdout.write('Local producer configuration and read-only checks passed.\n');
     else {
       const socket = await prepared.serve();
+      const coverageAbort = new AbortController();
+      if (prepared.coverage) void prepared.coverage.run(coverageAbort.signal);
       process.stdout.write('Local assessment producer listening on its private socket.\n');
       for (const signal of ['SIGINT', 'SIGTERM'] as const)
-        process.once(signal, () => void socket.close().finally(() => process.exit(0)));
+        process.once(signal, () => {
+          coverageAbort.abort();
+          void socket.close().finally(() => process.exit(0));
+        });
     }
   } catch {
     process.stderr.write('Local assessment producer refused.\n');

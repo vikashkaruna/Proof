@@ -83,6 +83,8 @@ interface AppShellProps {
    */
   capabilities: readonly string[];
   canViewClosureDossiers?: boolean;
+  /** Server-verified live founder designation; the page independently rechecks. */
+  canReviewFounderReports?: boolean;
   logoutAction: () => Promise<void>;
 }
 
@@ -93,6 +95,7 @@ export function AppShell({
   activeTenantSlug,
   capabilities,
   canViewClosureDossiers = false,
+  canReviewFounderReports = false,
   logoutAction,
 }: AppShellProps) {
   const router = useRouter();
@@ -145,7 +148,12 @@ export function AppShell({
   }, [pathname]);
 
   const held = new Set(capabilities);
-  const navGroups = visibleNavGroups(capabilities, APP_NAV_GROUPS, canViewClosureDossiers);
+  const navGroups = visibleNavGroups(
+    capabilities,
+    APP_NAV_GROUPS,
+    canViewClosureDossiers,
+    canReviewFounderReports,
+  );
 
   // Halting a client's automation is an authority, not a convenience. A viewer
   // was previously shown this button; the BFF refused, so all it taught them

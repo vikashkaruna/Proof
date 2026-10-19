@@ -1,3 +1,4 @@
+import { readAssessmentBases, assessmentMetrics } from '@/lib/assessment-basis';
 import Link from 'next/link';
 import { requireCapabilityContext, Capability } from '@/lib/tenant-context';
 import { can } from '@axiom/types';
@@ -50,6 +51,17 @@ export default async function EngagementsListPage() {
   ]);
   const { data: engagements, error } = engagementResult;
 
+  const bases = await readAssessmentBases(
+    supabase,
+    tenantId,
+    (engagementResult.data ?? []).map((e) => e.id),
+  );
+  const metrics = new Map(
+    (engagements ?? []).map((e) => [
+      e.id,
+      assessmentMetrics(bases.get(e.id), e.posture_score, e.estimated_exposure_inr),
+    ]),
+  );
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
@@ -120,10 +132,10 @@ export default async function EngagementsListPage() {
                       <StatusBadge status={e.status} />
                     </td>
                     <td className="px-4 py-2">
-                      <PostureScore score={e.posture_score} variant="compact" />
+                      <PostureScore score={metrics.get(e.id)?.score ?? null} variant="compact" />
                     </td>
                     <td className="px-4 py-2 font-mono text-xs">
-                      {e.estimated_exposure_inr == null ? '—' : formatINR(e.estimated_exposure_inr)}
+                      {formatINR(metrics.get(e.id)?.exposureInr ?? null)}
                     </td>
                     <td className="px-4 py-2 text-xs text-slate-500">{formatDate(e.started_at)}</td>
                     <td className="px-4 py-2 text-right">

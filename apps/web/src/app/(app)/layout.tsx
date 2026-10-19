@@ -1,3 +1,4 @@
+import { hasLiveFounderReportAccess } from '@/lib/founder-report-access';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@axiom/supabase';
@@ -90,6 +91,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     ? canAccessClosureDossiers(active.role as UserRole, founderIsInternal)
     : false;
 
+  const canReviewFounderReports =
+    active?.role === UserRole.FOUNDER &&
+    (await hasLiveFounderReportAccess({
+      userId: user.id,
+      role: UserRole.FOUNDER,
+      isAxiomInternal: founderIsInternal,
+      supabase,
+    }));
+
   return (
     <AppShell
       user={user}
@@ -97,6 +107,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       activeTenantSlug={activeTenantSlug}
       capabilities={capabilities}
       canViewClosureDossiers={canViewClosureDossiers}
+      canReviewFounderReports={Boolean(canReviewFounderReports)}
       logoutAction={logoutAction}
     >
       {children}

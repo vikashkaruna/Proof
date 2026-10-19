@@ -249,6 +249,13 @@ export const APP_NAV_GROUPS: NavGroup[] = [
     label: 'Reporting & Proof',
     items: [
       {
+        route: '/reports/founder-review',
+        en: 'Founder report review',
+        hi: 'संस्थापक रिपोर्ट समीक्षा',
+        phase: 'P2',
+        capability: Capability.WORKBENCH_ACCESS,
+      },
+      {
         route: '/reports',
         en: 'Working Reports & Registers',
         agentRole: 'Prativedan · Clerical Drafter',
@@ -336,6 +343,7 @@ export function visibleNavGroups(
   capabilities: readonly string[],
   groups: NavGroup[] = APP_NAV_GROUPS,
   canViewClosureDossiers = false,
+  canReviewFounderReports = false,
 ): NavGroup[] {
   const held = new Set(capabilities);
   return groups
@@ -343,7 +351,9 @@ export function visibleNavGroups(
       ...group,
       items: group.items.filter(
         (i) =>
-          held.has(i.capability) && (i.route !== '/reports?tab=pramaan' || canViewClosureDossiers),
+          held.has(i.capability) &&
+          (i.route !== '/reports?tab=pramaan' || canViewClosureDossiers) &&
+          (i.route !== '/reports/founder-review' || canReviewFounderReports),
       ),
     }))
     .filter((group) => group.items.length > 0);
@@ -353,10 +363,14 @@ export function visibleNavGroups(
 export function visibleRoutes(
   capabilities: readonly string[],
   canViewClosureDossiers = false,
+  canReviewFounderReports = false,
 ): string[] {
-  return visibleNavGroups(capabilities, APP_NAV_GROUPS, canViewClosureDossiers).flatMap((g) =>
-    g.items.map((i) => i.route),
-  );
+  return visibleNavGroups(
+    capabilities,
+    APP_NAV_GROUPS,
+    canViewClosureDossiers,
+    canReviewFounderReports,
+  ).flatMap((g) => g.items.map((i) => i.route));
 }
 
 /**

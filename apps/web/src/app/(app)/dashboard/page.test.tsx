@@ -5,9 +5,15 @@ import DashboardPage from './page';
 
 type Result = { data?: unknown; count?: number | null; error?: Error | null };
 const state = vi.hoisted(() => ({
+  basis: 'recorded_assessment' as 'recorded_assessment' | 'scheduled_coverage' | 'unavailable',
   results: {} as Record<string, Result>,
   role: 'owner' as string,
   from: vi.fn(),
+}));
+vi.mock('@/lib/assessment-basis', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/assessment-basis')>()),
+  readAssessmentBases: async (_db: unknown, _tenant: string, ids: string[]) =>
+    new Map([...ids, ''].map((id) => [id, state.basis])),
 }));
 vi.mock('@/lib/tenant-context', () => ({
   requireTenantContext: async () => ({
@@ -24,6 +30,7 @@ vi.mock('next/link', () => ({
 }));
 
 beforeEach(() => {
+  state.basis = 'recorded_assessment';
   state.results = {};
   state.role = 'owner';
   state.from.mockReset().mockImplementation((table: string) => {
@@ -254,3 +261,16 @@ it('does not label a run active when its start timestamp is unknown', async () =
   expect(view).toContain('Activity unverified');
   expect(view).toContain('the start timestamp cannot establish current activity.');
 });
+
+for (const basis of ['scheduled_coverage', 'unavailable'] as const) {
+  it(`withholds dashboard posture for ${basis} provenance`, async () => {
+    state.basis = basis;
+    state.results.engagements = {
+      data: { id: 'eng-1', status: 'active', posture_score: 93 },
+      error: null,
+    };
+    const view = await html();
+    expect(view).not.toContain('data-testid="posture-value"');
+    expect(view).toContain('No verified posture score is available.');
+  });
+}

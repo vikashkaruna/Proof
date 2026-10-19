@@ -102,6 +102,15 @@ export default async function MonitoringPage() {
     routeCapability('/monitoring'),
   );
   const canManage = can(Capability.ESTATE_MANAGE, { role });
+  const assessmentDelegation = role === 'owner' && (
+    <p className="text-sm text-slate-600">
+      <Link className="underline" href="/monitoring/scheduled-assessments">
+        Scheduled coverage assessments
+      </Link>{' '}
+      — inspect availability, review a separate findings.write delegation and follow its original
+      recorded fires. Read schedules and standing approvals do not grant this authority.
+    </p>
+  );
   const scheduledReads =
     role === 'owner' &&
     process.env.AXIOM_SCHEDULED_POSTGRESQL_READ_ENABLED === 'true' &&
@@ -150,6 +159,7 @@ export default async function MonitoringPage() {
           title="Continuous Monitoring"
           description="Scheduled re-discovery, drift detections and the health of the monitoring itself."
         />
+        {assessmentDelegation}
         <p
           role="alert"
           className="rounded-md border border-ember-500 bg-ember-50 p-4 text-sm text-ember-700"
@@ -236,6 +246,7 @@ export default async function MonitoringPage() {
         />
       </StatGrid>
 
+      {assessmentDelegation}
       {scheduledReads && (
         <p className="text-sm text-slate-600">
           The observer outcomes below belong to the existing monitoring journal. Scheduled

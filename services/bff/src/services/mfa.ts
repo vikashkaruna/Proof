@@ -129,6 +129,7 @@ export type MfaChallengePurpose =
   | 'owned_synthetic_revocation'
   | 'standing_policy_revision'
   | 'data_flow_declaration'
+  | 'scheduled_coverage'
   | 'mfa_recovery';
 
 export interface ApprovalBinding {
@@ -252,6 +253,7 @@ const DATABASE_CLOCK_MFA_PURPOSES = {
   owned_synthetic_revocation: 'owned_deployment_revocation',
   standing_policy_revision: 'standing_policy',
   data_flow_declaration: 'data_flow_declaration',
+  scheduled_coverage: 'scheduled_coverage',
 } as const;
 function databaseClockPurpose(
   purpose: string,

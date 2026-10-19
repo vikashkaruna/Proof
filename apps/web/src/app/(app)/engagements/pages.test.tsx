@@ -6,10 +6,16 @@ import EngagementsListPage from './page';
 import EngagementDetailPage from './[id]/page';
 
 const state = vi.hoisted(() => ({
+  basis: 'recorded_assessment' as 'recorded_assessment' | 'scheduled_coverage' | 'unavailable',
   results: {} as Record<string, { data: unknown; error: Error | null }>,
   calls: [] as Array<[string, string, unknown]>,
   role: 'viewer' as UserRole,
   guards: [] as string[],
+}));
+vi.mock('@/lib/assessment-basis', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/assessment-basis')>()),
+  readAssessmentBases: async (_db: unknown, _tenant: string, ids: string[]) =>
+    new Map([...ids, ''].map((id) => [id, state.basis])),
 }));
 vi.mock('@/lib/tenant-context', () => ({
   Capability: {
@@ -54,6 +60,7 @@ vi.mock('next/link', () => ({
 }));
 
 beforeEach(() => {
+  state.basis = 'recorded_assessment';
   state.results = {};
   state.calls = [];
   state.guards = [];
@@ -139,3 +146,50 @@ it('guards the list and the detail with the capability that offers Engagements i
   ).rejects.toThrow('NOT_FOUND');
   expect(state.guards).toEqual(['assessment.run', 'assessment.run']);
 });
+
+for (const basis of ['scheduled_coverage', 'unavailable', 'recorded_assessment'] as const) {
+  it(`filters list and detail calculations using ${basis} server provenance`, async () => {
+    state.basis = basis;
+    const engagement = {
+      id: 'eng-1',
+      title: 'Measured technical assessment',
+      tenants: { name: 'Actual tenant' },
+      library_version: '1',
+      status: 'active',
+      started_at: '2026-10-01T00:00:00Z',
+      posture_score: 83,
+      estimated_exposure_inr: 1234567,
+    };
+    state.results.engagements = { data: [engagement], error: null };
+    const list = renderToStaticMarkup(await EngagementsListPage());
+    state.results.engagements = { data: engagement, error: null };
+    state.results.findings = {
+      data: [
+        {
+          id: 'finding-1',
+          control_id: 'DP-1',
+          status: 'fail',
+          score: 0.91,
+          risk_points: 987654,
+          rationale: 'Internal calculated exposure 987654',
+        },
+      ],
+      error: null,
+    };
+    const detail = renderToStaticMarkup(
+      await EngagementDetailPage({ params: Promise.resolve({ id: 'eng-1' }) }),
+    );
+    if (basis === 'recorded_assessment') {
+      expect(list).toContain('83');
+      expect(list).toContain('₹12.35 L');
+      expect(detail).toContain('987654.0');
+      expect(detail).toContain('Internal calculated exposure 987654');
+    } else {
+      expect(list).not.toContain('>83<');
+      expect(list).not.toContain('₹12.35 L');
+      expect(detail).not.toContain('Internal calculated exposure');
+      expect(detail).not.toContain('987654');
+      expect(detail).toContain('Unknown');
+    }
+  });
+}

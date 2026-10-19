@@ -72,7 +72,9 @@ python3 tests/database/lib/owned-postgres-role-fixture.py "$container" "$image"
 current_version=$(python3 tests/database/lib/report-policy-phases.py current-version --directory "$phase_dir")
 while IFS= read -r suite; do
   echo "Testing $suite (current$current_version)"
-  if [[ "$suite" = standing-approval-coordinator.test.sql ]]; then
+  if [[ "$suite" = scheduled-coverage-reassessment.test.sql ]]; then
+    { python3 tests/database/lib/postgresql-discovery-fixture.py; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; python3 tests/database/lib/scheduled-coverage-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [[ "$suite" = standing-approval-coordinator.test.sql ]]; then
     { python3 tests/database/lib/standing-approval-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
   elif [[ "$suite" = owned-deployment.test.sql || "$suite" = owned-deployment-enrollment.test.sql || "$suite" = owned-deployment-revocation.test.sql ]]; then
     { python3 tests/database/lib/postgresql-discovery-fixture.py; if [[ "$suite" = owned-deployment-enrollment.test.sql ]]; then python3 tests/database/lib/owned-enrollment-fixture.py; elif [[ "$suite" = owned-deployment-revocation.test.sql ]]; then python3 tests/database/lib/owned-enrollment-fixture.py --active; fi; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
@@ -107,6 +109,9 @@ python3 tests/database/lib/report-policy-phases.py verify --directory "$phase_di
 standing173_race_image=$(docker image inspect --format '{{.Id}}' "$image")
 python3 tests/database/lib/standing-approval-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
 python3 tests/database/lib/explicit-data-flow-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
+python3 tests/database/lib/scheduled-coverage-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
+python3 tests/database/lib/founder-onboarding-races.py --container "$container_id" --image "$standing173_race_image" --database axiom_policy_test
+python3 tests/database/lib/founder-membership-upgrade.py --container "$container_id" --image "$standing173_race_image"
 python3 tests/database/sudhaar-review-adoption-fixture.py | sql
 bash tests/database/operator-workflows-public-source.sh "$container"
 bash tests/database/concurrent-operator-workflows.sh "$container"

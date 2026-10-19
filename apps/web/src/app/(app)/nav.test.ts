@@ -422,3 +422,21 @@ describe('declared data flow history navigation', () => {
     ).toBe('Declared data flows');
   });
 });
+
+describe('live-founder report workspace navigation', () => {
+  it('does not infer live designation from a founder label or any other role', () => {
+    for (const role of Object.values(UserRole)) {
+      expect(visibleRoutes(capabilitiesFor(role), true)).not.toContain('/reports/founder-review');
+    }
+    expect(visibleRoutes(capabilitiesFor(UserRole.OWNER), true, true)).not.toContain(
+      '/reports/founder-review',
+    );
+    expect(visibleRoutes([], true, true)).not.toContain('/reports/founder-review');
+  });
+  it('offers the workspace only with founder capabilities plus the separately server-verified live designation', () => {
+    expect(visibleRoutes(capabilitiesFor(UserRole.FOUNDER), true, true)).toContain(
+      '/reports/founder-review',
+    );
+    expect(routeCapability('/reports/founder-review')).toBe(Capability.WORKBENCH_ACCESS);
+  });
+});

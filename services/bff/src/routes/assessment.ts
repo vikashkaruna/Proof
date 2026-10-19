@@ -1,3 +1,4 @@
+import { readScheduledCoveragePresentation } from '../services/scheduled-coverage-projection.js';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createSupabaseAdmin } from '@axiom/supabase';
@@ -72,6 +73,7 @@ const runSchema = z.object({
   output_redacted_hash: digestSchema,
   completed_at: z.iso.datetime({ offset: true }),
   error: z.null(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
 });
 const unavailableProvenance = {
   status: 'unavailable' as const,
@@ -215,6 +217,8 @@ export function assessmentRoutes() {
       let provenance: NonNullable<z.infer<typeof AssessmentSnapshotSchema>['provenance']> =
         unavailableProvenance;
       let structured: ReturnType<typeof validateAssessmentProvenance>['provenance'] = null;
+      let scheduledCoverage:
+        Awaited<ReturnType<typeof readScheduledCoveragePresentation>> | undefined;
       if (packetResult.data.length > 1) return c.json(unavailable, 503);
       if (packetResult.data.length === 1) {
         const packet = packetSchema.parse(packetResult.data[0]);
@@ -235,7 +239,9 @@ export function assessmentRoutes() {
           return c.json(unavailable, 503);
         const { data: runData, error: runError } = await db
           .from('agent_runs')
-          .select('id,tenant_id,engagement_id,agent,status,output_redacted_hash,completed_at,error')
+          .select(
+            'id,tenant_id,engagement_id,agent,status,output_redacted_hash,completed_at,error,metadata',
+          )
           .eq('tenant_id', tenantId)
           .eq('id', packet.run_id)
           .abortSignal(readSignal)
@@ -264,6 +270,27 @@ export function assessmentRoutes() {
           packet.library_digest,
         );
         structured = checked.provenance;
+        if (run.metadata.request_kind === 'scheduled_coverage_reassessment_v1') {
+          scheduledCoverage = await readScheduledCoveragePresentation(
+            db,
+            tenantId,
+            run.id,
+            engagement.id,
+          );
+          if (
+            !structured ||
+            structured.controls.some(
+              (c) =>
+                c.caller_affirmed_count !== 0 ||
+                c.caller_denied_count !== 0 ||
+                !['unknown', 'not_boolean_assessable'].includes(c.answer_state),
+            ) ||
+            Object.values(structured.applicability).some(
+              (a) => a.value !== null || a.provenance !== 'unknown',
+            )
+          )
+            throw Error('Unknown-only scheduled coverage required');
+        }
         provenance = {
           ...unavailableProvenance,
           runId: packet.run_id,
@@ -285,7 +312,7 @@ export function assessmentRoutes() {
       const questionnaire = new Map(structured?.controls.map((row) => [row.control_id, row]) ?? []);
       const controls: AssessmentControl[] = definitions.map((control) => {
         const finding = byControl.get(control.id);
-        const score = finding?.score ?? null;
+        const score = scheduledCoverage ? null : (finding?.score ?? null);
         const answers = questionnaire.get(control.id);
         const scoreBand =
           score === null ? null : score >= 80 ? 'pass' : score >= 40 ? 'partial' : 'fail';
@@ -310,8 +337,9 @@ export function assessmentRoutes() {
                 },
               }
             : {}),
-          status:
-            score === null
+          status: scheduledCoverage
+            ? 'unknown'
+            : score === null
               ? 'unassessed'
               : applicabilityState === 'caller_declared_not_applicable_unverified'
                 ? 'not_applicable'
@@ -343,7 +371,8 @@ export function assessmentRoutes() {
             status: engagement.status,
           },
           isSdf: tenant.is_sdf,
-          exposureInr: engagement.estimated_exposure_inr,
+          exposureInr: scheduledCoverage ? null : engagement.estimated_exposure_inr,
+          ...(scheduledCoverage ? { scheduledCoverage } : {}),
           provenance,
           controls,
           summary,
