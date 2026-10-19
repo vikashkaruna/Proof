@@ -1,4 +1,5 @@
 'use client';
+import { requestReviewGuidance } from './report-review-guidance';
 
 import { formatDateTime } from '@/lib/display-time';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -60,6 +61,8 @@ type AuditorWorkflowProps = {
   actorId?: string;
   canRequest: boolean;
   canManage: boolean;
+  existingRequestsOnly?: boolean;
+  refreshSignal?: number;
   onOpenReport: (reportId: string) => void;
   onChanged: () => void;
 };
@@ -73,6 +76,8 @@ function TenantAuditorWorkflow({
   actorId,
   canRequest,
   canManage,
+  existingRequestsOnly = false,
+  refreshSignal = 0,
   onOpenReport,
   onChanged,
 }: AuditorWorkflowProps) {
@@ -108,7 +113,7 @@ function TenantAuditorWorkflow({
     tenantId,
     actorId,
     kind: 'auditor',
-    canRequest,
+    canRequest: canRequest && !existingRequestsOnly,
     onConfirmed: () => {
       setTitle('');
       setSelectedRun('');
@@ -122,11 +127,13 @@ function TenantAuditorWorkflow({
     if (!canRequest) return;
     const controller = new AbortController();
     void Promise.all([
-      reportRequest(
-        tenantId,
-        `/reports/board/assessment-options?limit=${pageSize}&offset=${assessmentOffset}`,
-        { signal: controller.signal },
-      ),
+      existingRequestsOnly
+        ? Promise.resolve(null)
+        : reportRequest(
+            tenantId,
+            `/reports/board/assessment-options?limit=${pageSize}&offset=${assessmentOffset}`,
+            { signal: controller.signal },
+          ),
       reportRequest(
         tenantId,
         `/reports/statutory/auditor/requests?limit=${pageSize}&offset=${requestOffset}`,
@@ -134,11 +141,11 @@ function TenantAuditorWorkflow({
       ),
     ])
       .then(async ([options, listed]) => {
-        const assessmentsResult = optionsSchema.parse(await options.json());
+        const assessmentsResult = options ? optionsSchema.parse(await options.json()) : null;
         const requestsResult = requestsSchema.parse(await listed.json());
         if (controller.signal.aborted) return;
-        setAssessments(assessmentsResult.assessments);
-        setAssessmentTotal(assessmentsResult.total);
+        setAssessments(assessmentsResult?.assessments ?? []);
+        setAssessmentTotal(assessmentsResult?.total ?? 0);
         setRequests(requestsResult.requests);
         setRequestTotal(requestsResult.total);
       })
@@ -149,7 +156,15 @@ function TenantAuditorWorkflow({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [tenantId, canRequest, assessmentOffset, requestOffset, revision]);
+  }, [
+    tenantId,
+    canRequest,
+    existingRequestsOnly,
+    assessmentOffset,
+    requestOffset,
+    revision,
+    refreshSignal,
+  ]);
 
   useEffect(() => {
     if (!selected?.reportId) return;
@@ -179,7 +194,7 @@ function TenantAuditorWorkflow({
       if (!controller.signal.aborted) setError(failure(cause));
     });
     return () => controller.abort();
-  }, [tenantId, canManage, selected?.reportId, revision]);
+  }, [tenantId, canManage, selected?.reportId, revision, refreshSignal]);
 
   async function act(path: string, body: unknown | (() => unknown)) {
     setBusy(true);
@@ -215,8 +230,9 @@ function TenantAuditorWorkflow({
             Assessment-derived auditor review packs
           </h2>
           <p className="text-sm text-slate-600">
-            A founder can prepare and release a retained pack from a finalized assessment. This is
-            not an independent audit or evidence attestation.
+            {existingRequestsOnly
+              ? 'Review existing auditor-pack requests for the selected organization. This is an assessment-derived review pack, not an independent audit or evidence attestation.'
+              : 'A founder can prepare and release a retained pack from a finalized assessment. This is not an independent audit or evidence attestation.'}
           </p>
         </div>
         <button type="button" className={button} disabled={busy || loading} onClick={refresh}>
@@ -233,95 +249,97 @@ function TenantAuditorWorkflow({
           {message}
         </p>
       )}
-      <ReportRequestRecovery recovery={recovery} />
-      <form
-        aria-label="Request auditor review pack"
-        className="grid gap-3 rounded-lg border border-slate-200 p-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!chosen || !confirmed || !title.trim() || recovery.blocked) return;
-          void recovery.send({
-            engagementId: chosen.engagementId,
-            assessmentRunId: chosen.assessmentRunId,
-            title: title.trim(),
-          });
-        }}
-      >
-        <h3 className="font-semibold">Request from a finalized assessment</h3>
-        <label className="text-sm">
-          Assessment
-          <select
-            className={`${field} mt-1 w-full`}
-            value={selectedRun}
-            disabled={busy || loading || recovery.blocked}
-            onChange={(event) => {
-              setSelectedRun(event.target.value);
-              setConfirmed(false);
-            }}
-          >
-            <option value="">Choose a finalized assessment</option>
-            {assessments.map((item) => (
-              <option key={item.assessmentRunId} value={item.assessmentRunId}>
-                {item.engagementTitle} · {date(item.finalizedAt)} · {item.libraryVersion}
-              </option>
-            ))}
-          </select>
-        </label>
-        {!loading && assessments.length === 0 && (
-          <p className="text-sm text-slate-600">
-            No finalized assessment is available in this tenant.
-          </p>
-        )}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className={button}
-            disabled={loading || assessmentOffset === 0}
-            onClick={() => setAssessmentOffset(Math.max(0, assessmentOffset - pageSize))}
-          >
-            Previous assessments
-          </button>
-          <button
-            type="button"
-            className={button}
-            disabled={loading || assessmentOffset + pageSize >= assessmentTotal}
-            onClick={() => setAssessmentOffset(assessmentOffset + pageSize)}
-          >
-            Next assessments
-          </button>
-        </div>
-        <label className="text-sm">
-          Internal request reference
-          <input
-            className={`${field} mt-1 w-full`}
-            value={title}
-            maxLength={300}
-            required
-            disabled={busy || recovery.blocked}
-            onChange={(event) => {
-              setTitle(event.target.value);
-              setConfirmed(false);
-            }}
-          />
-        </label>
-        <label className="flex gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={confirmed}
-            disabled={busy || !chosen || recovery.blocked}
-            onChange={(event) => setConfirmed(event.target.checked)}
-          />
-          I understand this pack contains recorded assessment findings, not an independent auditor
-          attestation.
-        </label>
-        <button
-          type="submit"
-          className={button}
-          disabled={busy || !chosen || !confirmed || !title.trim() || recovery.blocked}
+      {!existingRequestsOnly && <ReportRequestRecovery recovery={recovery} />}
+      {!existingRequestsOnly && (
+        <form
+          aria-label="Request auditor review pack"
+          className="grid gap-3 rounded-lg border border-slate-200 p-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!chosen || !confirmed || !title.trim() || recovery.blocked) return;
+            void recovery.send({
+              engagementId: chosen.engagementId,
+              assessmentRunId: chosen.assessmentRunId,
+              title: title.trim(),
+            });
+          }}
         >
-          Request review pack
-        </button>
-      </form>
+          <h3 className="font-semibold">Request from a finalized assessment</h3>
+          <label className="text-sm">
+            Assessment
+            <select
+              className={`${field} mt-1 w-full`}
+              value={selectedRun}
+              disabled={busy || loading || recovery.blocked}
+              onChange={(event) => {
+                setSelectedRun(event.target.value);
+                setConfirmed(false);
+              }}
+            >
+              <option value="">Choose a finalized assessment</option>
+              {assessments.map((item) => (
+                <option key={item.assessmentRunId} value={item.assessmentRunId}>
+                  {item.engagementTitle} · {date(item.finalizedAt)} · {item.libraryVersion}
+                </option>
+              ))}
+            </select>
+          </label>
+          {!loading && assessments.length === 0 && (
+            <p className="text-sm text-slate-600">
+              No finalized assessment is available in this tenant.
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={button}
+              disabled={loading || assessmentOffset === 0}
+              onClick={() => setAssessmentOffset(Math.max(0, assessmentOffset - pageSize))}
+            >
+              Previous assessments
+            </button>
+            <button
+              type="button"
+              className={button}
+              disabled={loading || assessmentOffset + pageSize >= assessmentTotal}
+              onClick={() => setAssessmentOffset(assessmentOffset + pageSize)}
+            >
+              Next assessments
+            </button>
+          </div>
+          <label className="text-sm">
+            Internal request reference
+            <input
+              className={`${field} mt-1 w-full`}
+              value={title}
+              maxLength={300}
+              required
+              disabled={busy || recovery.blocked}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                setConfirmed(false);
+              }}
+            />
+          </label>
+          <label className="flex gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              disabled={busy || !chosen || recovery.blocked}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            I understand this pack contains recorded assessment findings, not an independent auditor
+            attestation.
+          </label>
+          <button
+            type="submit"
+            className={button}
+            disabled={busy || !chosen || !confirmed || !title.trim() || recovery.blocked}
+          >
+            Request review pack
+          </button>
+        </form>
+      )}
       <div aria-label="Auditor pack requests" className="space-y-3">
         <h3 className="font-semibold">Recorded requests</h3>
         {loading && <p role="status">Loading auditor requests…</p>}
@@ -336,6 +354,13 @@ function TenantAuditorWorkflow({
                 className="w-full rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-teal-600"
                 aria-pressed={selectedRequest === item.id}
                 onClick={() => {
+                  if (selectedRequest === item.id) {
+                    setReleaseConfirmed(false);
+                    setError('');
+                    setMessage('');
+                    refresh();
+                    return;
+                  }
                   setSelectedRequest(item.id);
                   setArtifact(null);
                   setReport(null);
@@ -348,6 +373,11 @@ function TenantAuditorWorkflow({
                 <span className="block text-sm text-slate-600">
                   {item.status} · Requested {date(item.createdAt)}
                 </span>
+                {existingRequestsOnly && (
+                  <span className="block text-sm text-slate-600">
+                    Next: {requestReviewGuidance(item.status)}
+                  </span>
+                )}
               </button>
             </li>
           ))}

@@ -1,4 +1,5 @@
 'use client';
+import { requestReviewGuidance } from './report-review-guidance';
 
 import { formatDateTime } from '@/lib/display-time';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -69,6 +70,8 @@ type BoardWorkflowProps = {
   actorId?: string;
   canRequest: boolean;
   canManage: boolean;
+  existingRequestsOnly?: boolean;
+  refreshSignal?: number;
   onOpenReport: (reportId: string) => void;
   onChanged: () => void;
 };
@@ -82,6 +85,8 @@ function TenantBoardWorkflow({
   actorId,
   canRequest,
   canManage,
+  existingRequestsOnly = false,
+  refreshSignal = 0,
   onOpenReport,
   onChanged,
 }: BoardWorkflowProps) {
@@ -123,7 +128,7 @@ function TenantBoardWorkflow({
     tenantId,
     actorId,
     kind: 'board',
-    canRequest,
+    canRequest: canRequest && !existingRequestsOnly,
     onConfirmed: () => {
       setTitle('');
       setSelectedRun('');
@@ -139,22 +144,26 @@ function TenantBoardWorkflow({
     const load = async () => {
       try {
         const [assessmentResponse, requestResponse] = await Promise.all([
-          reportRequest(
-            tenantId,
-            `/reports/board/assessment-options?limit=${pageSize}&offset=${assessmentOffset}`,
-            { signal: controller.signal },
-          ),
+          existingRequestsOnly
+            ? Promise.resolve(null)
+            : reportRequest(
+                tenantId,
+                `/reports/board/assessment-options?limit=${pageSize}&offset=${assessmentOffset}`,
+                { signal: controller.signal },
+              ),
           reportRequest(
             tenantId,
             `/reports/board/requests?limit=${pageSize}&offset=${requestOffset}`,
             { signal: controller.signal },
           ),
         ]);
-        const options = assessmentsSchema.parse(await assessmentResponse.json());
+        const options = assessmentResponse
+          ? assessmentsSchema.parse(await assessmentResponse.json())
+          : null;
         const listed = requestsSchema.parse(await requestResponse.json());
         if (controller.signal.aborted) return;
-        setAssessments(options.assessments);
-        setAssessmentTotal(options.total);
+        setAssessments(options?.assessments ?? []);
+        setAssessmentTotal(options?.total ?? 0);
         setRequests(listed.requests);
         setRequestTotal(listed.total);
       } catch (cause) {
@@ -165,7 +174,15 @@ function TenantBoardWorkflow({
     };
     void load();
     return () => controller.abort();
-  }, [tenantId, canRequest, assessmentOffset, requestOffset, revision]);
+  }, [
+    tenantId,
+    canRequest,
+    existingRequestsOnly,
+    assessmentOffset,
+    requestOffset,
+    revision,
+    refreshSignal,
+  ]);
 
   useEffect(() => {
     if (!selected?.reportId) return;
@@ -197,7 +214,7 @@ function TenantBoardWorkflow({
     };
     void load();
     return () => controller.abort();
-  }, [tenantId, canManage, selected?.reportId, revision]);
+  }, [tenantId, canManage, selected?.reportId, revision, refreshSignal]);
 
   async function act(path: string, body: unknown | (() => unknown)) {
     setBusy(true);
@@ -233,8 +250,9 @@ function TenantBoardWorkflow({
             <AgentLabel agent="prativedan" />
             <h2 className="text-lg font-semibold text-[#1E2A4A]">Board reports</h2>
             <p className="text-sm text-slate-600">
-              Request a draft from a finalized assessment. A founder reviews the exact content,
-              retains its source and PDF versions, then releases the reviewed PDF.
+              {existingRequestsOnly
+                ? 'Review existing board requests for the selected organization. Generate, inspect, retain and release only their exact saved versions.'
+                : 'Request a draft from a finalized assessment. A founder reviews the exact content, retains its source and PDF versions, then releases the reviewed PDF.'}
             </p>
           </div>
         </div>
@@ -252,104 +270,106 @@ function TenantBoardWorkflow({
           {message}
         </p>
       )}
-      <ReportRequestRecovery recovery={recovery} />
-      <form
-        aria-label="Request board report"
-        className="grid gap-3 rounded-lg border border-slate-200 p-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!chosen || !confirmed || !title.trim() || recovery.blocked) return;
-          void recovery.send({
-            engagementId: chosen.engagementId,
-            assessmentRunId: chosen.assessmentRunId,
-            title: title.trim(),
-          });
-        }}
-      >
-        <h3 className="font-semibold">Request from a finalized assessment</h3>
-        <div className="text-sm">
-          <label htmlFor="board-assessment" className="block">
-            Assessment
-          </label>
-          <select
-            id="board-assessment"
-            className={`${field} mt-1 w-full`}
-            value={selectedRun}
-            disabled={busy || loading || recovery.blocked}
-            onChange={(event) => {
-              setSelectedRun(event.target.value);
-              setConfirmed(false);
-            }}
-          >
-            <option value="">Choose a finalized assessment</option>
-            {assessments.map((item) => (
-              <option key={item.assessmentRunId} value={item.assessmentRunId}>
-                {item.engagementTitle} · {date(item.finalizedAt)} · {item.libraryVersion}
-              </option>
-            ))}
-          </select>
-        </div>
-        {assessments.length === 0 && !loading && (
-          <p className="text-sm text-slate-600">
-            No finalized assessments are available in this tenant yet. Complete and confirm an
-            assessment before requesting a board draft.
-          </p>
-        )}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className={button}
-            disabled={assessmentOffset === 0 || loading}
-            onClick={() => {
-              setLoading(true);
-              setAssessmentOffset(Math.max(0, assessmentOffset - pageSize));
-            }}
-          >
-            Previous assessments
-          </button>
-          <button
-            type="button"
-            className={button}
-            disabled={assessmentOffset + pageSize >= assessmentTotal || loading}
-            onClick={() => {
-              setLoading(true);
-              setAssessmentOffset(assessmentOffset + pageSize);
-            }}
-          >
-            Next assessments
-          </button>
-        </div>
-        <label className="text-sm">
-          Report title
-          <input
-            className={`${field} mt-1 w-full`}
-            value={title}
-            maxLength={300}
-            required
-            disabled={busy || recovery.blocked}
-            onChange={(event) => {
-              setTitle(event.target.value);
-              setConfirmed(false);
-            }}
-          />
-        </label>
-        <label className="flex gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={confirmed}
-            disabled={busy || !chosen || recovery.blocked}
-            onChange={(event) => setConfirmed(event.target.checked)}
-          />
-          I request a draft bound to this finalized assessment and its recorded control library.
-        </label>
-        <button
-          type="submit"
-          className={button}
-          disabled={busy || !chosen || !confirmed || !title.trim() || recovery.blocked}
+      {!existingRequestsOnly && <ReportRequestRecovery recovery={recovery} />}
+      {!existingRequestsOnly && (
+        <form
+          aria-label="Request board report"
+          className="grid gap-3 rounded-lg border border-slate-200 p-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!chosen || !confirmed || !title.trim() || recovery.blocked) return;
+            void recovery.send({
+              engagementId: chosen.engagementId,
+              assessmentRunId: chosen.assessmentRunId,
+              title: title.trim(),
+            });
+          }}
         >
-          Request board draft
-        </button>
-      </form>
+          <h3 className="font-semibold">Request from a finalized assessment</h3>
+          <div className="text-sm">
+            <label htmlFor="board-assessment" className="block">
+              Assessment
+            </label>
+            <select
+              id="board-assessment"
+              className={`${field} mt-1 w-full`}
+              value={selectedRun}
+              disabled={busy || loading || recovery.blocked}
+              onChange={(event) => {
+                setSelectedRun(event.target.value);
+                setConfirmed(false);
+              }}
+            >
+              <option value="">Choose a finalized assessment</option>
+              {assessments.map((item) => (
+                <option key={item.assessmentRunId} value={item.assessmentRunId}>
+                  {item.engagementTitle} · {date(item.finalizedAt)} · {item.libraryVersion}
+                </option>
+              ))}
+            </select>
+          </div>
+          {assessments.length === 0 && !loading && (
+            <p className="text-sm text-slate-600">
+              No finalized assessments are available in this tenant yet. Complete and confirm an
+              assessment before requesting a board draft.
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              className={button}
+              disabled={assessmentOffset === 0 || loading}
+              onClick={() => {
+                setLoading(true);
+                setAssessmentOffset(Math.max(0, assessmentOffset - pageSize));
+              }}
+            >
+              Previous assessments
+            </button>
+            <button
+              type="button"
+              className={button}
+              disabled={assessmentOffset + pageSize >= assessmentTotal || loading}
+              onClick={() => {
+                setLoading(true);
+                setAssessmentOffset(assessmentOffset + pageSize);
+              }}
+            >
+              Next assessments
+            </button>
+          </div>
+          <label className="text-sm">
+            Report title
+            <input
+              className={`${field} mt-1 w-full`}
+              value={title}
+              maxLength={300}
+              required
+              disabled={busy || recovery.blocked}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                setConfirmed(false);
+              }}
+            />
+          </label>
+          <label className="flex gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              disabled={busy || !chosen || recovery.blocked}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            I request a draft bound to this finalized assessment and its recorded control library.
+          </label>
+          <button
+            type="submit"
+            className={button}
+            disabled={busy || !chosen || !confirmed || !title.trim() || recovery.blocked}
+          >
+            Request board draft
+          </button>
+        </form>
+      )}
       <div aria-label="Board report requests" className="space-y-3">
         <h3 className="font-semibold">Recorded requests</h3>
         {loading && <p role="status">Loading board requests…</p>}
@@ -385,6 +405,11 @@ function TenantBoardWorkflow({
                 <span className="block text-sm text-slate-600">
                   {item.status} · Requested {date(item.createdAt)}
                 </span>
+                {existingRequestsOnly && (
+                  <span className="block text-sm text-slate-600">
+                    Next: {requestReviewGuidance(item.status)}
+                  </span>
+                )}
               </button>
             </li>
           ))}

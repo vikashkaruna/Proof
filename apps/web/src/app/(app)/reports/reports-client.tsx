@@ -436,13 +436,16 @@ function TenantReportsClient(access: Access) {
   );
 }
 
-function ReportInspector({
+export function ReportInspector({
   reportId,
   onChanged,
+  onRead,
   ...access
 }: Access & {
   reportId: string;
   onChanged: () => void;
+  /** Optional coordinator refresh after an authoritative exact-report read. */
+  onRead?: () => void;
 }) {
   const [report, setReport] = useState<ReportDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -470,8 +473,10 @@ function ReportInspector({
     void reportRequest(access.tenantId, `/reports/${reportId}`, { signal: controller.signal })
       .then((response) => response.json())
       .then((value) => {
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted) {
           setReport(z.object({ data: detailSchema }).parse(value).data);
+          onRead?.();
+        }
       })
       .catch((err: unknown) => {
         if (!controller.signal.aborted) setReadError(failure(err));
@@ -480,7 +485,7 @@ function ReportInspector({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [access.tenantId, reportId, revision]);
+  }, [access.tenantId, reportId, revision, onRead]);
   async function act(path: string, body: unknown | (() => unknown)) {
     setBusy(true);
     setError('');

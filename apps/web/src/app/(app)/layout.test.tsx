@@ -12,6 +12,8 @@ const state = vi.hoisted(() => ({
   membershipReads: 0,
   authError: null as Error | null,
   authThrows: false,
+  profileInternal: true,
+  founderLive: true,
 }));
 vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => ({ value: 'beta' }) }) }));
 vi.mock('next/navigation', () => ({
@@ -27,7 +29,19 @@ vi.mock('@axiom/supabase', () => ({
         return { data: { user: state.user }, error: state.authError };
       },
     },
-    from: () => {
+    rpc: () => ({ abortSignal: async () => ({ data: state.founderLive, error: null }) }),
+    from: (table: string) => {
+      if (table === 'users') {
+        const profile = {
+          select: () => profile,
+          eq: () => profile,
+          maybeSingle: async () => ({
+            data: { is_axiom_internal: state.profileInternal },
+            error: null,
+          }),
+        };
+        return profile;
+      }
       const query = {
         select: () => query,
         eq: async () => {
@@ -43,9 +57,18 @@ vi.mock('@axiom/supabase', () => ({
   }),
 }));
 vi.mock('./app-shell', () => ({
-  AppShell: ({ tenants, children }: { tenants: unknown; children: React.ReactNode }) => (
+  AppShell: ({
+    tenants,
+    children,
+    canReviewFounderReports,
+  }: {
+    tenants: unknown;
+    children: React.ReactNode;
+    canReviewFounderReports: boolean;
+  }) => (
     <div>
       <pre>{JSON.stringify(tenants)}</pre>
+      <output data-testid="founder-report-navigation">{String(canReviewFounderReports)}</output>
       {children}
     </div>
   ),
@@ -59,6 +82,8 @@ beforeEach(() => {
   state.membershipReads = 0;
   state.authError = null;
   state.authThrows = false;
+  state.profileInternal = true;
+  state.founderLive = true;
 });
 
 it('does not render protected content without an authenticated user', async () => {
@@ -71,6 +96,8 @@ it('reports provider failure without treating a valid cookie as a missing sessio
     'Authentication service is temporarily unavailable',
   );
   state.authThrows = false;
+  state.profileInternal = true;
+  state.founderLive = true;
   state.authError = new AuthRetryableFetchError('provider unavailable', 503);
   await expect(AppLayout({ children: <p>Protected</p> })).rejects.toThrow(
     'Authentication service is temporarily unavailable',
@@ -106,4 +133,27 @@ it('passes only recorded tenant memberships into the shell', async () => {
   expect(view).toContain('Beta');
   expect(view).toContain('Protected');
   expect(view).not.toContain('Meridian');
+});
+
+it('derives founder report navigation from current live designation rather than an explicit legacy founder label', async () => {
+  state.user = { id: 'actor' };
+  state.memberships = [
+    {
+      tenant_id: 'tenant',
+      role: 'founder',
+      tenants: { slug: 'beta', name: 'Selected organization' },
+    },
+  ];
+  state.founderLive = false;
+  expect(renderToStaticMarkup(await AppLayout({ children: <p>Reader</p> }))).toContain(
+    'data-testid="founder-report-navigation">false',
+  );
+  state.founderLive = true;
+  expect(renderToStaticMarkup(await AppLayout({ children: <p>Reader</p> }))).toContain(
+    'data-testid="founder-report-navigation">true',
+  );
+  state.profileInternal = false;
+  expect(renderToStaticMarkup(await AppLayout({ children: <p>Reader</p> }))).toContain(
+    'data-testid="founder-report-navigation">false',
+  );
 });
