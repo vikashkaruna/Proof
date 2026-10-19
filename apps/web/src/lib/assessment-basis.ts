@@ -37,7 +37,9 @@ export async function readAssessmentBases(
   try {
     const response = await db
       .from('agent_runs')
-      .select('tenant_id,engagement_id,agent,status,output_redacted_hash,completed_at,metadata')
+      .select('tenant_id,engagement_id,agent,status,output_redacted_hash,completed_at,metadata', {
+        count: 'exact',
+      })
       .eq('tenant_id', tenantId)
       .eq('agent', 'parikshan')
       .in('engagement_id', ids)
@@ -45,6 +47,9 @@ export async function readAssessmentBases(
       .abortSignal(AbortSignal.timeout(5000));
     if (response.error) return result;
     const rows = z.array(run).max(1000).parse(response.data);
+    // PostgREST may silently cap below our requested limit. Only a same-query
+    // exact total proves every matching run was received; a sentinel cannot.
+    if (!Number.isSafeInteger(response.count) || response.count !== rows.length) return result;
     if (rows.some((row) => row.tenant_id !== tenantId || !result.has(row.engagement_id)))
       return result;
     const unknown = new Set<string>();

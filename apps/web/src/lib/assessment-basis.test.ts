@@ -12,11 +12,15 @@ const ordinary = () => ({
   completed_at: '2026-10-19T00:00:00Z',
   metadata: { request_kind: 'questionnaire_v1' } as Record<string, unknown>,
 });
-function database(data: unknown, error: unknown = null) {
+function database(
+  data: unknown,
+  error: unknown = null,
+  count: unknown = Array.isArray(data) ? data.length : null,
+) {
   const calls: unknown[][] = [];
   const query = {
-    select: (value: unknown) => {
-      calls.push(['select', value]);
+    select: (value: unknown, options: unknown) => {
+      calls.push(['select', value, options]);
       return query;
     },
     eq: (field: unknown, value: unknown) => {
@@ -33,7 +37,7 @@ function database(data: unknown, error: unknown = null) {
     },
     abortSignal: async (signal: AbortSignal) => {
       calls.push(['signal', signal]);
-      return { data, error };
+      return { data, error, count };
     },
   };
   const from = vi.fn(() => query);
@@ -87,6 +91,29 @@ describe('trusted assessment provenance', () => {
     ])
       expect(await basis(rows)).toBe('unavailable');
     expect(await basis([ordinary()], new Error('offline'))).toBe('unavailable');
+  });
+  it('requires exact same-query completeness even when PostgREST silently caps results', async () => {
+    for (const [returned, count] of [
+      [1000, 1001],
+      [20, 21],
+      [1, null],
+      [1, -1],
+      [1, 1.5],
+    ] as const) {
+      const { db } = database(Array.from({ length: returned }, ordinary), null, count);
+      expect((await readAssessmentBases(db, tenant, [engagement])).get(engagement)).toBe(
+        'unavailable',
+      );
+    }
+    const { db, calls } = database(Array.from({ length: 1000 }, ordinary), null, 1000);
+    expect((await readAssessmentBases(db, tenant, [engagement])).get(engagement)).toBe(
+      'recorded_assessment',
+    );
+    expect(calls).toContainEqual([
+      'select',
+      'tenant_id,engagement_id,agent,status,output_redacted_hash,completed_at,metadata',
+      { count: 'exact' },
+    ]);
   });
   it('does not read invalid or unbounded scope', async () => {
     const { db, from } = database([ordinary()]);
