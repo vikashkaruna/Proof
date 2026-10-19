@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { Variables } from '../types.js';
 import { ownedSyntheticPlanRoutes, type OwnedSyntheticRouteDeps } from './owned-synthetic-plans.js';
 import { ownedHash } from '../services/owned-execution-plan.js';
+import { ownedOperationId } from '../services/owned-execution-broker.js';
 const id = (n: number) => `89140000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const request = {
   operationKey: id(3),
@@ -85,7 +86,7 @@ function post(path = '', body: unknown = request, headers: Record<string, string
     body: JSON.stringify(body),
   });
 }
-it.each(['', '/cancel', '/outcome'])(
+it.each(['', '/cancel', '/outcome', '/observe-effect'])(
   'unprovided Auth context is401 before source/controller work on%s',
   async (path) => {
     authenticated = false;
@@ -260,3 +261,92 @@ it.each(['', '/cancel', '/outcome'])(
     expect(unbounded).not.toHaveBeenCalled();
   },
 );
+
+const effectRequest = { operationKey: id(3), planId: id(11), actionId: id(12), batchId: id(13) };
+function effectReceipt() {
+  return {
+    ...effectRequest,
+    tenantId: id(1),
+    actorId: id(2),
+    bindingId: id(4),
+    contentDigest: 'a'.repeat(64),
+    ledgerReceipt: '123',
+    observation: {
+      outcome: 'unknown',
+      observedAt: '2026-10-19T00:00:00+00:00',
+      forwardOperationId: ownedOperationId(id(13), id(12), 'forward'),
+      rollbackOperationId: ownedOperationId(id(13), id(12), 'rollback'),
+      forward: null,
+      rollback: null,
+      current: { fixture_id: id(20), resource_id: id(21), version: 0, audit_log_enabled: false },
+      currentMatchesLastCommit: null,
+      recordedActionStatus: 'failed',
+      recordedBatchStatus: 'partial_failure',
+      approvalExpired: true,
+      approvalRevoked: false,
+      retryAllowed: false,
+      rollbackAllowed: false,
+      executionStatusChanged: false,
+    },
+  };
+}
+it('reads original accepted effect without dispatch, retry or target-credential access', async () => {
+  deps.observeEffect = vi.fn(async () => effectReceipt());
+  const response = await post('/observe-effect', effectRequest);
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual(effectReceipt());
+  expect(deps.observeEffect).toHaveBeenCalledWith(
+    expect.objectContaining({ tenantId: id(1), actorId: id(2), sessionId: id(6) }),
+    effectRequest,
+  );
+  expect(deps.planPorts).not.toHaveBeenCalled();
+  expect(deps.cancellationPorts).not.toHaveBeenCalled();
+});
+it.each(['tenantId', 'actorId', 'operationKey', 'planId', 'actionId', 'batchId'] as const)(
+  'rejects an observation for foreign%s',
+  async (field) => {
+    deps.observeEffect = vi.fn(async () => ({ ...effectReceipt(), [field]: id(99) }));
+    expect((await post('/observe-effect', effectRequest)).status).toBe(503);
+  },
+);
+it('rejects substituted provider operation identity', async () => {
+  const r = effectReceipt();
+  deps.observeEffect = vi.fn(async () => ({
+    ...r,
+    observation: { ...r.observation, forwardOperationId: id(99) },
+  }));
+  expect((await post('/observe-effect', effectRequest)).status).toBe(503);
+});
+it('unmounted, killed or uncertain effect source never becomes success', async () => {
+  expect((await post('/observe-effect', effectRequest)).status).toBe(503);
+  deps.observeEffect = vi.fn(async () => effectReceipt());
+  vi.mocked(deps.isKilled).mockResolvedValue(true);
+  expect((await post('/observe-effect', effectRequest)).status).toBe(423);
+  expect(deps.observeEffect).not.toHaveBeenCalled();
+  vi.mocked(deps.isKilled).mockResolvedValue(false);
+  vi.mocked(deps.observeEffect).mockRejectedValue(Error('lost reply'));
+  expect((await post('/observe-effect', effectRequest)).status).toBe(503);
+});
+it.each(['viewer', 'approver', 'reviewer', 'axiom_analyst'] as const)(
+  'role%s cannot record an execution observation',
+  async (r) => {
+    role = r;
+    deps.observeEffect = vi.fn(async () => effectReceipt());
+    expect((await post('/observe-effect', effectRequest)).status).toBe(403);
+    expect(deps.observeEffect).not.toHaveBeenCalled();
+  },
+);
+it('refuses caller-supplied authority, endpoint or mismatching key before observation', async () => {
+  deps.observeEffect = vi.fn(async () => effectReceipt());
+  for (const extra of [
+    { signedToken: {} },
+    { endpoint: 'http://caller.invalid' },
+    { retry: true },
+  ]) {
+    expect((await post('/observe-effect', { ...effectRequest, ...extra })).status).toBe(400);
+  }
+  expect((await post('/observe-effect', effectRequest, { 'Idempotency-Key': id(99) })).status).toBe(
+    400,
+  );
+  expect(deps.observeEffect).not.toHaveBeenCalled();
+});

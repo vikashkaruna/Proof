@@ -9,3 +9,6 @@ if base.count(marker) != 1:
     raise ValueError("Reviewed PostgreSQL fixture boundary changed")
 print(base[: base.index(marker)])
 print("reset role;")
+
+# Guarded disposable stand-ins are inert before migration169 exists.
+print((root / "tests/database/lib/owned-deployment-fixture.sql").read_text())

@@ -159,6 +159,33 @@ def plan(root: Path = ROOT) -> dict:
             "discovery165_suite_required",
         ),
         (166, {"owned-postgres-target.test.sql"}, "owned_target166_suite_required"),
+        (167, {"owned-human-plans.test.sql"}, "owned_human167_suite_required"),
+        (
+            168,
+            {"owned-execution-binding.test.sql"},
+            "owned_execution168_suite_required",
+        ),
+        (
+            169,
+            {
+                "owned-deployment.test.sql",
+                "owned-deployment-enrollment.test.sql",
+                "owned-deployment-revocation.test.sql",
+            },
+            "owned_deployment169_suites_required",
+        ),
+        (173, {"standing-approval-coordinator.test.sql"}, "standing173_suite_required"),
+        (170, {"owned-effect-observations.test.sql"}, "owned_effect170_suite_required"),
+        (
+            171,
+            {"scheduled-postgresql-reads.test.sql"},
+            "scheduled_read171_suite_required",
+        ),
+        (
+            172,
+            {"prativedan-accounted-terminal.test.sql"},
+            "prativedan172_suite_required",
+        ),
     ):
         need(versions[-1] < minimum or suites <= set(files), code)
     return {

@@ -1,3 +1,5 @@
+import { loadPrativedanSocket } from './workloads/prativedan-socket.js';
+import type { StandingCoordinator } from './services/standing-coordinator.js';
 import { loadDiscoverySocket } from './workloads/discovery-socket.js';
 import { serve } from '@hono/node-server';
 import { loadEnv } from '@axiom/config';
@@ -31,14 +33,47 @@ const discovery = await loadSandboxPostgresql(
 const discoveryController = await loadDiscoverySocket(
   env.AXIOM_POSTGRESQL_DISCOVERY_SOCKET_CONFIG_FILE,
 );
-const app = createApp({ assessmentRequests, discovery, discoveryController });
+const prativedan = await loadPrativedanSocket(env.AXIOM_PRATIVEDAN_SOCKET_CONFIG_FILE);
+let standingCoordinator: StandingCoordinator | null = null;
+const app = createApp({
+  assessmentRequests,
+  discovery,
+  discoveryController,
+  prativedan,
+  onStandingCoordinator: (value) => {
+    standingCoordinator = value;
+  },
+});
+const standingShutdown = new AbortController();
 const port = Number(process.env.PORT || env.BFF_PORT);
 
 log.info({ port }, 'starting BFF');
 
-serve({ fetch: app.fetch, port }, (info) =>
-  log.info({ addr: info.address, port: info.port }, 'BFF listening'),
-);
+const httpServer = serve({ fetch: app.fetch, port }, (info) => {
+  log.info({ addr: info.address, port: info.port }, 'BFF listening');
+  // Only the actual listening process owns this default-off consumer.
+  if (standingCoordinator) {
+    const coordinator = standingCoordinator as StandingCoordinator;
+    void coordinator
+      .run(standingShutdown.signal)
+      .catch(() =>
+        log.error({ code: 'standing_consumer_stopped' }, 'Standing approval consumer stopped'),
+      );
+  }
+});
+if (standingCoordinator)
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.once(signal, () => {
+      standingShutdown.abort();
+      // Accepted/claimed work remains in SQL for read-only reconciliation.
+      const deadline = setTimeout(() => process.exit(1), 5000);
+      deadline.unref();
+      httpServer.close(() => {
+        clearTimeout(deadline);
+        process.exit(0);
+      });
+    });
+  }
 
 // Named before exporting: an anonymous default is harder to trace from a
 // stack frame back to the module that produced it.

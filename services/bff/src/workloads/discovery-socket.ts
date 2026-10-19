@@ -179,35 +179,40 @@ export async function startDiscoverySocket(options: {
       ),
   };
 }
+export async function verifyDiscoveryControllerSocket(raw: unknown) {
+  const c = config.parse(raw);
+  if ((await realpath(dirname(c.socketPath))) !== dirname(c.socketPath))
+    throw new Error('Discovery controller refused');
+  for (let parent = dirname(c.socketPath); ; parent = dirname(parent)) {
+    const ancestor = await lstat(parent);
+    if (
+      !ancestor.isDirectory() ||
+      ![0, c.controllerUid].includes(ancestor.uid) ||
+      ((ancestor.mode & 0o022) !== 0 && !(ancestor.uid === 0 && ancestor.mode & 0o1000))
+    )
+      throw new Error('Discovery controller refused');
+    if (parent === dirname(parent)) break;
+  }
+  const st = await lstat(c.socketPath),
+    dir = await lstat(dirname(c.socketPath));
+  if (
+    !st.isSocket() ||
+    st.uid !== c.controllerUid ||
+    st.gid !== c.socketGroup ||
+    (st.mode & 0o7777) !== 0o660 ||
+    dir.uid !== c.controllerUid ||
+    dir.gid !== c.socketGroup ||
+    (dir.mode & 0o7777) !== 0o750
+  )
+    throw new Error('Discovery controller refused');
+}
 export function discoverySocketClient(raw: unknown) {
   const c = config.parse(raw);
   return {
+    check: () => verifyDiscoveryControllerSocket(c),
     async run(tenantId: string, requestId: string): Promise<DiscoveryOutcome> {
       const input = pointer.parse({ tenantId, requestId });
-      if ((await realpath(dirname(c.socketPath))) !== dirname(c.socketPath))
-        throw new Error('Discovery controller refused');
-      for (let parent = dirname(c.socketPath); ; parent = dirname(parent)) {
-        const ancestor = await lstat(parent);
-        if (
-          !ancestor.isDirectory() ||
-          ![0, c.controllerUid].includes(ancestor.uid) ||
-          ((ancestor.mode & 0o022) !== 0 && !(ancestor.uid === 0 && ancestor.mode & 0o1000))
-        )
-          throw new Error('Discovery controller refused');
-        if (parent === dirname(parent)) break;
-      }
-      const st = await lstat(c.socketPath),
-        dir = await lstat(dirname(c.socketPath));
-      if (
-        !st.isSocket() ||
-        st.uid !== c.controllerUid ||
-        st.gid !== c.socketGroup ||
-        (st.mode & 0o7777) !== 0o660 ||
-        dir.uid !== c.controllerUid ||
-        dir.gid !== c.socketGroup ||
-        (dir.mode & 0o7777) !== 0o750
-      )
-        throw new Error('Discovery controller refused');
+      await verifyDiscoveryControllerSocket(c);
       return new Promise((done, fail) => {
         const req = request(
           {

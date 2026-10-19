@@ -60,6 +60,7 @@ export async function prepareLocalController(args: string[], env: NodeJS.Process
           socketGroup: config.socket.socketGroup,
           controller: components.controller,
           scheduling: components.scheduling,
+          monitoring: components.monitoring,
         }),
     };
   } catch {

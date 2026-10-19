@@ -115,13 +115,32 @@ class FakeDocker:
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_writer_identity_requires_explicit_registration_command(self):
+        current = entries(
+            roles={
+                name: value for name, value in spire.ROLES.items() if name != "karya"
+            }
+        )
+        with (
+            patch.object(spire, "node_id", return_value=PARENT),
+            patch.object(spire, "entries", return_value=current),
+            patch.object(spire, "run") as command,
+        ):
+            spire.register()
+            command.assert_not_called()
+            spire.register(karya_only=True)
+            command.assert_called_once()
+            args = command.call_args.args[0]
+            self.assertIn("spiffe://local.axiomproof.test/agent/karya", args)
+            self.assertIn("unix:uid:20005", args)
+
     def test_exact_reviewed_snapshot_only(self):
         self.assertEqual(len(spire.recovery_entries(PARENT, entries())), 4)
         self.assertEqual(
             len(
                 spire.recovery_entries(PARENT, entries(roles=spire.ROLES), spire.ROLES)
             ),
-            5,
+            6,
         )
         with self.assertRaises(RuntimeError):
             spire.recovery_entries(PARENT, entries(roles=spire.ROLES))

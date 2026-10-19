@@ -649,7 +649,13 @@ describe('atomic activation and recovery set', () => {
   });
 });
 
-describe('local custody dedicated step-up', () => {
+describe.each([
+  { purpose: 'local_custody_policy', suffix: 'local_custody' },
+  { purpose: 'owned_synthetic_enrollment', suffix: 'owned_deployment' },
+  { purpose: 'monitoring_read_scope', suffix: 'monitoring_read' },
+  { purpose: 'owned_synthetic_revocation', suffix: 'owned_deployment_revocation' },
+  { purpose: 'standing_policy_revision', suffix: 'standing_policy' },
+] as const)('$purpose dedicated step-up', ({ purpose, suffix }) => {
   const binding = 'e'.repeat(64);
   let custodyDbNow: number | null;
   let custodyRpcCalls: { name: string; args: Record<string, unknown> }[];
@@ -665,7 +671,7 @@ describe('local custody dedicated step-up', () => {
     custodyDbNow = null;
     custodyRpcCalls = [];
     const clock = () => custodyDbNow ?? Date.now();
-    // Clock/CAS fixture only: native SQL separately proves session/role/lock authority.
+    // Clock/CAS fixture only: session/role/lock authority requires native SQL qualification.
     const scope = (name: string, args: Record<string, unknown>, extra: string[]) => {
       custodyRpcCalls.push({ name, args });
       expect(Object.keys(args).sort()).toEqual([...scopeKeys, ...extra].sort());
@@ -684,13 +690,13 @@ describe('local custody dedicated step-up', () => {
           )?.id,
       );
     };
-    db.onRpc('issue_local_custody_mfa_challenge', (args) => {
+    db.onRpc(`issue_${suffix}_mfa_challenge`, (args) => {
       scope('issue', args, ['p_ttl_ms']);
       const row = db.seed('mfa_challenges', {
         user_id: args.p_actor_id,
         tenant_id: args.p_tenant_id,
         factor_id: args.p_factor_id,
-        purpose: 'local_custody_policy',
+        purpose,
         bound_resource_ref: args.p_operation_key,
         bound_payload_sha256: args.p_bound_payload_sha256,
         created_at: new Date(clock()).toISOString(),
@@ -700,7 +706,7 @@ describe('local custody dedicated step-up', () => {
       });
       return { id: row.id, expires_at: row.expires_at, max_attempts: row.max_attempts };
     });
-    db.onRpc('satisfy_local_custody_mfa_challenge', (args) => {
+    db.onRpc(`satisfy_${suffix}_mfa_challenge`, (args) => {
       scope('satisfy', args, ['p_challenge_id', 'p_expected_attempts', 'p_satisfied_with']);
       const row = db.rows('mfa_challenges').find((r) => r.id === args.p_challenge_id)!;
       if (
@@ -713,7 +719,7 @@ describe('local custody dedicated step-up', () => {
       row.satisfied_with = args.p_satisfied_with;
       return { id: row.id, satisfied_at: row.satisfied_at, satisfied_with: row.satisfied_with };
     });
-    db.onRpc('consume_local_custody_mfa_challenge', (args) => {
+    db.onRpc(`consume_${suffix}_mfa_challenge`, (args) => {
       scope('consume', args, ['p_challenge_id', 'p_expected_attempts', 'p_consumed_for']);
       const row = db.rows('mfa_challenges').find((r) => r.id === args.p_challenge_id)!;
       if (
@@ -737,7 +743,7 @@ describe('local custody dedicated step-up', () => {
     mfa.issueChallenge({
       userId: USER,
       tenantId: TENANT,
-      purpose: 'local_custody_policy',
+      purpose,
       sessionId: PLAN,
       boundResourceRef: ACTION_A,
       boundPayloadSha256: binding,
@@ -747,7 +753,7 @@ describe('local custody dedicated step-up', () => {
     mfa.consumeChallenge({
       userId: USER,
       tenantId,
-      purpose: 'local_custody_policy',
+      purpose,
       sessionId: PLAN,
       challengeId,
       boundResourceRef: ACTION_A,
@@ -767,7 +773,7 @@ describe('local custody dedicated step-up', () => {
           userId: USER,
           tenantId: TENANT,
           sessionId: PLAN,
-          purpose: 'local_custody_policy',
+          purpose,
           boundResourceRef: ACTION_A,
           boundPayloadSha256: binding,
           ttlMs: 300000,
@@ -823,7 +829,7 @@ describe('local custody dedicated step-up', () => {
       await mfa.consumeChallenge({
         userId: USER,
         tenantId: TENANT,
-        purpose: 'local_custody_policy',
+        purpose,
         challengeId: issued.challengeId,
         boundResourceRef: ACTION_A,
         boundPayloadSha256: binding,
@@ -834,12 +840,12 @@ describe('local custody dedicated step-up', () => {
   });
   it('never falls back to host writes when custody database-clock RPCs fail', async () => {
     const { secret } = await enrol();
-    db.failNextRpc('issue_local_custody_mfa_challenge');
+    db.failNextRpc(`issue_${suffix}_mfa_challenge`);
     await expect(issue()).rejects.toThrow('Could not issue custody MFA challenge');
     expect(db.rows('mfa_challenges')).toHaveLength(0);
     const issued = await issue();
     if (!issued.ok) throw new Error('fixture');
-    db.failNextRpc('satisfy_local_custody_mfa_challenge');
+    db.failNextRpc(`satisfy_${suffix}_mfa_challenge`);
     expect(
       await mfa.verifyChallenge({
         challengeId: issued.challengeId,
@@ -858,7 +864,7 @@ describe('local custody dedicated step-up', () => {
     // Independent fixture satisfaction isolates consume failure from verification.
     row.satisfied_at = new Date().toISOString();
     row.satisfied_with = 'totp';
-    db.failNextRpc('consume_local_custody_mfa_challenge');
+    db.failNextRpc(`consume_${suffix}_mfa_challenge`);
     expect(await consume(issued.challengeId)).toMatchObject({ ok: false });
     expect(row.consumed_at).toBeUndefined();
   });
@@ -874,7 +880,7 @@ describe('local custody dedicated step-up', () => {
         created_at: 'untrusted',
       },
     ]) {
-      db.onRpc('issue_local_custody_mfa_challenge', () => response);
+      db.onRpc(`issue_${suffix}_mfa_challenge`, () => response);
       await expect(issue()).rejects.toThrow();
     }
     expect(db.rows('mfa_challenges')).toHaveLength(0);
@@ -884,7 +890,7 @@ describe('local custody dedicated step-up', () => {
       const { secret } = await enrol();
       const issued = await issue();
       if (!issued.ok) throw new Error('fixture');
-      db.onRpc('satisfy_local_custody_mfa_challenge', () => ({
+      db.onRpc(`satisfy_${suffix}_mfa_challenge`, () => ({
         id: issued.challengeId,
         satisfied_at: new Date().toISOString(),
         satisfied_with: 'totp',
@@ -913,7 +919,7 @@ describe('local custody dedicated step-up', () => {
       const row = db.rows('mfa_challenges')[0]!;
       row.satisfied_at = new Date().toISOString();
       row.attempts = 1;
-      db.onRpc('consume_local_custody_mfa_challenge', () => ({
+      db.onRpc(`consume_${suffix}_mfa_challenge`, () => ({
         id: issued.challengeId,
         satisfied_at: row.satisfied_at,
         expires_at: row.expires_at,
@@ -936,9 +942,7 @@ describe('local custody dedicated step-up', () => {
     expect(row.consumed_for).toBe(ACTION_A);
   });
   it('requires bounded session-bound source before creating the challenge', async () => {
-    await expect(
-      mfa.issueChallenge({ userId: USER, tenantId: TENANT, purpose: 'local_custody_policy' }),
-    ).rejects.toThrow();
+    await expect(mfa.issueChallenge({ userId: USER, tenantId: TENANT, purpose })).rejects.toThrow();
     expect(db.rows('mfa_challenges')).toEqual([]);
   });
   it('refuses a foreign-session/content binding before satisfying the challenge', async () => {

@@ -3,7 +3,8 @@ import { loadEnv } from '@axiom/config';
 
 let cached: SupabaseClient | null = null;
 
-/** PostgREST identity limited to append_agent_ledger for agent/system ledger events. */
+/** Existing agent/system writer identity. Standing173 adds only fixed private
+ * delegation work RPCs; it cannot record a human decision or call an issuer kernel. */
 export function createAgentLedgerWriter(): SupabaseClient {
   const env = loadEnv();
   const key = env.SUPABASE_AGENT_LEDGER_WRITER_KEY;

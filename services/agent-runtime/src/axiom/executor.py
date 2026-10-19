@@ -90,16 +90,52 @@ class ExecutorDb:
         try:
             response = (
                 self._client.from_("remediation_actions")
-                .select("id, action_type, parameters, blast_radius")
+                .select("id, plan_id, action_type, parameters, blast_radius, rollback_definition")
                 .eq("tenant_id", tenant_id)
                 .eq("id", action_id)
-                .maybeSingle()
+                .maybe_single()
                 .execute()
             )
         except Exception as exc:
             structlog.get_logger().warning("executor.action_unreadable")
             raise ExecutorRefused("record_unavailable") from exc
-        return response.data if isinstance(response.data, dict) else None
+        return response.data if response is not None and isinstance(response.data, dict) else None
+
+    def owned_rollback_context(self, tenant_id: str, batch_id: str) -> dict[str, Any]:
+        """Read only the exact batch's existing signed token; never issue one."""
+        try:
+            batch = (
+                self._client.from_("execution_batches")
+                .select("id, plan_id, request_key, approval_token_id, content_digest, concurrency")
+                .eq("tenant_id", tenant_id)
+                .eq("id", batch_id)
+                .single()
+                .execute()
+                .data
+            )
+            token = (
+                self._client.from_("approval_tokens")
+                .select("signed_payload, signature")
+                .eq("tenant_id", tenant_id)
+                .eq("id", batch["approval_token_id"])
+                .single()
+                .execute()
+                .data
+            )
+            if not isinstance(batch, dict) or not isinstance(token, dict):
+                raise ValueError()
+            return {
+                "plan_id": batch["plan_id"],
+                "request_key": batch["request_key"],
+                "content_digest": batch["content_digest"],
+                "concurrency": batch["concurrency"],
+                "approval_token": {
+                    "spec": token["signed_payload"],
+                    "signature": token["signature"],
+                },
+            }
+        except Exception:
+            raise ExecutorRefused("record_unavailable") from None
 
     def rollback_rows(
         self, tenant_id: str, batch_id: str, action_ids: list[str]

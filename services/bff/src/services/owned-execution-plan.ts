@@ -33,7 +33,7 @@ const snapshot = z
     audit_log_enabled: z.boolean(),
   })
   .strict();
-const roundtrip = z
+export const ownedRoundtripSchema = z
   .object({
     engine: z
       .object({
@@ -54,7 +54,7 @@ const roundtrip = z
     resources_measured: z.literal(1),
   })
   .strict();
-export type OwnedRoundtrip = z.infer<typeof roundtrip>;
+export type OwnedRoundtrip = z.infer<typeof ownedRoundtripSchema>;
 const binding = z
   .object({
     id: uuid,
@@ -101,7 +101,7 @@ const source = z
     binding,
     state: z.enum(['pending', 'recorded']),
     recorded: ownedPlanReceiptSchema.nullable(),
-    recordedValidation: roundtrip.nullable(),
+    recordedValidation: ownedRoundtripSchema.nullable(),
   })
   .strict();
 export interface OwnedPlanContext {
@@ -266,7 +266,7 @@ async function produceWithOwnedSource(
     (current.recorded !== null || current.recordedValidation !== null)
   )
     throw new OwnedPlanRefused('owned_plan_source_refused');
-  const measured = roundtrip.safeParse(
+  const measured = ownedRoundtripSchema.safeParse(
     current.state === 'recorded'
       ? current.recordedValidation
       : await measuredCall(ports, current.binding),

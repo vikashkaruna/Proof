@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 import { formatDateTime } from '@/lib/display-time';
 
 import { formatDate } from '@/lib/display-time';
@@ -364,6 +365,42 @@ function NodeDetail({
           {k}: {v}
         </p>
       ))}
+      {node.kind === 'system' && (
+        <section className="space-y-2 border-t pt-3">
+          <h3 className="font-semibold">Recorded creation source</h3>
+          {node.derivation?.state === 'recorded' ? (
+            <>
+              <p>
+                Approved onboarding proposal; intake item {node.derivation.sourceIndex + 1} → this
+                system.
+              </p>
+              <p>
+                Approval receipt {node.derivation.reviewReceiptId}; reviewed{' '}
+                {formatDateTime(node.derivation.reviewedAt)}.
+              </p>
+              <p className="break-all text-xs">Proposal {node.derivation.proposalId}</p>
+              <p className="break-all font-mono text-xs">
+                Source commitment: {node.derivation.contentSha256}
+              </p>
+              <p>
+                This is the recorded creation source. Current configuration, connectivity and data
+                transfers are not established.
+              </p>
+              {node.derivation.sourceHref && (
+                <Link className="text-teal-700 underline" href={node.derivation.sourceHref}>
+                  Open approved onboarding source
+                </Link>
+              )}
+            </>
+          ) : (
+            <p>
+              {node.derivation?.state === 'absent'
+                ? 'No recorded approved intake derivation is available for this system.'
+                : 'Creation provenance is unavailable or could not be matched to an approved source and receipt.'}
+            </p>
+          )}
+        </section>
+      )}
       <p className="font-semibold">Relationships</p>
       {related.length === 0 ? (
         <p data-testid="no-relationships">
@@ -373,7 +410,8 @@ function NodeDetail({
         <ul>
           {related.map((e) => (
             <li key={e.id}>
-              {e.kind === 'write' ? 'WRITE' : e.kind} {label(e.from)} → {label(e.to)}
+              {e.kind === 'write' ? 'WRITE' : (e.detail.label ?? e.kind)} {label(e.from)} →{' '}
+              {label(e.to)}
               {e.detail.expiresAt ? ` (expires ${formatDate(e.detail.expiresAt)})` : ''}
             </li>
           ))}

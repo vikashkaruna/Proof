@@ -14,7 +14,14 @@ export interface OwnedRpcClient {
 export interface OwnedSyntheticControllerConfig {
   humanWriterFactory(): OwnedRpcClient;
   /** Non-login scoped owned_target_controller RPC role; never runtime business or human-writer credentials. */
-  targetControllerFactory(): OwnedRpcClient;
+  targetControllerFactory?(): OwnedRpcClient;
+  targetRpc?(
+    tenantId: string,
+    bindingId: string,
+    name: string,
+    args: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<{ data: unknown; error: unknown }>;
   isKilled(tenantId: string): Promise<boolean>;
 }
 const authority = z.object({ verified: z.literal(true) }).strict();
@@ -50,14 +57,25 @@ export function createOwnedSyntheticController(
     rpc: humanRpc,
     validateRoundtrip: async (binding) => {
       if (binding.tenantId !== context.tenantId) throw Error('Owned measurement tenant changed');
-      const result = await config
-        .targetControllerFactory()
-        .rpc('measure_owned_synthetic_target', {
-          p_tenant_id: context.tenantId,
-          p_binding_id: binding.id,
-          p_engagement_id: binding.engagementId,
-        })
-        .abortSignal(AbortSignal.timeout(15000));
+      const args = {
+        p_tenant_id: context.tenantId,
+        p_binding_id: binding.id,
+        p_engagement_id: binding.engagementId,
+      };
+      const signal = AbortSignal.timeout(15000);
+      const result = config.targetRpc
+        ? await config.targetRpc(
+            context.tenantId,
+            binding.id,
+            'measure_owned_synthetic_target',
+            args,
+            signal,
+          )
+        : await config
+            .targetControllerFactory?.()
+            .rpc('measure_owned_synthetic_target', args)
+            .abortSignal(signal);
+      if (!result) throw Error('Owned target transport unavailable');
       if (result.error) throw Error('Owned target measurement unavailable');
       return result.data;
     },
@@ -94,6 +112,14 @@ export function createOwnedSyntheticController(
     isKilled: config.isKilled,
     planPorts,
     cancellationPorts,
+    observeEffect: async (context, request) =>
+      humanRpc('observe_owned_execution_effect', {
+        ...authArgs(context),
+        p_operation_key: request.operationKey,
+        p_plan_id: request.planId,
+        p_action_id: request.actionId,
+        p_batch_id: request.batchId,
+      }),
     readTargets: async (context, engagementId) =>
       humanRpc('read_owned_human_targets', { ...authArgs(context), p_engagement_id: engagementId }),
     readOriginalOutcome: async (context, operationKey, requestHash) =>

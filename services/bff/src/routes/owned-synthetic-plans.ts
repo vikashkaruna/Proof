@@ -2,9 +2,15 @@
 import { Hono, type MiddlewareHandler } from 'hono';
 import { boundedJsonBody } from '../middleware/evidence-body-limit.js';
 import { z } from 'zod';
-import { Capability } from '@axiom/types';
+import {
+  Capability,
+  OwnedEffectObservationRequestSchema,
+  OwnedEffectObservationReceiptSchema,
+  type OwnedEffectObservationRequest,
+} from '@axiom/types';
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
+import { ownedOperationId } from '../services/owned-execution-broker.js';
 import {
   ownedHash,
   ownedPlanReceiptSchema,
@@ -49,6 +55,10 @@ const targetList = z
   })
   .strict();
 export interface OwnedSyntheticRouteDeps {
+  observeEffect?(
+    context: OwnedPlanContext,
+    request: OwnedEffectObservationRequest,
+  ): Promise<unknown>;
   isKilled(tenantId: string): Promise<boolean>;
   planPorts(context: OwnedPlanContext): OwnedPostgresPlanPorts;
   cancellationPorts(context: OwnedPlanContext): OwnedCancellationPorts;
@@ -94,6 +104,7 @@ export function ownedSyntheticPlanRoutes(deps?: OwnedSyntheticRouteDeps | null) 
     '/plans/owned-synthetic',
     '/plans/owned-synthetic/cancel',
     '/plans/owned-synthetic/outcome',
+    '/plans/owned-synthetic/observe-effect',
     '/plans/owned-synthetic/targets/:engagementId',
   ]) {
     app.use(path, boundedJsonBody(16384));
@@ -130,6 +141,45 @@ export function ownedSyntheticPlanRoutes(deps?: OwnedSyntheticRouteDeps | null) 
       return c.json(source.data);
     } catch {
       return c.json({ error: { code: 'owned_source_unconfirmed' } }, 503);
+    }
+  });
+  app.post('/plans/owned-synthetic/observe-effect', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: { code: 'validation_failed' } }, 400);
+    }
+    const parsed = OwnedEffectObservationRequestSchema.safeParse(body);
+    const key = uuid.safeParse(c.req.header('Idempotency-Key'));
+    if (!parsed.success || !key.success || key.data !== parsed.data.operationKey)
+      return c.json({ error: { code: 'validation_failed' } }, 400);
+    if (!controller.observeEffect)
+      return c.json({ error: { code: 'owned_source_not_configured' } }, 503);
+    const ctx = context(c.get('tenantId'), c.get('user').id, c.get('sessionId'), key.data);
+    try {
+      if (await controller.isKilled(ctx.tenantId))
+        return c.json({ error: { code: 'kill_switch_active' } }, 423);
+      const receipt = OwnedEffectObservationReceiptSchema.safeParse(
+        await controller.observeEffect(ctx, parsed.data),
+      );
+      if (
+        !receipt.success ||
+        receipt.data.tenantId !== ctx.tenantId ||
+        receipt.data.actorId !== ctx.actorId ||
+        receipt.data.operationKey !== key.data ||
+        receipt.data.planId !== parsed.data.planId ||
+        receipt.data.actionId !== parsed.data.actionId ||
+        receipt.data.batchId !== parsed.data.batchId ||
+        receipt.data.observation.forwardOperationId !==
+          ownedOperationId(parsed.data.batchId, parsed.data.actionId, 'forward') ||
+        receipt.data.observation.rollbackOperationId !==
+          ownedOperationId(parsed.data.batchId, parsed.data.actionId, 'rollback')
+      )
+        return c.json({ error: { code: 'owned_effect_unconfirmed' } }, 503);
+      return c.json(receipt.data);
+    } catch {
+      return c.json({ error: { code: 'owned_effect_unconfirmed' } }, 503);
     }
   });
   app.post('/plans/owned-synthetic', async (c) => {

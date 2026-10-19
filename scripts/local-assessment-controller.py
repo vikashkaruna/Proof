@@ -361,6 +361,11 @@ def image_id(image: str):
 
 
 def validate_runtime(runtime: dict):
+    if (
+        "monitoringReadDispatch" in runtime
+        and type(runtime["monitoringReadDispatch"]) is not bool
+    ):
+        raise TypeError("Explicit monitoring read deployment boolean required")
     from urllib.parse import urlsplit
 
     if any(
@@ -400,8 +405,25 @@ def validate_runtime(runtime: dict):
         raise ValueError("Local backend required")
 
 
+def validate_monitoring_socket_volume(runtime: dict):
+    if not runtime.get("monitoringReadDispatch", False):
+        return
+    value = json.loads(
+        run(["docker", "volume", "inspect", "axiom-discovery-controller-socket"]).stdout
+    )
+    if (
+        len(value) != 1
+        or value[0].get("Name") != "axiom-discovery-controller-socket"
+        or value[0].get("Driver") != "local"
+        or value[0].get("Labels", {}).get("axiom.purpose")
+        != "local-discovery-controller"
+    ):
+        raise ValueError("Reviewed Drishti socket volume required")
+
+
 def stage(slug: str, runtime: dict):
     validate_runtime(runtime)
+    validate_monitoring_socket_volume(runtime)
     # This helper only reads retained policy state. Its existing function refuses
     # absent active heads and returns the original activation event for the epoch.
     custody = load_module(
@@ -416,6 +438,12 @@ def stage(slug: str, runtime: dict):
     configuration = build_configuration(
         slug, active, manifest, node, runtime["workerImage"], runtime["namespace"]
     )
+    if runtime.get("monitoringReadDispatch", False):
+        configuration["controller"]["monitoring"] = {
+            "socketPath": "/run/axiom-discovery/discovery.sock",
+            "controllerUid": 20105,
+            "socketGroup": 20112,
+        }
     retained_current = BASE / slug / "runtime.json"
     if (
         retained_current.exists()
@@ -490,6 +518,7 @@ def stage(slug: str, runtime: dict):
 
 
 def controller_args(slug: str, runtime: dict, mode: str):
+    validate_monitoring_socket_volume(runtime)
     validate_runtime(runtime)
     if (
         mode not in ("check", "serve")
@@ -524,6 +553,16 @@ def controller_args(slug: str, runtime: dict, mode: str):
         str(SOCKET_GROUP),
         "--group-add",
         str(runtime["dockerGid"]),
+        *(
+            [
+                "--group-add",
+                "20112",
+                "--mount",
+                "type=volume,src=axiom-discovery-controller-socket,dst=/run/axiom-discovery,readonly",
+            ]
+            if runtime.get("monitoringReadDispatch", False)
+            else []
+        ),
         "--network",
         "container:axiom-bff",
         "--read-only",
@@ -567,6 +606,7 @@ def controller_args(slug: str, runtime: dict, mode: str):
 
 
 def serve(slug: str, runtime: dict, mode: str):
+    validate_monitoring_socket_volume(runtime)
     if mode == "serve":
         remove_owned(name(slug))
     run(controller_args(slug, runtime, mode))
@@ -626,6 +666,11 @@ def scheduler_args(slug: str, runtime: dict):
         "--assessment-controller-uid",
         str(UID),
         "--assessment-outbox-pump",
+        *(
+            ["--monitoring-read-pump"]
+            if runtime.get("monitoringReadDispatch", False)
+            else []
+        ),
     ]
 
 
@@ -710,6 +755,11 @@ def main():
     parser.add_argument("--renew", action="store_true")
     parser.add_argument("--resume")
     parser.add_argument("--controller-image")
+    parser.add_argument(
+        "--monitoring-read-dispatch",
+        action="store_true",
+        help="Reviewed local Drishti socket mount and scoped scheduled-read consumer; default off",
+    )
     parser.add_argument("--worker-image")
     parser.add_argument("--scheduler-image")
     parser.add_argument("--namespace")
@@ -758,6 +808,8 @@ def main():
                 "supabaseUrl": args.supabase_url,
                 "dockerGid": args.docker_gid,
             }
+            if args.monitoring_read_dispatch:
+                runtime["monitoringReadDispatch"] = True
             stage(slug, runtime)
         elif args.action == "renew-due":
             if args.watch and not 30 <= args.watch <= 600:

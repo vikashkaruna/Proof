@@ -1,4 +1,4 @@
-/** Unmounted assessment orchestration. Python exclusively owns the one-shot
+/** Dedicated assessment orchestration. Its private controller owns the one-shot
  * claim and invocation. Uncertain network outcomes never grant retry authority. */
 import { canonicalJson } from '@axiom/ledger';
 import {
@@ -34,7 +34,10 @@ export interface PrativedanAssessmentControllerConfig {
    * current session, authenticator attestation and expiry. No caller assertions. */
   authorizeCurrentHuman(context: PrativedanAssessmentHumanContext): Promise<void>;
   isKilled(tenantId: string): Promise<boolean>;
-  runtime: { invoke(binding: PrativedanAssessmentRuntimeBinding): Promise<unknown> };
+  runtime: {
+    invoke(binding: PrativedanAssessmentRuntimeBinding): Promise<unknown>;
+    recover?(binding: PrativedanAssessmentRuntimeBinding): Promise<unknown>;
+  };
   /** Opt-in trusted scoped read; no caller witness and no implicit live mount. */
   accountingReader?: AccountedResultReadPort;
 }
@@ -115,17 +118,28 @@ export class PrativedanAssessmentDraftController {
   }
   async reconcile(context: PrativedanAssessmentHumanContext, reviewedRequestText: string) {
     context = await this.authorize(context);
-    return (await this.read(context, reviewedRequestText)).journal;
+    const prepared = await this.read(context, reviewedRequestText);
+    if (prepared.journal.state === 'invocation_uncertain' && this.config.runtime.recover)
+      return (await this.generate(context, reviewedRequestText)).journal;
+    return prepared.journal;
   }
   async generate(context: PrativedanAssessmentHumanContext, reviewedRequestText: string) {
     context = await this.authorize(context);
     let prepared = await this.read(context, reviewedRequestText);
     const journal = prepared.journal;
-    if (journal.state !== 'requested') return { journal, outcome: journal.state };
+    if (
+      journal.state !== 'requested' &&
+      (journal.state !== 'invocation_uncertain' || !this.config.runtime.recover)
+    )
+      return { journal, outcome: journal.state };
     await this.authorize(context);
     let rawEnvelope: unknown;
     try {
-      rawEnvelope = await this.config.runtime.invoke({
+      const invoke =
+        journal.state === 'invocation_uncertain'
+          ? this.config.runtime.recover!
+          : this.config.runtime.invoke;
+      rawEnvelope = await invoke.call(this.config.runtime, {
         tenant_id: journal.tenant_id,
         actor_id: journal.actor_id,
         operation_key: journal.operation_key,
@@ -164,6 +178,12 @@ export class PrativedanAssessmentDraftController {
         binding,
         this.config.accountingReader,
       );
+      if (verified.result.status === 'failed')
+        return {
+          journal: prepared.journal,
+          outcome: 'recorded_failure',
+          failureCode: verified.result.error,
+        };
       if (
         verified.result.status !== 'succeeded' ||
         verified.output === null ||

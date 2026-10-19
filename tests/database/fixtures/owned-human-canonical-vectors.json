@@ -1,0 +1,55 @@
+{
+  "tenantId": "89110000-0000-4000-8000-000000000001",
+  "actorId": "89110000-0000-4000-8000-000000000002",
+  "snapshot": {
+    "fixture_id": "89110000-0000-4000-8000-000000000004",
+    "resource_id": "89110000-0000-4000-8000-000000000005",
+    "version": 0,
+    "audit_log_enabled": false
+  },
+  "request": {
+    "operationKey": "89110000-0000-4000-8000-000000000006",
+    "bindingId": "89110000-0000-4000-8000-000000000007",
+    "engagementId": "89110000-0000-4000-8000-000000000008",
+    "expectedSnapshotHash": "8ab25ccf9334cb2927355679a5297bd6ed13e37802d67e0c02dc0c9b75b4e467",
+    "reason": "Synthetic only: café / मुंबई / 🔐; \"quoted\" and \\ path.",
+    "acknowledgeOwnedSynthetic": true,
+    "actionType": "config.audit_log_enable",
+    "desiredEnabled": true
+  },
+  "proof": {
+    "engine": {
+      "engine": "owned_boolean_cas_v1",
+      "implementation_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "capability_sha256": "a5b3db560e0707307c69aa70dc6bd62ad4a4ae0612c39f9420db6d99c4a20fb9",
+      "capabilities": [
+        "atomic_exact_operation_journal",
+        "version_and_snapshot_cas",
+        "no_write_roundtrip"
+      ]
+    },
+    "before": {
+      "fixture_id": "89110000-0000-4000-8000-000000000004",
+      "resource_id": "89110000-0000-4000-8000-000000000005",
+      "version": 0,
+      "audit_log_enabled": false
+    },
+    "projected_after": {
+      "fixture_id": "89110000-0000-4000-8000-000000000004",
+      "resource_id": "89110000-0000-4000-8000-000000000005",
+      "version": 1,
+      "audit_log_enabled": true
+    },
+    "restored": {
+      "fixture_id": "89110000-0000-4000-8000-000000000004",
+      "resource_id": "89110000-0000-4000-8000-000000000005",
+      "version": 2,
+      "audit_log_enabled": false
+    },
+    "persistent_mutations": 0,
+    "resources_measured": 1
+  },
+  "snapshotHash": "8ab25ccf9334cb2927355679a5297bd6ed13e37802d67e0c02dc0c9b75b4e467",
+  "requestHash": "d3b1b1700d49bf744e4dec170f511c5702fe4548351ba06a5f4a8afcc775ae2a",
+  "proofHash": "fcac5e059d588b712db2d3304ade3aa707f213f4e4b10406622e953c8cc89ab3"
+}

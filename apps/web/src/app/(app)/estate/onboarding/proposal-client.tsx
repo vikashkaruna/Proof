@@ -181,7 +181,7 @@ export function ProposalClient({
         <p>No proposal is ready yet. An assigned Axiom analyst can prepare it.</p>
       )}
       {data.proposals.map((p) => (
-        <Card key={`${p.id}:${p.status}`}>
+        <Card key={`${p.id}:${p.status}`} id={`proposal-${p.id}`}>
           <CardHeader>
             <CardTitle>
               {p.estate_snapshot.name} — {p.status}

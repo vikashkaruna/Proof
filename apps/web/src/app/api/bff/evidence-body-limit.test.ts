@@ -104,27 +104,44 @@ it.each([
   },
 );
 
-it.each(['', '/cancel', '/outcome'])(
-  'bounds owned original workflow stream%s before arrayBuffer or upstream dispatch',
-  async (suffix) => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
-    vi.stubGlobal('fetch', fetchMock);
-    const path = ['v1', 'plans', 'owned-synthetic', ...suffix.split('/').filter(Boolean)];
-    const request = new NextRequest(`http://localhost/api/bff/${path.join('/')}`, {
-      method: 'POST',
-      headers: { 'x-tenant-id': 'fixture', 'content-length': '1' },
-      body: new ReadableStream({
-        start(controller) {
-          controller.enqueue(new Uint8Array(16385));
-          controller.close();
-        },
-      }),
-      ...{ duplex: 'half' },
-    });
-    const unbounded = vi.spyOn(request, 'arrayBuffer');
-    const result = await POST(request, { params: Promise.resolve({ path }) });
-    expect(result.status).toBe(413);
-    expect(unbounded).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  },
-);
+it.each([
+  'plans/owned-synthetic',
+  'plans/owned-synthetic/cancel',
+  'plans/owned-synthetic/outcome',
+  'plans/owned-synthetic/observe-effect',
+  ...['challenge', 'verify', 'record', 'recover', 'fence'].map(
+    (phase) => `standing-approvals/${phase}`,
+  ),
+  'owned-deployments',
+  ...[
+    'preflight',
+    'challenge',
+    'verify',
+    'approve',
+    'install',
+    'fence-intent',
+    'revoke-challenge',
+    'revoke-verify',
+    'revoke',
+  ].map((phase) => `owned-deployments/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/${phase}`),
+])('bounds owned workflow stream %s before arrayBuffer or upstream dispatch', async (route) => {
+  const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+  vi.stubGlobal('fetch', fetchMock);
+  const path = ['v1', ...route.split('/')];
+  const request = new NextRequest(`http://localhost/api/bff/${path.join('/')}`, {
+    method: 'POST',
+    headers: { 'x-tenant-id': 'fixture', 'content-length': '1' },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(16385));
+        controller.close();
+      },
+    }),
+    ...{ duplex: 'half' },
+  });
+  const unbounded = vi.spyOn(request, 'arrayBuffer');
+  const result = await POST(request, { params: Promise.resolve({ path }) });
+  expect(result.status).toBe(413);
+  expect(unbounded).not.toHaveBeenCalled();
+  expect(fetchMock).not.toHaveBeenCalled();
+});

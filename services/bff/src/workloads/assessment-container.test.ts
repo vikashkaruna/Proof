@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { assessmentContainerFactory } from './assessment-container.js';
+import {
+  assessmentContainerFactory,
+  ownedExecutionContainerFactory,
+} from './assessment-container.js';
 
 vi.mock('node:child_process', () => ({ spawn: vi.fn() }));
 const config = {
@@ -48,6 +51,19 @@ describe('trusted per-job container launcher', () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+  it('launches only the fixed credentialless Karya supervisor for owned execution', () => {
+    ownedExecutionContainerFactory({
+      ...config,
+      resourcePrefix: 'axiom-proof-local-owned-execution-worker',
+    })();
+    const args = vi.mocked(spawn).mock.calls[0]![1] as string[];
+    expect(args).toContain('axiom.owned_execution_supervisor');
+    expect(args[args.indexOf('--name') + 1]).toMatch(/^axiom-proof-local-owned-execution-worker-/);
+    expect(args[args.indexOf('--network') + 1]).toBe('none');
+    expect(args[args.indexOf('--log-driver') + 1]).toBe('none');
+    expect(args).not.toContain('--env');
+    expect(args.join(' ')).not.toContain('docker.sock,dst');
   });
   it.each([
     { image: 'worker:latest' },

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Capability, can } from '@axiom/types';
 import { PageHeader } from '@axiom/ui';
 import { moduleBarProps } from '@/lib/module-bar';
+import { ownedDeploymentAccess } from '@/lib/owned-deployment-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,6 +93,27 @@ export default async function SettingsPage() {
             className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-teal-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700"
           >
             Manage local custody policies
+          </Link>
+        </section>
+      )}
+
+      {ownedDeploymentAccess(role, isAxiomInternal).available && (
+        <section
+          aria-labelledby="owned-settings-heading"
+          className="space-y-3 rounded-2xl border border-slate-200 bg-white p-5"
+        >
+          <h2 id="owned-settings-heading" className="font-semibold text-indigo-950">
+            Demo execution setup
+          </h2>
+          <p className="text-sm text-slate-600">
+            Request a reviewed synthetic target, run preparation checks, obtain founder approval and
+            verify installation before creating a remediation plan.
+          </p>
+          <Link
+            href="/settings/owned-targets"
+            className="inline-flex min-h-10 items-center rounded-lg bg-teal-700 px-4 py-2 text-sm font-semibold text-white"
+          >
+            Prepare a demo execution target
           </Link>
         </section>
       )}

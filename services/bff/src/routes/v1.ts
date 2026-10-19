@@ -1,3 +1,10 @@
+import type { StandingCoordinator } from '../services/standing-coordinator.js';
+import { standingApprovalRoutes } from './standing-approvals.js';
+import { monitoringReadScopeRoutes } from './monitoring-read-scopes.js';
+import {
+  prativedanAccountedDraftRoutes,
+  type PrativedanPrivateClient,
+} from './prativedan-accounted-drafts.js';
 import {
   postgresqlDiscoveryRoutes,
   type DiscoveryRequestController,
@@ -231,12 +238,15 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 }
 
 interface Deps {
+  prativedan?: PrativedanPrivateClient;
   discoveryController?: DiscoveryRequestController;
   licensePublicKeyPem?: string;
   ownedSynthetic?: OwnedSyntheticRouteDeps | null;
   stagedEvidence?: StagedEvidenceRoutesDeps;
   assessmentRequests?: AssessmentRequestProducer;
   publicWebsiteCapture?: NonNullable<Parameters<typeof publicWebsiteCheckRoutes>[0]>['capture'];
+  standingCoordinatorEnabled?: boolean;
+  standingCoordinatorStatus?: () => ReturnType<StandingCoordinator['health']>;
   approvalEngine: ApprovalEngine;
   killSwitch: KillSwitchService;
   ledger: LedgerService;
@@ -247,6 +257,14 @@ interface Deps {
 export function v1Routes(deps: Deps) {
   const app = new Hono<{ Variables: Variables }>();
   // Exact owned paths precede generic /plans/:id; middleware never escapes this source scope.
+  app.route(
+    '/',
+    standingApprovalRoutes({
+      mfa: deps.mfa,
+      enabled: deps.standingCoordinatorEnabled ?? false,
+      status: deps.standingCoordinatorStatus,
+    }),
+  );
   app.route('/', ownedSyntheticPlanRoutes(deps.ownedSynthetic));
   app.route('/', estateRoutes());
   app.route('/', consentRoutes());
@@ -255,6 +273,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', evidenceRoutes());
   app.route('/', evidencePackRoutes());
   app.route('/', boardReportRoutes());
+  app.route('/', prativedanAccountedDraftRoutes({ mfa: deps.mfa, client: deps.prativedan }));
   app.route('/', dpbReportRoutes());
   app.route('/', technicalReportRoutes());
   app.route('/', w2ParityRoutes());
@@ -274,6 +293,10 @@ export function v1Routes(deps: Deps) {
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', postgresqlDiscoveryRoutes(deps.discoveryController));
+  app.route(
+    '/',
+    monitoringReadScopeRoutes({ mfa: deps.mfa, controller: deps.discoveryController }),
+  );
   app.route('/', catalogueReferenceRoutes());
   app.route('/', catalogueVersionRoutes({ mfa: deps.mfa }));
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));

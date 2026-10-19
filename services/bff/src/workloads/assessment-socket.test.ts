@@ -18,6 +18,7 @@ afterEach(async () => {
 async function fixture(
   deadlineMs = 5000,
   scheduling?: Parameters<typeof startAssessmentControllerSocket>[0]['scheduling'],
+  monitoring?: Parameters<typeof startAssessmentControllerSocket>[0]['monitoring'],
 ) {
   const directory = await realpath(await mkdtemp('/tmp/ax-controller-'));
   await chmod(directory, 0o700);
@@ -32,6 +33,7 @@ async function fixture(
   const socket = await startAssessmentControllerSocket({
     directory,
     scheduling,
+    monitoring,
     controller,
     socketGroup: process.getgid!(),
     deadlineMs,
@@ -160,6 +162,40 @@ describe('private controller socket', () => {
     ).toBe(503);
     expect(scheduling.reserve).toHaveBeenCalledTimes(1);
     expect(scheduling.acknowledge).not.toHaveBeenCalled();
+    expect(f.controller.run).not.toHaveBeenCalled();
+  });
+  it('mounts monitoring references only with an explicit trusted adapter', async () => {
+    const disabled = await fixture();
+    expect((await call(disabled.socketPath, {}, '/assessment/monitoring/poll')).status).toBe(503);
+    const reference = { tenantId: id(1), fireId: id(8) };
+    const outcome = {
+      ...reference,
+      state: 'confirmed' as const,
+      cleanupConfirmed: true,
+      receiptId: '77',
+    };
+    const monitoring = {
+      reserve: vi.fn(async () => ({ fires: [reference] })),
+      run: vi.fn(async () => outcome),
+      reconcile: vi.fn(async () => outcome),
+    };
+    const f = await fixture(5000, undefined, monitoring);
+    expect((await call(f.socketPath, {}, '/assessment/monitoring/poll')).status).toBe(200);
+    expect((await call(f.socketPath, reference, '/assessment/monitoring/run')).status).toBe(200);
+    expect((await call(f.socketPath, reference, '/assessment/monitoring/reconcile')).status).toBe(
+      200,
+    );
+    expect(monitoring.run).toHaveBeenCalledExactlyOnceWith(reference, expect.any(AbortSignal));
+    expect(monitoring.reconcile).toHaveBeenCalledExactlyOnceWith(
+      reference,
+      expect.any(AbortSignal),
+    );
+    expect(monitoring.reserve).toHaveBeenCalledExactlyOnceWith(expect.any(AbortSignal));
+    expect(
+      (await call(f.socketPath, { ...reference, actorId: id(9) }, '/assessment/monitoring/run'))
+        .status,
+    ).toBe(503);
+    expect(monitoring.run).toHaveBeenCalledTimes(1);
     expect(f.controller.run).not.toHaveBeenCalled();
   });
   it('refuses a directory accessible by other principals before binding', async () => {

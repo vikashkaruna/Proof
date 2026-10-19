@@ -62,6 +62,14 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       /^\/v1\/evidence\/staged-ingestions\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\/expire$/.test(
         c.req.path,
       ));
+  // Enrollment phases retain exact path-scoped operation journals. Challenge,
+  // verify and approve deliberately share one decision key across distinct phases.
+  const durableOwnedDeployment =
+    c.req.method === 'POST' &&
+    (c.req.path === '/v1/owned-deployments' ||
+      /^\/v1\/owned-deployments\/[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}\/(?:preflight|challenge|verify|approve|install|fence-intent|revoke-challenge|revoke-verify|revoke)$/.test(
+        c.req.path,
+      ));
   const durableOwnedSynthetic =
     c.req.method === 'POST' &&
     [
@@ -81,6 +89,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
       ));
   if (
     durableLocalCustody ||
+    durableOwnedDeployment ||
     durableIntake ||
     durablePublicControlReviewSet ||
     durablePublicWebsiteAsset ||
@@ -132,6 +141,7 @@ export const idempotency = createMiddleware<{ Variables: Variables }>(async (c, 
   // or freeze structural-review currency. Keep key checks above.
   if (
     durableLocalCustody ||
+    durableOwnedDeployment ||
     durableIntake ||
     durablePublicControlReviewSet ||
     durablePublicWebsiteAsset ||

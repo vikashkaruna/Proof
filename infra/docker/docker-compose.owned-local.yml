@@ -1,0 +1,31 @@
+# Explicitly selected local-only overlay. Set reviewed names in .env.local;
+# prepare the owned socket volume before pinning BFF/runtime CIDs and requesting
+# an enrollment. It starts no installer, registers no identity and mints no key.
+services:
+  bff:
+    environment:
+      AXIOM_OWNED_DEPLOYMENT_ENABLED: ${AXIOM_OWNED_DEPLOYMENT_ENABLED:-false}
+      AXIOM_OWNED_DEPLOYMENT_MANIFEST_FILE: /etc/axiom/owned-deployment/manifests.json
+      AXIOM_OWNED_DEPLOYMENT_TRANSPORT_FILE: /etc/axiom/owned-deployment/transport.json
+      AXIOM_OWNED_TARGET_CREDENTIAL_DIRECTORY: /var/lib/axiom/owned-target-credentials
+      AXIOM_OWNED_SYNTHETIC_ENABLED: ${AXIOM_OWNED_SYNTHETIC_ENABLED:-false}
+      AXIOM_OWNED_EXECUTION_ENABLED: ${AXIOM_OWNED_EXECUTION_ENABLED:-false}
+    volumes:
+      - type: volume
+        source: owned-execution-socket
+        target: /run/axiom-proof-local-owned-execution
+        read_only: true
+  agent-runtime:
+    group_add: ['20113']
+    environment:
+      AXIOM_OWNED_EXECUTION_ENABLED: ${AXIOM_OWNED_EXECUTION_ENABLED:-false}
+      AXIOM_OWNED_EXECUTION_SOCKET: /run/axiom-proof-local-owned-execution/owned-execution.sock
+    volumes:
+      - type: volume
+        source: owned-execution-socket
+        target: /run/axiom-proof-local-owned-execution
+        read_only: true
+volumes:
+  owned-execution-socket:
+    name: ${AXIOM_OWNED_EXECUTION_SOCKET_VOLUME:?reviewed existing local socket volume required}
+    external: true

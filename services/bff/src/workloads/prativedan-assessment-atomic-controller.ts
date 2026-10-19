@@ -1,7 +1,6 @@
-/** Unmounted private controller foundation. No HTTP handler, issuer, credential
- * provisioning or private channel. SQL locks persisted facts; external GoTrue /
- * SPIRE revocation continuity after the last verification is still unproved.
- */
+/** Private controller core, mounted only through the dedicated isolated runtime.
+ * SQL locks persisted facts; no caller, issuer or credential provisioning seam.
+ * External revocation cannot be made atomic with a separate database commit. */
 import { z } from 'zod';
 import { canonicalJson } from '@axiom/ledger';
 import {
@@ -42,6 +41,13 @@ const selectionSchema = z.strictObject({
 });
 const commandSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('load') }),
+  z.strictObject({ kind: z.literal('accounted-read') }),
+  z.strictObject({ kind: z.literal('accounting-witness') }),
+  z.strictObject({
+    kind: z.literal('accounted-start'),
+    inputText: z.string().min(1).max(1048576),
+    taskSha256: digest,
+  }),
   z.strictObject({ kind: z.literal('claim'), inputText: z.string().min(1).max(1048576) }),
   z.strictObject({
     kind: z.literal('phase'),
@@ -135,6 +141,13 @@ export class PrativedanAssessmentAtomicController {
         return { ...identity, registrationVersion: version };
       };
       const first = await authenticate();
+      // A live Workload API read renews its bounded observation deadline.
+      // Compare the principal/registration/bundle facts, not the wall-clock
+      // freshness deadline; each authenticate independently refuses expiry.
+      const identityFacts = (value: typeof first) => {
+        const { expiresAt: _expiresAt, ...facts } = value;
+        return canonicalJson(facts);
+      };
       const human = async () => {
         const context = prativedanAssessmentHumanContextSchema.parse(
           await this.ports.resolveCurrentHuman(selected),
@@ -160,7 +173,7 @@ export class PrativedanAssessmentAtomicController {
         journal.source_sha256 !== selected.sourceSha256
       )
         throw new PrativedanAtomicRefused();
-      if (command.kind === 'claim') {
+      if (command.kind === 'claim' || command.kind === 'accounted-start') {
         const input = prativedanAssessmentRendererInputSchema.parse(
           parsePrativedanAssessmentJson(command.inputText),
         );
@@ -170,7 +183,12 @@ export class PrativedanAssessmentAtomicController {
         )
           throw new PrativedanAtomicRefused();
       }
-      if (command.kind !== 'load' && command.kind !== 'claim' && journal.state === 'requested')
+      if (
+        !['load', 'claim', 'accounted-start', 'accounted-read', 'accounting-witness'].includes(
+          command.kind,
+        ) &&
+        journal.state === 'requested'
+      )
         throw new PrativedanAtomicRefused();
       if (
         command.kind === 'phase' &&
@@ -180,7 +198,7 @@ export class PrativedanAssessmentAtomicController {
       if (canonicalJson(context) !== canonicalJson(await human()))
         throw new PrativedanAtomicRefused();
       const final = await authenticate();
-      if (canonicalJson(first) !== canonicalJson(final)) throw new PrativedanAtomicRefused();
+      if (identityFacts(first) !== identityFacts(final)) throw new PrativedanAtomicRefused();
       authority = {
         actor_id: context.actorId,
         session_id: context.sessionId,
@@ -192,7 +210,7 @@ export class PrativedanAssessmentAtomicController {
       beforeCall = async () => {
         if (canonicalJson(context) !== canonicalJson(await human()))
           throw new PrativedanAtomicRefused();
-        if (canonicalJson(first) !== canonicalJson(await authenticate()))
+        if (identityFacts(first) !== identityFacts(await authenticate()))
           throw new PrativedanAtomicRefused();
       };
     } catch {
@@ -230,6 +248,19 @@ export class PrativedanAssessmentAtomicController {
       return result.data;
     };
     try {
+      if (command.kind === 'accounting-witness')
+        return rpc('prativedan_read_model_accounting_result', scope);
+      if (command.kind === 'accounted-read') return rpc('read_prativedan_accounted_draft', scope);
+      if (command.kind === 'accounted-start') {
+        const admitted = await rpc('start_prativedan_accounted_draft', {
+          ...scope,
+          input_text: command.inputText,
+          task_sha256: command.taskSha256,
+        });
+        // Private controller custody only. This original authority is never sent
+        // to a browser/worker and cannot authorize a new task or model start.
+        return { admitted, originalAuthority: authority };
+      }
       if (command.kind === 'load') {
         const value = prativedanAssessmentJournalSchema.parse(
           await rpc('load_prativedan_assessment_dispatch', scope),
