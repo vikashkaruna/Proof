@@ -216,15 +216,15 @@ end $$;
 reset role;
 set local role authenticated;
 select set_config('request.jwt.claims','{"sub":"99880000-0000-4000-8000-000000000001","role":"authenticated"}',true);
-select pg_temp.ok((select count(*)=1 from public.statutory_report_requests
+select pg_temp.ok((select count(*)=2 from public.statutory_report_requests
   where tenant_id='99880000-0000-4000-8000-000000000010'),
-  'manager sees only own request');
+  'manager sees both own original and new branded requests');
 select set_config('request.jwt.claims','{"sub":"99880000-0000-4000-8000-000000000004","role":"authenticated"}',true);
 select pg_temp.ok((select count(*)=0 from public.statutory_report_requests
   where tenant_id='99880000-0000-4000-8000-000000000010'),
   'viewer cannot inspect private request');
 select set_config('request.jwt.claims','{"sub":"99880000-0000-4000-8000-000000000002","role":"authenticated"}',true);
-select pg_temp.ok((select count(*)=1 from public.statutory_report_requests
+select pg_temp.ok((select count(*)=2 from public.statutory_report_requests
   where tenant_id='99880000-0000-4000-8000-000000000010'),
   'internal founder can inspect tenant request');
 select pg_temp.ok(not has_table_privilege('authenticated','public.statutory_request_sources','SELECT'),
