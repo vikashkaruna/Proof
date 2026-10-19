@@ -561,3 +561,11 @@ export function renderReviewedQuestionnaireEvidenceReport(
     throw Error('questionnaire_review_refused');
   }
 }
+
+/** Pure presentation for a separately validated versioned wrapper. No authority is granted. */
+export function renderQuestionnaireDocumentPresentation(
+  document: unknown,
+  review?: { displayName: string; actorId: string; reviewedAt: string },
+) {
+  return html(QuestionnaireEvidenceDocumentV6Schema.parse(document), review);
+}

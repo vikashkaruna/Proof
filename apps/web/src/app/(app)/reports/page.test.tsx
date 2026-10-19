@@ -173,9 +173,10 @@ it('shows named immutable review attribution and distinct content/archive hashes
   });
   const html = renderToStaticMarkup(<ReportProof report={report} />);
   expect(html).toContain('approved by Recorded Founder');
-  expect(html).toContain(`Content SHA-256: ${'a'.repeat(64)}`);
-  expect(html).toContain(`Released archive SHA-256: ${'b'.repeat(64)}`);
-  expect(html).toContain('Exact version: actual-version');
+  expect(html).toContain('Source and version details');
+  expect(html).toContain(`Content SHA-256: <code>${'a'.repeat(64)}</code>`);
+  expect(html).toContain(`Released archive SHA-256: <code>${'b'.repeat(64)}</code>`);
+  expect(html).toContain('Exact version: <code>actual-version</code>');
   expect(html).not.toContain('signature');
 });
 

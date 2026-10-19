@@ -1,3 +1,8 @@
+import {
+  buildBrandedReport,
+  renderBrandedDraft,
+  verifyBrandedSource,
+} from '@axiom/report-kit/branded-report';
 /**
  * Board Report Generation Service.
  * Implements manager-initiated request binding, deterministic draft synthesis,
@@ -126,7 +131,7 @@ export class BoardReportService {
   ) {
     const operationKey = input.operationKey ?? randomUUID();
     const result = await this.rpc(
-      'request_board_report',
+      'request_branded_board_report',
       {
         p_tenant_id: tenantId,
         p_actor_id: actorId,
@@ -213,19 +218,28 @@ export class BoardReportService {
       throw new EvidenceError('assessment_source_incomplete', 409);
     }
     const frozenVersion = (frozenJson as { schema_version?: unknown })?.schema_version;
-    if (frozenVersion === 4 || frozenVersion === 5) {
+    if (frozenVersion === 4 || frozenVersion === 5 || frozenVersion === 6) {
       // Source4 (reviewed public evidence) → document5; source5 (questionnaire
       // only, 0155) → document6. Both withhold metrics and are recomputed by SQL.
       const questionnaireOnly = frozenVersion === 5;
-      const verifySource = questionnaireOnly
-        ? verifyQuestionnaireEvidenceSource
-        : verifyCoverageFirstSource;
-      const buildDocument = questionnaireOnly
-        ? buildQuestionnaireEvidenceReport
-        : buildCoverageFirstReport;
-      const renderDraft = questionnaireOnly
-        ? renderQuestionnaireEvidenceDraft
-        : renderCoverageFirstDraft;
+      const verifySource =
+        frozenVersion === 6
+          ? verifyBrandedSource
+          : questionnaireOnly
+            ? verifyQuestionnaireEvidenceSource
+            : verifyCoverageFirstSource;
+      const buildDocument =
+        frozenVersion === 6
+          ? buildBrandedReport
+          : questionnaireOnly
+            ? buildQuestionnaireEvidenceReport
+            : buildCoverageFirstReport;
+      const renderDraft =
+        frozenVersion === 6
+          ? renderBrandedDraft
+          : questionnaireOnly
+            ? renderQuestionnaireEvidenceDraft
+            : renderCoverageFirstDraft;
       let content;
       const input = {
         requestId,

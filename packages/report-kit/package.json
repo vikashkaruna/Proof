@@ -29,7 +29,8 @@
     "./questionnaire-evidence-report": "./src/questionnaire-evidence-report.ts",
     "./test-fixtures/board-v2": "./src/board-v2.fixture.ts",
     "./full-closure": "./src/full-closure.ts",
-    "./test-fixtures/full-closure": "./src/full-closure.test-helper.ts"
+    "./test-fixtures/full-closure": "./src/full-closure.test-helper.ts",
+    "./branded-report": "./src/branded-report.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

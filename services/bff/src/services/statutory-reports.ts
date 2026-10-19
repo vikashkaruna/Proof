@@ -1,3 +1,9 @@
+import {
+  buildBrandedReport,
+  renderBrandedDraft,
+  renderReviewedBrandedReport,
+  BrandedDocumentV7Schema,
+} from '@axiom/report-kit/branded-report';
 /**
  * Statutory Report Generation Service.
  * Renders existing statutory report drafts. New generation remains closed
@@ -127,14 +133,13 @@ export class StatutoryReportService {
     signal?: AbortSignal,
   ) {
     return this.rpc(
-      'request_statutory_report',
+      'request_branded_auditor_report',
       {
         p_tenant_id: tenantId,
         p_actor_id: actorId,
         p_operation_key: input.operationKey ?? randomUUID(),
         p_engagement_id: input.engagementId,
         p_assessment_run_id: input.assessmentRunId,
-        p_kind: 'auditor',
         p_title: input.title,
         p_correlation_id: correlationId,
       },
@@ -186,17 +191,20 @@ export class StatutoryReportService {
       const version = JSON.parse(frozen.data.source_text).schema_version;
       const coverage = version === 4;
       const questionnaireOnly = version === 5;
+      const branded = version === 6;
       if (
-        (coverage || questionnaireOnly) &&
+        (coverage || questionnaireOnly || branded) &&
         JSON.parse(frozen.data.source_text).report_kind !== 'auditor'
       )
         throw Error();
       content = (
-        questionnaireOnly
-          ? buildQuestionnaireEvidenceReport
-          : coverage
-            ? buildCoverageFirstReport
-            : buildAuditorAssessmentPack
+        branded
+          ? buildBrandedReport
+          : questionnaireOnly
+            ? buildQuestionnaireEvidenceReport
+            : coverage
+              ? buildCoverageFirstReport
+              : buildAuditorAssessmentPack
       )({
         sourceText: frozen.data.source_text,
         sourceSha256: frozen.data.source_sha256,
@@ -218,8 +226,8 @@ export class StatutoryReportService {
         p_request_id: requestId,
         p_content_text: JSON.stringify(content),
         p_html_text:
-          content.schema_version === 6
-            ? renderQuestionnaireEvidenceDraft({
+          content.schema_version === 7
+            ? renderBrandedDraft({
                 sourceText: frozen.data.source_text,
                 sourceSha256: frozen.data.source_sha256,
                 requestId,
@@ -229,8 +237,8 @@ export class StatutoryReportService {
                 title: requestRow.data.title,
                 generatedAt: content.generated_at,
               })
-            : content.schema_version === 5
-              ? renderCoverageFirstDraft({
+            : content.schema_version === 6
+              ? renderQuestionnaireEvidenceDraft({
                   sourceText: frozen.data.source_text,
                   sourceSha256: frozen.data.source_sha256,
                   requestId,
@@ -240,7 +248,18 @@ export class StatutoryReportService {
                   title: requestRow.data.title,
                   generatedAt: content.generated_at,
                 })
-              : renderAuditorAssessmentPackHtml(content),
+              : content.schema_version === 5
+                ? renderCoverageFirstDraft({
+                    sourceText: frozen.data.source_text,
+                    sourceSha256: frozen.data.source_sha256,
+                    requestId,
+                    tenantId,
+                    engagementId: requestRow.data.engagement_id,
+                    assessmentRunId: requestRow.data.assessment_run_id,
+                    title: requestRow.data.title,
+                    generatedAt: content.generated_at,
+                  })
+                : renderAuditorAssessmentPackHtml(content),
         p_correlation_id: correlationId,
       },
       signal,
@@ -324,7 +343,11 @@ export class StatutoryReportService {
     validatedContent: unknown;
     html: string;
   } {
-    if (rawContent.schema_version === 5 || rawContent.schema_version === 6)
+    if (
+      rawContent.schema_version === 5 ||
+      rawContent.schema_version === 6 ||
+      rawContent.schema_version === 7
+    )
       throw new EvidenceError('source_bound_workflow_required', 409);
     switch (kind) {
       case 'board': {
@@ -432,8 +455,9 @@ export class StatutoryReportService {
     }
     const raw = report.content_text ? JSON.parse(report.content_text) : report.content;
     const rawVersion = (raw as Record<string, unknown>)?.schema_version;
-    if (rawVersion === 5 || rawVersion === 6) {
+    if (rawVersion === 5 || rawVersion === 6 || rawVersion === 7) {
       const questionnaireOnly = rawVersion === 6;
+      const branded = rawVersion === 7;
       if (report.status === 'published') throw new EvidenceError('retained_pdf_required', 409);
       if (report.kind !== 'board' && report.kind !== 'auditor')
         throw new EvidenceError('source_bound_workflow_required', 409);
@@ -445,7 +469,11 @@ export class StatutoryReportService {
         )
           throw Error();
         const document = (
-          questionnaireOnly ? QuestionnaireEvidenceDocumentV6Schema : CoverageFirstDocumentV5Schema
+          branded
+            ? BrandedDocumentV7Schema
+            : questionnaireOnly
+              ? QuestionnaireEvidenceDocumentV6Schema
+              : CoverageFirstDocumentV5Schema
         ).parse(parseCoverageFirstJson(report.content_text, 4 * 1024 * 1024));
         const requestQuery = this.db
           .from(report.kind === 'board' ? 'board_report_requests' : 'statutory_report_requests')
@@ -501,13 +529,17 @@ export class StatutoryReportService {
           sourceSha256: source.source_sha256,
           generatedAt: document.generated_at,
         };
-        const rebuilt = questionnaireOnly
-          ? buildQuestionnaireEvidenceReport(input)
-          : buildCoverageFirstReport(input);
+        const rebuilt = branded
+          ? buildBrandedReport(input)
+          : questionnaireOnly
+            ? buildQuestionnaireEvidenceReport(input)
+            : buildCoverageFirstReport(input);
         if (canonicalJson(document) !== canonicalJson(rebuilt)) throw Error();
-        let html = questionnaireOnly
-          ? renderQuestionnaireEvidenceDraft(input)
-          : renderCoverageFirstDraft(input);
+        let html = branded
+          ? renderBrandedDraft(input)
+          : questionnaireOnly
+            ? renderQuestionnaireEvidenceDraft(input)
+            : renderCoverageFirstDraft(input);
         if (report.status === 'approved') {
           const reviewQuery = this.db
             .from('report_reviews')
@@ -523,9 +555,11 @@ export class StatutoryReportService {
             .parse(result.data);
           const { generatedAt: _generatedAt, ...reviewedInput } = input;
           html = (
-            questionnaireOnly
-              ? renderReviewedQuestionnaireEvidenceReport
-              : renderReviewedCoverageFirstReport
+            branded
+              ? renderReviewedBrandedReport
+              : questionnaireOnly
+                ? renderReviewedQuestionnaireEvidenceReport
+                : renderReviewedCoverageFirstReport
           )({
             ...reviewedInput,
             reportId: report.id,
