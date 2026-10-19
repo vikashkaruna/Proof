@@ -60,7 +60,7 @@ do $$ declare r jsonb;t uuid;begin
  perform pg_temp.assert_true(not exists(select 1 from public.tenant_users where tenant_id=t and role='owner'),'no fabricated client owner/consent');
  perform pg_temp.assert_true((select creation_authority='platform_founder' and submitted_by=pg_temp.u(1) from public.tenant_onboarding_intakes where tenant_id=t),'founder creation quota marker');
  perform pg_temp.assert_true((select count(*)=1 from public.engagements where tenant_id=t),'one initial engagement');
- perform pg_temp.assert_true((select count(*)=1 from public.audit_ledger where tenant_id=t and action_type='tenant.created' and metadata->>'creation_authority'='platform_founder'),'one actual genesis ledger receipt');
+ perform pg_temp.assert_true((select count(*)=1 from public.audit_ledger where tenant_id=t and action_type='tenant.created' and detail->>'creation_authority'='platform_founder'),'one actual genesis ledger receipt');
  perform pg_temp.assert_true(public.report_founder_allowed(t,pg_temp.u(1)) and public.report_founder_allowed(t,pg_temp.u(2)),'existing founder report review authority preserved');
  perform pg_temp.assert_true(pg_temp.onboard(1)->>'error'='tenant_quota_exceeded','derived global access not used as unlimited quota');
  perform set_config('test.onboard176.founder',t::text,true);
