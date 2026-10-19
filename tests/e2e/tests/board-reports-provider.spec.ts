@@ -563,7 +563,12 @@ test.describe('real-provider board report lifecycle', () => {
     page,
     browser,
   }) => {
-    test.setTimeout(300_000);
+    // Registered journey adds bounded onboarding/submission (180s) and handoff
+    // waiting (90s) before the existing 300s lifecycle; keep the whole test finite.
+    test.setTimeout(registeredBrowserRequested() ? 600_000 : 300_000);
+    const checkpoint = (stage: string) => {
+      if (registeredBrowserRequested()) console.log(`[registered-website-stage] ${stage}`);
+    };
     if (registeredBrowserRequested()) {
       const owned = readOwnedRegisteredBrowser(repoRoot);
       await verifyRegisteredBrowserServer(owned.config);
@@ -677,6 +682,7 @@ test.describe('real-provider board report lifecycle', () => {
         ])
           expect(document).not.toHaveProperty(k);
       }
+      checkpoint('report-board-content');
       const detail = await founder.request.get(`/api/bff/v1/reports/${draft.reportId}`);
       expect(detail.status()).toBe(200);
       const report = ((await detail.json()) as { data: { contentHash: string } }).data;
@@ -715,6 +721,7 @@ test.describe('real-provider board report lifecycle', () => {
         await expect(coverage).not.toContainText(
           /Posture score\s*[:=]?\s*\d|Estimated exposure\s*[:=]?\s*[₹0-9]/i,
         );
+        checkpoint('report-board-preview');
         await assertReadableCoveragePreview(founder, {
           reportId: draft.reportId,
           requestId: request.requestId,
@@ -807,6 +814,7 @@ test.describe('real-provider board report lifecycle', () => {
       } finally {
         vault.close();
       }
+      checkpoint('report-board-retained');
       const pdfVersion = rows[0]!;
       const privatePdf = await founder.request.get(
         `/api/bff/v1/reports/board/${draft.reportId}/pdf`,
@@ -872,6 +880,7 @@ test.describe('real-provider board report lifecycle', () => {
       expect(((await wrong.json()) as { error: { code: string } }).error.code).toBe(
         'archive_hash_mismatch',
       );
+      checkpoint('report-board-release');
       const released = await post(founder, `/reports/${draft.reportId}/release`, {
         expectedContentHash: row.content_sha256,
         expectedArchiveHash: pdfVersion.content_hash,
@@ -946,6 +955,7 @@ test.describe('real-provider board report lifecycle', () => {
             : 'source_bound_dossier_required',
         );
       }
+      checkpoint('report-board-dossier');
       const prepared = await post(page, `/engagements/${assessment.engagementId}/closure/pramaan`, {
         dossierType: 'board_executive',
         reportId: draft.reportId,
@@ -1029,6 +1039,7 @@ test.describe('real-provider board report lifecycle', () => {
         (await viewer.request.get(`/api/bff/v1/reports/board/${draft.reportId}/pdf`)).status(),
       ).toBe(200);
     } finally {
+      checkpoint('report-browser-cleanup');
       await founderContext.close();
       await viewerContext.close();
     }
