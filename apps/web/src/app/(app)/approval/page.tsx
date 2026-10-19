@@ -38,6 +38,11 @@ export default async function ApprovalPage() {
         title="Approval Queue"
         description="Recorded actions awaiting human review. Open the source plan to inspect the dry-run, rollback, scope, and approval authority before taking action."
       />
+      {['owner', 'admin', 'approver', 'founder'].includes(role) && (
+        <Link href="/approvals/standing" className="text-sm font-medium text-teal-700 underline">
+          Review standing approval delegations
+        </Link>
+      )}
       <p className="text-sm text-slate-600">
         Select an action, inspect its recorded dry-run and rollback details, then approve the
         eligible actions in the source plan with your authenticator. Approval records your decision;
