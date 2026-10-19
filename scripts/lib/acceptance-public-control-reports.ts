@@ -278,6 +278,7 @@ export function reportAcceptanceCodeSha256(repositoryRoot = '.') {
       'services/bff/src/services/statutory-artifacts.ts',
       'tests/e2e/tests/board-reports-provider.spec.ts',
       'tests/e2e/branded-coverage-assertions.ts',
+      'tests/e2e/pdf-text.ts',
       'apps/web/src/app/(app)/reports/reports-client.tsx',
       'apps/web/src/app/(app)/reports/coverage-first-preview.tsx',
       'packages/report-kit/src/public-control-provenance.ts',

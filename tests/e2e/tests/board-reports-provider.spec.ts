@@ -1,3 +1,4 @@
+import { normalizePdfText } from '../pdf-text';
 import { assertBrandedCoverageDocument } from '../branded-coverage-assertions';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
@@ -60,7 +61,9 @@ async function assertCoverageFirstPdf(bytes: Buffer, kind: 'board' | 'auditor') 
   const textFile = join(localFixture().directory, `coverage-first-${kind}.private.txt`);
   await writeFile(pdfFile, bytes, { mode: 0o600 });
   await execFileAsync('pdftotext', [pdfFile, textFile], { timeout: 10000 });
-  const text = await import('node:fs/promises').then((fs) => fs.readFile(textFile, 'utf8'));
+  const text = normalizePdfText(
+    await import('node:fs/promises').then((fs) => fs.readFile(textFile, 'utf8')),
+  );
   expect(text).toMatch(/Scores and financial exposure estimates are withheld/);
   expect(text).toMatch(/Scope and coverage/);
   expect(text).toMatch(/Unknown/);
@@ -78,7 +81,9 @@ async function assertQuestionnaireEvidencePdf(bytes: Buffer, kind: 'board' | 'au
   const textFile = join(localFixture().directory, `questionnaire-evidence-${kind}.private.txt`);
   await writeFile(pdfFile, bytes, { mode: 0o600 });
   await execFileAsync('pdftotext', [pdfFile, textFile], { timeout: 10000 });
-  const text = await import('node:fs/promises').then((fs) => fs.readFile(textFile, 'utf8'));
+  const text = normalizePdfText(
+    await import('node:fs/promises').then((fs) => fs.readFile(textFile, 'utf8')),
+  );
   expect(text).toMatch(/Scores, score bands and financial exposure estimates are withheld/);
   expect(text).toMatch(/Coverage and evidence needed/);
   expect(text).not.toMatch(
