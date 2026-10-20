@@ -23,16 +23,16 @@
     "@axiom/types": "workspace:*",
     "@axiom/ui": "workspace:*",
     "@supabase/ssr": "^0.12.7",
-    "@supabase/supabase-js": "^2.117.3",
+    "@supabase/supabase-js": "^2.118.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
-    "lucide-react": "^1.55.0",
-    "next": "^16.3.8",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "lucide-react": "^1.58.0",
+    "next": "^16.4.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "recharts": "^3.10.1",
     "tailwind-merge": "^3.7.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@axiom/eslint-config": "workspace:*",

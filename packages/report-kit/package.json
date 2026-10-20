@@ -39,7 +39,7 @@
   },
   "dependencies": {
     "fflate": "0.8.3",
-    "zod": "^4.6.5",
+    "zod": "^4.6.7",
     "@axiom/types": "workspace:*",
     "@axiom/control-library": "workspace:*",
     "@axiom/ledger": "workspace:*"
