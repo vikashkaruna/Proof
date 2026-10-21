@@ -144,8 +144,8 @@ echo "▶ Seeding representative tenants and persona logins..."
 SUPABASE_DB_URL="$DB_URL" python3 scripts/migrate-database.py --dsn-env \
   --sql-file infra/supabase/seed-users.sql
 SUPABASE_DB_URL="$DB_URL" pnpm seed:users
-SUPABASE_DB_URL="$DB_URL" pnpm tsx scripts/seed-platform-baseline.ts
-echo "  ✓ Representative identities seeded"
+echo "  ✓ Representative identities seeded; no findings, evidence or reports fabricated"
+echo "  Demo history is a separate explicit non-production seed; retained reports require real assessment sources."
 
 echo "================================================================="
 echo "  ✓ Migrations and seeds complete"

@@ -1,4 +1,6 @@
+import { uuidSchema } from '../services/evidence-ingestion.js';
 import { dataFlowDeclarationRoutes } from './data-flow-declarations.js';
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
 import { scheduledCoverageRoutes } from './scheduled-coverage.js';
 import type { StandingCoordinator } from '../services/standing-coordinator.js';
 import { standingApprovalRoutes } from './standing-approvals.js';
@@ -34,6 +36,8 @@ import { assessmentRoutes } from './assessment.js';
 import { assessmentJobStatusRoutes } from './assessment-job-status.js';
 import { connectorRoutes } from './connectors.js';
 import { catalogueVersionRoutes } from './catalogue-versions.js';
+import { catalogueEngagementRoutes } from './catalogue-engagement.js';
+import { publicCoverageClarificationRoutes } from './public-coverage-clarifications.js';
 import { catalogueReferenceRoutes } from './catalogue-references.js';
 import { publicWebsiteControlReviewRoutes } from './public-website-control-review.js';
 import { publicControlReviewSetRoutes } from './public-control-review-sets.js';
@@ -318,6 +322,8 @@ export function v1Routes(deps: Deps) {
   );
   app.route('/', catalogueReferenceRoutes());
   app.route('/', catalogueVersionRoutes({ mfa: deps.mfa }));
+  app.route('/', catalogueEngagementRoutes({ mfa: deps.mfa }));
+  app.route('/', publicCoverageClarificationRoutes());
   app.route('/', publicWebsiteCheckRoutes({ capture: deps.publicWebsiteCapture }));
   app.route('/', localCustodyPolicyRoutes({ mfa: deps.mfa }));
   app.route('/', mfaRecoveryRoutes({ mfa: deps.mfa }));
@@ -3787,6 +3793,34 @@ export function v1Routes(deps: Deps) {
   app.get('/user/tenants', async (c) => {
     const user = c.get('user');
     const admin = createSupabaseAdmin();
+    try {
+      if (await isLivePlatformFounder(admin, user.id)) {
+        const result = await admin
+          .from('tenants')
+          .select(
+            'id,name,slug,tier,is_sdf,processes_health_data,processes_children_data,created_at',
+          );
+        const parsed = z
+          .array(
+            z.object({
+              id: uuidSchema,
+              name: z.string(),
+              slug: z.string(),
+              tier: z.string(),
+              is_sdf: z.boolean(),
+              processes_health_data: z.boolean(),
+              processes_children_data: z.boolean(),
+              created_at: z.string(),
+            }),
+          )
+          .safeParse(result.data);
+        if (result.error || !parsed.success)
+          return c.json({ error: { code: 'tenant_authority_unavailable' } }, 503);
+        return c.json({ tenants: parsed.data.map((tenant) => ({ ...tenant, role: 'founder' })) });
+      }
+    } catch {
+      return c.json({ error: { code: 'tenant_authority_unavailable' } }, 503);
+    }
     const { data, error } = await admin
       .from('tenant_users')
       .select('tenant_id, role, tenants:tenant_id(*)')

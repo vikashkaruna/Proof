@@ -28,7 +28,8 @@ import { acceptanceTarget, repoRoot, tenantCookie } from '../target';
 import {
   reportAcceptanceRequested,
   readPublicReportBrowserHandoff,
-  verifyBrandedAcceptanceReport,
+  verifyClarifiedAcceptanceReport,
+  ensureOwnerCoverageClarification,
 } from '../../../scripts/lib/acceptance-public-control-reports';
 import { EvidenceVault } from '../../../packages/evidence/src/index';
 import { unzipSync } from 'fflate';
@@ -117,6 +118,14 @@ async function assertReadableCoveragePreview(
     expect(new URL(preview.url()).origin).toBe(new URL(founder.url()).origin);
     expect(new URL(preview.url()).pathname).toBe(path);
     await assertBrandedCoverageDocument(preview, expected);
+    await expect(preview.locator('.brand-cover')).toContainText('Document 8');
+    const explanations = preview.getByRole('region', {
+      name: 'Owner explanations for incomplete public-page coverage',
+    });
+    await expect(explanations).toBeVisible();
+    await expect(explanations).toContainText('Owner declarations are unverified.');
+    await expect(explanations).toContainText('Contact and grievance channels');
+    await expect(explanations).toContainText('Consent and withdrawal information');
     await coverage.screenshot({
       path: join(
         localFixture().directory,
@@ -341,6 +350,45 @@ async function postInTenant(page: Page, path: string, body: unknown, tenantId = 
   });
 }
 const post = postInTenant;
+
+/** Owner uses the authenticated, MFA-satisfied BFF path; no fixture declaration insert. */
+async function clarifyIncompletePublicCoverage(
+  page: Page,
+  actorId: string,
+  tenantId: string,
+  source: ReturnType<typeof readPublicReportBrowserHandoff>['source'],
+) {
+  let checkId = source.asset?.checkId;
+  if (!checkId) {
+    const reviews = z
+      .array(z.object({ check_id: z.uuid() }))
+      .length(1)
+      .parse(
+        await database(
+          `public_control_review_sets?tenant_id=eq.${tenantId}&id=eq.${source.reviewId}&select=check_id`,
+        ),
+      );
+    checkId = reviews[0]!.check_id;
+  }
+  await ensureOwnerCoverageClarification({
+    tenantId,
+    engagementId: source.engagementId,
+    checkId,
+    headers: { 'x-tenant-id': tenantId, 'x-expected-actor-id': actorId },
+    request: async (path, expected, options = {}) => {
+      const response = await page.request.fetch(`/api/bff${path}`, {
+        method: options.method ?? 'GET',
+        headers: options.headers as Record<string, string>,
+        ...(typeof options.body === 'string' ? { data: options.body } : {}),
+      });
+      expect(response.status()).toBe(expected);
+      return new Response(new Uint8Array(await response.body()), {
+        status: response.status(),
+        headers: response.headers(),
+      });
+    },
+  });
+}
 
 async function boardRequest(
   page: Page,
@@ -610,6 +658,8 @@ test.describe('real-provider board report lifecycle', () => {
           resultDigest: sourceHandoff.resultDigest,
         }
       : await finalizedAssessment(manager.id);
+    if (sourceHandoff)
+      await clarifyIncompletePublicCoverage(page, manager.id, tenantId, sourceHandoff.source);
     const request = sourceHandoff
       ? await boardRequestInBrowser(page, assessment, tenantId, manager.id)
       : await boardRequest(page, assessment, tenantId);
@@ -642,7 +692,7 @@ test.describe('real-provider board report lifecycle', () => {
       )) as { source_text: string; source_sha256: string }[];
       expect(sources).toHaveLength(1);
       if (sourceHandoff) {
-        const { content: document } = verifyBrandedAcceptanceReport({
+        const { content: document } = verifyClarifiedAcceptanceReport({
           kind: 'board',
           title: request.title,
           tenantId,
@@ -654,7 +704,7 @@ test.describe('real-provider board report lifecycle', () => {
           contentText: row.content_text,
           contentSha256: row.content_sha256,
         });
-        expect(document.schema_version).toBe(7);
+        expect(document.schema_version).toBe(8);
         expect(document.presentation_policy.metrics).toBe('withheld');
         expect(document.provenance.reviewId).toBe(sourceHandoff.source.reviewId);
         expect(document.controls).toHaveLength(46);
@@ -664,18 +714,23 @@ test.describe('real-provider board report lifecycle', () => {
         if (sourceHandoff.source.asset)
           expect(document.asset_scope!.target.url).toBe('https://fixture.axiomproof.ai/');
       } else {
-        // A NEW questionnaire-only request is source6/doc7 wrapping source5/doc6, with every estimate
+        // A NEW questionnaire-only request is source8/doc8 wrapping immutable source6 then source5/doc6, with every estimate
         // withheld (0155); no permissive OR-version fallback.
         const outer = JSON.parse(sources[0]!.source_text);
-        expect(outer.schema_version).toBe(6);
-        expect(JSON.parse(outer.retained_source.text)).toMatchObject({
+        expect(outer.schema_version).toBe(8);
+        expect(outer.owner_clarification).toBeNull();
+        const branded = JSON.parse(outer.retained_source.text);
+        expect(branded.schema_version).toBe(6);
+        expect(JSON.parse(branded.retained_source.text)).toMatchObject({
           schema_version: 5,
           report_kind: 'board',
         });
         const document = JSON.parse(row.content_text);
-        expect(document.schema_version).toBe(7);
+        expect(document.schema_version).toBe(8);
         expect(document.underlying_document_version).toBe(6);
-        expect(document.underlying_source_sha256).toBe(outer.retained_source.sha256);
+        expect(document.underlying_source_sha256).toBe(branded.retained_source.sha256);
+        expect(document.branded_source_sha256).toBe(outer.retained_source.sha256);
+        expect(document.owner_coverage_clarification).toBeNull();
         expect(document.metrics.state).toBe('withheld');
         for (const k of [
           'posture_score',
@@ -1009,7 +1064,7 @@ test.describe('real-provider board report lifecycle', () => {
         source.source_text,
       );
       expect(Buffer.from(retainedFiles['source/board-report.pdf']!)).toEqual(downloadedPdf);
-      expect(JSON.parse(source.source_text).schema_version).toBe(6);
+      expect(JSON.parse(source.source_text).schema_version).toBe(8);
       expect(retained.headers()['x-content-sha256']).toBe(dossier.archiveHash);
       expect(
         (
@@ -1256,7 +1311,7 @@ test.describe('real-provider board report lifecycle', () => {
       await detail.getByText('Exact recorded content', { exact: true }).click();
       await expect(detail.locator('pre')).toContainText(unsafeText);
       // The finding rationale is opaque provenance in document7, never shown.
-      await expect(detail.locator('pre')).toContainText('"schema_version":7');
+      await expect(detail.locator('pre')).toContainText('"schema_version":8');
       await expect(detail.locator('img')).toHaveCount(0);
       await expect(detail.getByRole('button', { name: /Email/ })).toHaveCount(0);
       await detail
@@ -1365,6 +1420,8 @@ test.describe('real-provider board report lifecycle', () => {
           resultDigest: sourceHandoff.resultDigest,
         }
       : await finalizedAssessment(manager.id);
+    if (sourceHandoff)
+      await clarifyIncompletePublicCoverage(page, manager.id, tenantId, sourceHandoff.source);
     const requestBody = {
       engagementId: assessment.engagementId,
       assessmentRunId: assessment.runId,
@@ -1422,7 +1479,7 @@ test.describe('real-provider board report lifecycle', () => {
       )) as Array<{ source_text: string; source_sha256: string }>;
       expect(sources).toHaveLength(1);
       if (sourceHandoff) {
-        const { content: qualified } = verifyBrandedAcceptanceReport({
+        const { content: qualified } = verifyClarifiedAcceptanceReport({
           kind: 'auditor',
           title: requestBody.title,
           tenantId,
@@ -1434,19 +1491,22 @@ test.describe('real-provider board report lifecycle', () => {
           contentText: row.content_text,
           contentSha256: row.content_sha256,
         });
-        expect(qualified.schema_version).toBe(7);
+        expect(qualified.schema_version).toBe(8);
         expect(qualified.presentation_policy.metrics).toBe('withheld');
         expect(qualified.controls).toHaveLength(46);
       } else {
         const outer = JSON.parse(sources[0]!.source_text);
-        expect(outer.schema_version).toBe(6);
-        expect(JSON.parse(outer.retained_source.text)).toMatchObject({
+        expect(outer.schema_version).toBe(8);
+        expect(outer.owner_clarification).toBeNull();
+        const branded = JSON.parse(outer.retained_source.text);
+        expect(branded.schema_version).toBe(6);
+        expect(JSON.parse(branded.retained_source.text)).toMatchObject({
           schema_version: 5,
           report_kind: 'auditor',
         });
-        expect(content.schema_version).toBe(7);
+        expect(content.schema_version).toBe(8);
         expect(content.underlying_document_version).toBe(6);
-        expect(content.underlying_source_sha256).toBe(outer.retained_source.sha256);
+        expect(content.underlying_source_sha256).toBe(branded.retained_source.sha256);
         expect(content.metrics?.state).toBe('withheld');
         for (const k of ['posture_score', 'findings', 'risk_points'])
           expect(content).not.toHaveProperty(k);
@@ -1673,7 +1733,7 @@ test.describe('real-provider board report lifecycle', () => {
         sources[0]!.source_text,
       );
       expect(Buffer.from(files['source/auditor-review-pack.pdf']!)).toEqual(downloadedPdf);
-      expect(JSON.parse(sources[0]!.source_text).schema_version).toBe(6);
+      expect(JSON.parse(sources[0]!.source_text).schema_version).toBe(8);
       const manifest = JSON.parse(Buffer.from(files['manifest.json']!).toString()) as {
         kind: string;
         limitations: string[];

@@ -10,6 +10,7 @@ import {
   publicEvidenceCatalogueRowsMatchV2,
 } from '@axiom/control-library';
 import type { AssetReviewHint } from './public-control-asset-selection';
+import { PublicCoverageClarifications } from './public-coverage-clarifications';
 import { PublicControlHumanReview } from './public-control-human-review';
 import { sourceRequest, SourceWorkflowError } from './source-request';
 
@@ -194,13 +195,16 @@ function Review({
       {result && manifest && (
         <>
           {actorId && z.uuid().safeParse(actorId).success && (
-            <PublicControlHumanReview
-              assetHint={assetHint}
-              actorId={actorId}
-              canReview={canReview}
-              canRun={canRun}
-              assessment={result.assessment}
-            />
+            <>
+              <PublicCoverageClarifications actorId={actorId} assessment={result.assessment} />
+              <PublicControlHumanReview
+                assetHint={assetHint}
+                actorId={actorId}
+                canReview={canReview}
+                canRun={canRun}
+                assessment={result.assessment}
+              />
+            </>
           )}
           <p className="font-medium text-indigo-900">
             Human review required · {result.assessment.controls.length} controls · Library{' '}

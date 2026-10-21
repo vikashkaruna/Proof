@@ -131,7 +131,16 @@ begin
    when 'system_status' then update public.estate_systems set status='archived' where tenant_id=pg_temp.id(31) and id=pg_temp.id(72);
    when 'engagement_estate' then
     insert into public.estates(id,tenant_id,slug,name) values(pg_temp.id(175),pg_temp.id(31),'different-context','Different estate');
-    update public.engagements set estate_id=pg_temp.id(175) where tenant_id=pg_temp.id(31) and id=pg_temp.id(41);
+    begin
+     update public.engagements set estate_id=pg_temp.id(175) where tenant_id=pg_temp.id(31) and id=pg_temp.id(41);
+     raise exception 'admitted estate changed';
+    exception when check_violation then
+     perform pg_temp.ok(sqlerrm='engagement catalogue basis is immutable; create a new engagement','admitted estate mutation refused before source drift');
+    end;
+    perform pg_temp.ok((select estate_id=pg_temp.id(71)from public.engagements where id=pg_temp.id(41)),'refused scope change preserves admitted estate');
+    got:=pg_temp.save((r->>'request_text')::jsonb,pg_temp.id(2));
+    perform pg_temp.ok(got->'replayed'='true'::jsonb and got->'data'->>'snapshot_sha256'=r->>'snapshot_sha256','exact historical review survives refused scope change');
+    raise exception 'Rollback owned freshness subtransaction' using errcode='P1410';
    when 'target_withdrawal','association_withdrawal' then
     select value into subject from asset_operations where kind=case which when 'target_withdrawal' then 'target' else 'association' end;
     perform pg_temp.asset_write(jsonb_build_object('version',1,'kind','withdraw','operationKey',pg_temp.id(192),'confirmed',true,'subjectType',case which when 'target_withdrawal' then 'target' else 'association' end,'subjectId',(subject->>'snapshotText')::jsonb->>'id','expectedSubjectSha256',subject->>'snapshotSha256','reason','Synthetic freshness test withdrawal'));

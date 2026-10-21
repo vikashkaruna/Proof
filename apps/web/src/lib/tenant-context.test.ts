@@ -25,6 +25,8 @@ const state = vi.hoisted(() => ({
   }>,
   cookieSlug: 'alpha',
   internal: false,
+  founderLive: false,
+  organizations: [] as Array<{ id: string; slug: string; name: string; is_demo: boolean }>,
   factors: [{ id: 'factor-1' }] as Array<{ id: string }>,
   attestations: [{ expires_at: new Date(Date.now() + 60000).toISOString() }] as Array<{
     expires_at: string;
@@ -52,9 +54,11 @@ vi.mock('@axiom/supabase', () => ({
       getSession: async () => ({ data: { session: state.session } }),
     },
     from: database.from,
-    rpc: async (name: string) => {
+    rpc: (name: string) => {
+      if (name === 'is_live_platform_founder')
+        return { abortSignal: async () => ({ data: state.founderLive, error: null }) };
       if (name !== 'read_my_mfa_recovery') throw new Error('unexpected rpc');
-      return { data: database.recovery, error: null };
+      return Promise.resolve({ data: database.recovery, error: null });
     },
   }),
   sessionIdFromAccessToken: () => 'session-1',
@@ -95,6 +99,8 @@ beforeEach(() => {
   ];
   state.cookieSlug = 'alpha';
   state.internal = false;
+  state.founderLive = false;
+  state.organizations = [];
   state.factors = [{ id: 'factor-1' }];
   state.attestations = [{ expires_at: new Date(Date.now() + 60000).toISOString() }];
   state.session = { access_token: 'token' };
@@ -108,6 +114,7 @@ beforeEach(() => {
   database.from.mockImplementation((table: string) => {
     const rows = () => {
       if (table === 'tenant_users') return state.memberships;
+      if (table === 'tenants') return state.organizations;
       if (table === 'user_mfa_factors') return state.factors;
       if (table === 'mfa_session_attestations') return state.attestations;
       return [];
@@ -266,4 +273,45 @@ it('sends an account under founder-led recovery to the recovery panel, not the c
   await expect(requireTenantContext()).rejects.toThrow('redirect:/settings/security?recovery=1');
   database.recovery = null;
   await expect(requireTenantContext()).resolves.toMatchObject({ tenantId: 'tenant-a' });
+});
+
+it('uses live global founder authority for organizations without or with lower explicit membership, while preserving mandatory MFA', async () => {
+  state.founderLive = true;
+  state.memberships = [];
+  state.organizations = [
+    { id: 'tenant-z', slug: 'unrelated', name: 'Unrelated suspended organization', is_demo: false },
+  ];
+  await expect(requireTenantContext('unrelated')).resolves.toMatchObject({
+    tenantId: 'tenant-z',
+    role: 'founder',
+    approvalScopes: [],
+    isGlobalFounder: true,
+    isAxiomInternal: true,
+  });
+  await expect(requireInternalContext('unrelated')).resolves.toMatchObject({
+    isGlobalFounder: true,
+  });
+  state.memberships = [
+    {
+      tenant_id: 'tenant-z',
+      role: 'viewer',
+      approval_scopes: ['limited'],
+      tenants: { slug: 'unrelated', name: 'Unrelated', is_demo: false },
+    },
+  ];
+  await expect(requireTenantContext('unrelated')).resolves.toMatchObject({
+    role: 'founder',
+    approvalScopes: [],
+  });
+  state.factors = [];
+  await expect(requireTenantContext('unrelated')).rejects.toThrow(
+    'redirect:/settings/security?enrol=required',
+  );
+});
+it('revoked or nondesignated internal users cannot borrow global organization context', async () => {
+  state.internal = true;
+  state.memberships = [];
+  state.founderLive = false;
+  state.organizations = [{ id: 'tenant-z', slug: 'foreign', name: 'Foreign', is_demo: false }];
+  await expect(requireTenantContext('foreign')).rejects.toThrow('redirect:/onboarding');
 });

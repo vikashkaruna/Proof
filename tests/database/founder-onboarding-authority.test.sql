@@ -6,7 +6,7 @@ begin if value is distinct from true then raise exception 'ASSERTION FAILED: %',
 create function pg_temp.u(n integer) returns uuid language sql immutable as $$
  select ('00000000-0000-0000-0176-'||lpad(n::text,12,'0'))::uuid;
 $$;
-create function pg_temp.onboard(n integer, tier public.tenant_tier default 'growth', library text default 'onboarding-176')
+create function pg_temp.onboard(n integer, tier public.tenant_tier default 'growth', library text default '0.1.1')
 returns jsonb language plpgsql as $$
 declare result jsonb;
 begin
@@ -21,10 +21,9 @@ end $$;
 insert into auth.users(id,email) select pg_temp.u(n),'fixture176-'||n||'@test.invalid' from generate_series(1,8) n;
 insert into public.users(id,email,is_axiom_internal)
  select pg_temp.u(n),'fixture176-'||n||'@test.invalid',n in(1,2,4,5,6) from generate_series(1,8) n;
-insert into public.control_libraries(version,published_at,published_by,change_log,control_count,is_current)
- values('onboarding-176',now(),'test','synthetic SQL fixture, not catalogue approval',1,true);
-insert into public.controls(id,library_version,title,obligation,domain,severity,citations,evidence_required,assessment_questions,scoring,remediation_patterns,introduced_in_version)
- values('ONBOARD176','onboarding-176','Test','Test','GOV','low','[]','[]','[]','{}','{}','onboarding-176');
+-- The harness emits the exact approved production catalogue before this suite.
+-- Ordinary onboarding must use a released current version, just as in the app.
+update public.control_libraries set is_current=true where version='0.1.1';
 select public.designate_platform_founder(pg_temp.u(1),'test','synthetic founder176 one');
 select public.designate_platform_founder(pg_temp.u(2),'test','synthetic founder176 two');
 insert into public.onboarding_entitlements(user_id,max_owned_tenants,allowed_tiers,granted_by,grant_reason,valid_until)

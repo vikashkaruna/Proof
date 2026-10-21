@@ -13,7 +13,8 @@ const state = vi.hoisted(() => ({
   authError: null as Error | null,
   authThrows: false,
   profileInternal: true,
-  founderLive: true,
+  founderLive: false,
+  organizations: [] as Array<{ id: string; slug: string; name: string; is_demo?: boolean }>,
 }));
 vi.mock('next/headers', () => ({ cookies: async () => ({ get: () => ({ value: 'beta' }) }) }));
 vi.mock('next/navigation', () => ({
@@ -44,6 +45,8 @@ vi.mock('@axiom/supabase', () => ({
       }
       const query = {
         select: () => query,
+        then: (resolve: (v: unknown) => unknown) =>
+          Promise.resolve(resolve({ data: state.organizations, error: state.error })),
         eq: async () => {
           state.membershipReads += 1;
           return {
@@ -83,7 +86,8 @@ beforeEach(() => {
   state.authError = null;
   state.authThrows = false;
   state.profileInternal = true;
-  state.founderLive = true;
+  state.founderLive = false;
+  state.organizations = [];
 });
 
 it('does not render protected content without an authenticated user', async () => {
@@ -97,7 +101,7 @@ it('reports provider failure without treating a valid cookie as a missing sessio
   );
   state.authThrows = false;
   state.profileInternal = true;
-  state.founderLive = true;
+  state.founderLive = false;
   state.authError = new AuthRetryableFetchError('provider unavailable', 503);
   await expect(AppLayout({ children: <p>Protected</p> })).rejects.toThrow(
     'Authentication service is temporarily unavailable',
@@ -149,11 +153,27 @@ it('derives founder report navigation from current live designation rather than 
     'data-testid="founder-report-navigation">false',
   );
   state.founderLive = true;
+  state.organizations = [{ id: 'tenant', slug: 'beta', name: 'Selected organization' }];
   expect(renderToStaticMarkup(await AppLayout({ children: <p>Reader</p> }))).toContain(
     'data-testid="founder-report-navigation">true',
   );
   state.profileInternal = false;
   expect(renderToStaticMarkup(await AppLayout({ children: <p>Reader</p> }))).toContain(
-    'data-testid="founder-report-navigation">false',
+    'data-testid="founder-report-navigation">true',
   );
+});
+
+it('lists every RLS-visible organization with founder authority without requiring any membership row', async () => {
+  state.user = { id: 'global-founder' };
+  state.memberships = [];
+  state.founderLive = true;
+  state.organizations = [
+    { id: 'inactive', slug: 'inactive', name: 'Inactive organization' },
+    { id: 'foreign', slug: 'foreign', name: 'Organization without membership' },
+  ];
+  const view = renderToStaticMarkup(await AppLayout({ children: <p>Global</p> }));
+  expect(view).toContain('Inactive organization');
+  expect(view).toContain('Organization without membership');
+  expect(view.match(/&quot;role&quot;:&quot;founder&quot;/g)).toHaveLength(2);
+  expect(state.membershipReads).toBe(0);
 });

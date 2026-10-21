@@ -38,8 +38,14 @@ select local147_fixture.ok(local147_fixture.enqueue(322,3,jsonb_build_object('re
 select local147_fixture.ok(local147_fixture.enqueue(323,3,jsonb_build_object('reviewSnapshotSha256',repeat('f',64)))->>'error'='review_source_refused','wrong retained review snapshot hash refused');
 savepoint library_changed;
 insert into public.control_libraries(version,published_at,published_by,change_log,control_count,status) values('local147-other',now(),'Synthetic','Not pinned',0,'draft');
-update public.engagements set library_version='local147-other' where id=local147_fixture.id(41);
-select local147_fixture.ok(local147_fixture.enqueue(324)?'error','changed engagement library cannot bypass pinned questionnaire source');
+do $$begin
+ begin update public.engagements set library_version='local147-other' where id=local147_fixture.id(41);raise exception 'admitted catalogue changed';
+ exception when check_violation then
+  perform local147_fixture.ok(sqlerrm='engagement catalogue basis is immutable; create a new engagement','repin refused at immutable admission boundary');
+ end;
+end$$;
+select local147_fixture.ok((select library_version='0.1.1'from public.engagements where id=local147_fixture.id(41)),'refused repin preserves exact original catalogue');
+select local147_fixture.ok(local147_fixture.enqueue(301)=(select v from local147_saved where n=301),'recorded receipt survives refused repin');
 rollback to library_changed;
 do $$begin
  begin update public.controls set assessment_questions='[]' where library_version='0.1.1' and id='DPDPA-GOV-001';raise exception 'published questionnaire mutable';

@@ -1,3 +1,13 @@
+import {
+  PUBLIC_COVERAGE_PAGES,
+  publicControlAssessmentV2Schema,
+  publicCoverageClarificationRecordSchema,
+} from '../../packages/types/src/index.js';
+import {
+  buildClarifiedReport,
+  ClarifiedDocumentV8Schema,
+  verifyClarifiedSource,
+} from '../../packages/report-kit/src/clarified-report.js';
 /** Continuation of the existing normal-Auth/SPIRE assessment fixture. Only
  * engineering-owned loopback Object Lock storage; never cloud acceptance. */
 import assert from 'node:assert/strict';
@@ -219,8 +229,8 @@ export const publicReportBrowserHandoffSchema = z
     kind: z.literal('owned-reviewed-public-source-reports'),
     presentation: z
       .object({
-        sourceVersion: z.literal(6),
-        documentVersion: z.literal(7),
+        sourceVersion: z.literal(8),
+        documentVersion: z.literal(8),
         metrics: z.literal('withheld'),
         policySha256: z.literal(sha(canonicalJson(coverageFirstPolicy()))),
       })
@@ -266,6 +276,9 @@ export function reportAcceptanceCodeSha256(repositoryRoot = '.') {
       'infra/supabase/migrations/0142_public_control_asset_report_provenance.sql',
       'infra/supabase/migrations/0144_coverage_first_public_report_presentation.sql',
       'infra/supabase/migrations/0177_branded_report_presentation.sql',
+      'infra/supabase/migrations/0179_public_coverage_clarifications.sql',
+      'infra/supabase/migrations/0180_owner_clarified_reports.sql',
+      'packages/report-kit/src/clarified-report.ts',
       'packages/report-kit/src/branded-report.ts',
       'packages/report-kit/src/branded-assets-v1.ts',
       'packages/report-kit/src/branded-font-license-v1.ts',
@@ -470,7 +483,137 @@ export function verifyBrandedAcceptanceReport(
   return { ...verified, content };
 }
 
+/** Strict current source8/document8; old source6 verification remains frozen above. */
+export function verifyClarifiedAcceptanceReport(
+  input: Parameters<typeof verifyCoverageFirstAcceptanceReport>[0],
+  onPhase: (phase: BrandedAcceptancePhase) => void = () => {},
+) {
+  const source = sourceProofSchema.parse(input.source);
+  const scope = {
+    tenantId: input.tenantId,
+    requestId: input.requestId,
+    engagementId: source.engagementId,
+    assessmentRunId: source.runId,
+  };
+  onPhase('source-envelope');
+  const frozen = verifyClarifiedSource(input.sourceText, input.sourceSha256, scope);
+  assert.equal(frozen.envelope.report_kind, input.kind);
+  assert.equal(frozen.branded.version, 4);
+  assert.equal(sha(input.contentText), input.contentSha256);
+  const content = ClarifiedDocumentV8Schema.parse(
+    parseCoverageFirstJson(input.contentText, 4194304),
+  );
+  assert.equal(content.underlying_document_version, 5);
+  assert.deepEqual(
+    content,
+    buildClarifiedReport({
+      ...scope,
+      title: input.title,
+      generatedAt: content.generated_at,
+      sourceText: input.sourceText,
+      sourceSha256: input.sourceSha256,
+    }),
+  );
+  const inner = buildBrandedReport({
+    ...scope,
+    title: input.title,
+    generatedAt: content.generated_at,
+    sourceText: frozen.envelope.retained_source.text,
+    sourceSha256: frozen.envelope.retained_source.sha256,
+  });
+  const innerText = JSON.stringify(inner);
+  const verified = verifyBrandedAcceptanceReport(
+    {
+      ...input,
+      sourceText: frozen.envelope.retained_source.text,
+      sourceSha256: frozen.envelope.retained_source.sha256,
+      contentText: innerText,
+      contentSha256: sha(innerText),
+    },
+    onPhase,
+  );
+  return { ...verified, content };
+}
+
 type Request = (path: string, expected: number, options?: RequestInit) => Promise<Response>;
+/** Real authenticated owner/admin write in disposable acceptance only. No claim of observed evidence. */
+export async function ensureOwnerCoverageClarification(deps: {
+  request: Request;
+  headers: Record<string, string>;
+  tenantId: string;
+  engagementId: string;
+  checkId: string;
+}) {
+  const context = await deps.request(
+    `/v1/public-website-checks/${deps.checkId}/control-review?engagementId=${deps.engagementId}`,
+    200,
+    { headers: deps.headers },
+  );
+  const assessment = publicControlAssessmentV2Schema.parse((await context.json()).data.assessment);
+  const source = assessment.source;
+  assert.equal(source.tenantId, deps.tenantId);
+  assert.equal(source.engagementId, deps.engagementId);
+  assert.equal(source.checkId, deps.checkId);
+  const gaps = PUBLIC_COVERAGE_PAGES.map(
+    (page) =>
+      source.pages.find((item) => item.page === page) ?? {
+        page,
+        state: 'unexamined' as const,
+        truncated: false,
+      },
+  ).filter((page) => page.state !== 'examined' || page.truncated);
+  if (!gaps.length) return;
+  const query = new URLSearchParams({
+    engagementId: deps.engagementId,
+    checkId: deps.checkId,
+    payloadSha256: source.projectionSha256,
+  });
+  const current = await deps.request(`/v1/public-coverage-clarifications?${query}`, 200, {
+    headers: deps.headers,
+  });
+  const record = (await current.json()).data.record;
+  if (record) {
+    const saved = publicCoverageClarificationRecordSchema.parse(record);
+    assert.equal(saved.tenantId, deps.tenantId);
+    assert.equal(saved.checkId, deps.checkId);
+    assert.equal(saved.engagementId, deps.engagementId);
+    assert.equal(saved.payloadSha256, source.projectionSha256);
+    assert.equal(sha(saved.snapshotText), saved.snapshotSha256);
+    return;
+  }
+  const operationKey = randomUUID();
+  const body = {
+    version: 1,
+    operationKey,
+    engagementId: deps.engagementId,
+    checkId: deps.checkId,
+    payloadSha256: source.projectionSha256,
+    expectedPreviousRevisionId: null,
+    clarifications: gaps.map((page) => ({
+      page: page.page,
+      sourceState: page.state,
+      sourceTruncated: page.truncated,
+      reasonCategory: 'needs_investigation',
+      reason: `Synthetic owner requests follow-up examination of ${page.page}; retained public coverage is incomplete and no compliance conclusion is asserted.`,
+      proposedPublicUrl: null,
+    })),
+  };
+  const result = await deps.request('/v1/public-coverage-clarifications', 201, {
+    method: 'POST',
+    headers: {
+      ...deps.headers,
+      'content-type': 'application/json',
+      'idempotency-key': operationKey,
+    },
+    body: JSON.stringify(body),
+  });
+  const saved = publicCoverageClarificationRecordSchema.parse((await result.json()).data.record);
+  assert.equal(saved.requestText, canonicalJson(body));
+  assert.equal(sha(saved.snapshotText), saved.snapshotSha256);
+  assert.equal(saved.tenantId, deps.tenantId);
+  assert.equal(saved.payloadSha256, source.projectionSha256);
+}
+
 export async function verifyPublicControlReports(deps: {
   request: Request;
   db: SupabaseClient;
@@ -568,6 +711,22 @@ export async function verifyPublicControlReports(deps: {
   );
   assert(packet?.finalized_receipt);
   const resultDigest = digest.parse(packet.result_digest);
+  const review = check(
+    await deps.db
+      .from('public_control_review_sets')
+      .select('check_id')
+      .eq('tenant_id', deps.tenantId)
+      .eq('id', source.reviewId)
+      .single(),
+  );
+  deps.onPhase('owner-coverage-clarification');
+  await ensureOwnerCoverageClarification({
+    request: deps.request,
+    headers: deps.ownerHeaders,
+    tenantId: deps.tenantId,
+    engagementId: source.engagementId,
+    checkId: uuid.parse(review?.check_id),
+  });
   const vault = new EvidenceVault('ap-south-1', provider.endpoint, provider);
   try {
     for (const kind of ['board', 'auditor'] as const) {
@@ -633,7 +792,7 @@ export async function verifyPublicControlReports(deps: {
       );
       deps.onPhase(`${kind}-frozen-hash`);
       assert.equal(sha(frozen.source_text), frozen.source_sha256);
-      const { parsed, content, appendix } = verifyBrandedAcceptanceReport(
+      const { parsed, content, appendix } = verifyClarifiedAcceptanceReport(
         {
           kind,
           title: body.title,
@@ -800,8 +959,8 @@ export async function verifyPublicControlReports(deps: {
     version: 2,
     kind: 'owned-reviewed-public-source-reports',
     presentation: {
-      sourceVersion: 6,
-      documentVersion: 7,
+      sourceVersion: 8,
+      documentVersion: 8,
       metrics: 'withheld',
       policySha256: sha(canonicalJson(coverageFirstPolicy())),
     },

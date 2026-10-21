@@ -10,6 +10,8 @@ do $auth$declare prior text:=current_user;begin
   execute format('set local role %I',prior);
  end if;
 end $auth$;
+-- Restore the actual disposable fixture session, not an application writer.
+reset role;
 create function pg_temp.id(n int)returns uuid language sql immutable as $$select('17400000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 create function pg_temp.ok(v boolean,m text)returns void language plpgsql as $$begin if v is distinct from true then raise exception 'ASSERTION: %',m;end if;end$$;
 create function pg_temp.refused(q text,code text default'42501')returns void language plpgsql as $$begin begin execute q;exception when others then if sqlstate=code then return;end if;raise;end;raise exception 'Statement unexpectedly succeeded';end$$;

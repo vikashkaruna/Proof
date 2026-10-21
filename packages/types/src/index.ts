@@ -56,3 +56,6 @@ export * from './owned-deployment';
 export * from './standing-delegation';
 export * from './data-flow-declarations';
 export * from './scheduled-coverage';
+
+export * from './catalogue-engagement';
+export * from './public-coverage-clarifications';

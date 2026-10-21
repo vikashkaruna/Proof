@@ -1,3 +1,4 @@
+import { buildClarifiedReport } from '../../packages/report-kit/src/clarified-report.js';
 import {
   encodeBrandedSource,
   BRANDED_PRESENTATION_V1,
@@ -22,6 +23,7 @@ import {
   publicReportBrowserHandoffSchema,
   verifyCoverageFirstAcceptanceReport,
   verifyBrandedAcceptanceReport,
+  verifyClarifiedAcceptanceReport,
 } from './acceptance-public-control-reports.js';
 
 function fixture() {
@@ -164,8 +166,8 @@ test('browser handoff is strict, bounded and cannot carry authentication materia
   const value = {
     version: 2,
     presentation: {
-      sourceVersion: 6,
-      documentVersion: 7,
+      sourceVersion: 8,
+      documentVersion: 8,
       metrics: 'withheld',
       policySha256: sha(canonicalJson(coverageFirstPolicy())),
     },
@@ -456,3 +458,95 @@ for (const kind of ['board', 'auditor'] as const)
       }
     });
   }
+
+for (const kind of ['board', 'auditor'] as const) {
+  test(`current ${kind} acceptance freezes owner explanation in exact source8/document8`, () => {
+    const f = coverageFixture(kind, true);
+    const branded = encodeBrandedSource(
+      kind,
+      f.input.sourceText,
+      f.input.sourceSha256,
+      'Synthetic company',
+    );
+    const raw = JSON.parse(JSON.parse(f.input.sourceText).retained_source.text);
+    const capture = raw.human_control_review.capture;
+    const pages = JSON.parse(capture.payload_text).pages as Array<{
+      page: string;
+      state: string;
+      truncated: boolean;
+    }>;
+    const snapshot = {
+      version: 1,
+      disposition: 'owner_declarations_unverified',
+      tenantId: f.input.tenantId,
+      actorId: '10000000-0000-4000-8000-000000000001',
+      revisionId: randomUUID(),
+      previousRevisionId: null,
+      recordedAt: '2026-10-21T00:00:00Z',
+      request: {
+        version: 1,
+        operationKey: randomUUID(),
+        engagementId: f.input.source.engagementId,
+        checkId: capture.check_id,
+        payloadSha256: capture.payload_sha256,
+        expectedPreviousRevisionId: null,
+        clarifications: ['root', 'privacy', 'contact', 'terms', 'consent']
+          .map(
+            (page) =>
+              pages.find((item) => item.page === page) ?? {
+                page,
+                state: 'unexamined',
+                truncated: false,
+              },
+          )
+          .filter((page) => page.state !== 'examined' || page.truncated)
+          .map((page) => ({
+            page: page.page,
+            sourceState: page.state,
+            sourceTruncated: page.truncated,
+            reasonCategory: 'needs_investigation',
+            reason: 'Synthetic owner asks for follow-up; no compliance claim is asserted.',
+            proposedPublicUrl: null,
+          })),
+      },
+    };
+    const snapshotText = canonicalJson(snapshot);
+    const sourceText = canonicalJson({
+      schema_version: 8,
+      kind: 'clarified_report_source',
+      serialization: 'axiom-clarified-report-source-json-1',
+      report_kind: kind,
+      retained_source: branded,
+      owner_clarification: {
+        snapshot_text: snapshotText,
+        snapshot_sha256: sha(snapshotText),
+        receipt_id: '31',
+      },
+    });
+    const sourceSha256 = sha(sourceText);
+    const document = buildClarifiedReport({
+      requestId: f.input.requestId,
+      tenantId: f.input.tenantId,
+      engagementId: f.input.source.engagementId,
+      assessmentRunId: f.input.source.runId,
+      title: f.input.title,
+      generatedAt: f.document.generated_at,
+      sourceText,
+      sourceSha256,
+    });
+    const contentText = JSON.stringify(document);
+    const input = {
+      ...f.input,
+      sourceText,
+      sourceSha256,
+      contentText,
+      contentSha256: sha(contentText),
+    };
+    assert.equal(verifyClarifiedAcceptanceReport(input).content.schema_version, 8);
+    assert.throws(() =>
+      verifyClarifiedAcceptanceReport({ ...input, contentSha256: 'f'.repeat(64) }),
+    );
+    assert.throws(() => verifyClarifiedAcceptanceReport({ ...input, tenantId: randomUUID() }));
+    assert.throws(() => verifyBrandedAcceptanceReport(input));
+  });
+}

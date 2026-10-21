@@ -275,7 +275,7 @@ it('shows the founder workspace link only after current live designation while p
   for (const role of [UserRole.OWNER, UserRole.ADMIN, UserRole.REVIEWER, UserRole.VIEWER]) {
     state.role = role;
     state.internal = true;
-    state.live = true;
+    state.live = false;
     const view = renderToStaticMarkup(await ReportsPage());
     expect(view).not.toContain('href="/reports/founder-review"');
     expect(view).toContain('Loading recorded reports');
@@ -284,6 +284,13 @@ it('shows the founder workspace link only after current live designation while p
   state.internal = true;
   state.live = false;
   expect(renderToStaticMarkup(await ReportsPage())).not.toContain('href="/reports/founder-review"');
+  state.live = true;
+  expect(renderToStaticMarkup(await ReportsPage())).toContain('href="/reports/founder-review"');
+});
+
+it('offers founder review based on live platform designation despite lower explicit tenant role', async () => {
+  state.role = UserRole.VIEWER;
+  state.internal = false;
   state.live = true;
   expect(renderToStaticMarkup(await ReportsPage())).toContain('href="/reports/founder-review"');
 });

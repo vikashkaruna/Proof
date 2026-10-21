@@ -581,3 +581,27 @@ describe('board artifact provider boundary', () => {
     expect(await first).toMatchObject({ status: 'settled' });
   });
 });
+
+describe('global founder exact Board PDF access', () => {
+  it.each([null, 'viewer', 'owner'])(
+    'reads another creator approved PDF with membership %s',
+    async (role) => {
+      const { fixture, service, pdfBytes } = setup();
+      await service.build(tenant, actorId, reportId, operationKey);
+      fixture.rows('board_report_requests')[0]!.requested_by = actorId;
+      for (const version of fixture.rows('board_artifact_versions')) version.report_id = reportId;
+      const globalId = randomUUID();
+      fixture.rows('platform_founders').push({ user_id: globalId, revoked_at: null });
+      fixture.rows('users').push({ id: globalId, is_axiom_internal: true });
+      if (role) fixture.rows('tenant_users').push({ tenant_id: tenant, user_id: globalId, role });
+      expect((await service.pdf(tenant, globalId, reportId)).pdfBuffer).toEqual(pdfBytes);
+      expect(await service.status(tenant, globalId, reportId)).toMatchObject({
+        reportStatus: 'approved',
+      });
+      fixture.rows('platform_founders')[0]!.revoked_at = '2026-10-20T00:00:00Z';
+      await expect(service.pdf(tenant, globalId, reportId)).rejects.toMatchObject({
+        code: 'forbidden',
+      });
+    },
+  );
+});

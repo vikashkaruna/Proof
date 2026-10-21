@@ -48,15 +48,8 @@ create function pg_temp.jit(k text, lo int, hi int) returns int language sql imm
   as $$ select lo + (('x' || substr(md5(k), 1, 8))::bit(32)::bigint % (hi - lo + 1))::int $$;
 
 -- ── Control library ─────────────────────────────────────────────────
--- Assessment setup and evidence-pack options need exactly one current
--- library. Mirror `pnpm seed:controls`: if none is current, mark the newest
--- complete semver library current; never replace an existing choice.
-update public.control_libraries cl set is_current = true
- where not exists (select 1 from public.control_libraries where is_current)
-   and cl.version = (select l.version from public.control_libraries l
-                      where l.version ~ '^[0-9]+\.[0-9]+\.[0-9]+$' and l.status = 'published'
-                        and l.control_count = (select count(*) from public.controls c where c.library_version = l.version)
-                      order by l.published_at desc limit 1);
+-- Demo setup never publishes or selects a catalogue. Use the recorded founder
+-- approval/current-selection flow first; absence is a configuration refusal.
 
 -- ── People ──────────────────────────────────────────────────────────
 -- Every demo row names a real account so foreign keys and dual-control
@@ -151,9 +144,10 @@ on conflict (tenant_id, user_id) do nothing;
 create function pg_temp.seed_company(t uuid, c jsonb) returns void
 language plpgsql as $fn$
 declare
-  lib constant text := (select version from public.control_libraries
-                         where version ~ '^[0-9]+\.[0-9]+\.[0-9]+$'
-                         order by published_at desc limit 1);
+  lib constant text := (select l.version from public.control_libraries l
+                         join public.approved_catalogue_versions a on a.library_version=l.version
+                         where l.is_current and l.status='published'
+                           and (select count(*) from public.controls c where c.library_version=l.version)=a.control_count);
   k text := c->>'key';
   founder uuid := pg_temp.who('founder');
   owner uuid := pg_temp.who('owner');
@@ -181,7 +175,7 @@ declare
   receipt jsonb; ropa_id uuid;
 begin
   drafter := case when analyst <> owner then analyst else founder end;
-  if lib is null then raise exception 'no published control library to seed against'; end if;
+  if lib is null then raise exception 'no complete approved current catalogue to seed against'; end if;
   if exists (select 1 from public.engagements where tenant_id = t) then
     raise notice 'demo company % already has history; skipping core seed', k;
     return;

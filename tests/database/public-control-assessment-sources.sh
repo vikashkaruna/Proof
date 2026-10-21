@@ -103,23 +103,24 @@ select assessment_source_test.ok(assessment_source_test.enqueue(201)->>'error'='
 update public.tenant_users set role='founder' where tenant_id=assessment_source_test.id(31) and user_id=assessment_source_test.id(1);
 select assessment_source_test.ok(assessment_source_test.enqueue(203,5)->>'error'='forbidden','reviewer may review but cannot invoke existing runtime');
 select assessment_source_test.ok(assessment_source_test.enqueue(201,3)->>'error'='dispatch_conflict','different actor cannot recover original run');
--- Immutable historical source remains recoverable after head/estate change.
+-- Immutable historical source remains recoverable after a head change and refused estate mutation.
 create table assessment_source_test.second_review as select assessment_source_test.save(assessment_source_test.request(52,(select (value->>'id')::uuid from assessment_source_test.review)))->'data' as value;
 select assessment_source_test.ok(assessment_source_test.cancel_intent(221,review=>(select value from assessment_source_test.second_review))->>'error'='dispatch_conflict','changed original reference cannot reuse a cancelled key');
 select assessment_source_test.ok(assessment_source_test.enqueue(204)->>'error'='review_source_changed','superseded review cannot start new run');
 select assessment_source_test.ok(assessment_source_test.enqueue(201)?'run_id','superseded source remains exact-recoverable');
 select assessment_source_test.ok(assessment_source_test.enqueue(201,1,(select value from assessment_source_test.second_review))->>'error'='dispatch_conflict','same worker answers cannot substitute another review');
 insert into public.estates(id,tenant_id,name,slug) values(assessment_source_test.id(90),assessment_source_test.id(31),'Changed estate','assessment-source-changed');
-update public.engagements set estate_id=assessment_source_test.id(90) where id=assessment_source_test.id(41);
+do $$begin begin update public.engagements set estate_id=assessment_source_test.id(90) where id=assessment_source_test.id(41);raise exception 'admitted estate changed';exception when check_violation then null;end;end$$;
+select assessment_source_test.ok((select estate_id is null from public.engagements where id=assessment_source_test.id(41)),'refused estate reassignment preserves admitted scope');
 select assessment_source_test.ok(assessment_source_test.enqueue(201)?'run_id','historical estate is frozen for recovery');
-select assessment_source_test.ok(assessment_source_test.enqueue(205,1,(select value from assessment_source_test.second_review))->>'error'='review_source_changed','new dispatch refuses changed estate');
-select assessment_source_test.ok(assessment_source_test.cancel_intent(224)->>'state'='cancelled','unrecorded intent can be abandoned after head and estate change');
+select assessment_source_test.ok(assessment_source_test.enqueue(205)->>'error'='review_source_changed','new dispatch still refuses independently superseded review');
+select assessment_source_test.ok(assessment_source_test.cancel_intent(224)->>'state'='cancelled','unrecorded intent can be abandoned after head change and refused estate mutation');
 -- Existing generic paths cannot drop the attachment even with the exact input hash.
 set role human_action_writer;
 select assessment_source_test.ok(public.recover_reviewed_assessment_dispatch(assessment_source_test.id(201),assessment_source_test.id(31),assessment_source_test.id(1),assessment_source_test.id(81),null,assessment_source_test.id(41),assessment_source_test.id(201),repeat('a',64),'0.1.1',repeat('a',64))->>'error'='dispatch_conflict','generic recovery cannot drop review reference');
 select assessment_source_test.ok(public.cancel_unclaimed_assessment_request(assessment_source_test.id(31),assessment_source_test.id(1),assessment_source_test.id(201),assessment_source_test.id(41),'0.1.1',repeat('a',64))->>'error'='cancellation_conflict','generic cancellation cannot drop review reference');
 reset role;
--- A source-bound unclaimed cancellation survives supersession and estate change.
+-- A source-bound unclaimed cancellation survives supersession and refused estate mutation.
 create function assessment_source_test.cancel_run() returns jsonb language plpgsql as $$
 declare r jsonb;s jsonb;v jsonb:=(select value from assessment_source_test.review);begin
  s:=assessment_source_test.source(201);set local role human_action_writer;
@@ -167,14 +168,22 @@ sql -c "update public.tenant_users set role='founder' where tenant_id=assessment
 race 'update public.users set is_axiom_internal=false where id=assessment_source_test.id(1)' 'select assessment_source_test.enqueue(213)'
 grep -q forbidden "$result_dir/second"
 sql -c 'update public.users set is_axiom_internal=true where id=assessment_source_test.id(1)'
-race 'update public.engagements set estate_id=assessment_source_test.id(90) where id=assessment_source_test.id(41)' 'select assessment_source_test.enqueue(214)'
-grep -q review_source_changed "$result_dir/second"
+sql <<'SQL'
+create function assessment_source_test.refuse_estate()returns void language plpgsql as $$begin
+ perform id from public.engagements where id=assessment_source_test.id(41)for update;
+ begin update public.engagements set estate_id=assessment_source_test.id(90)where id=assessment_source_test.id(41);raise exception 'admitted estate changed';exception when check_violation then null;end;
+ perform assessment_source_test.ok((select estate_id is null from public.engagements where id=assessment_source_test.id(41)),'refused racing estate mutation preserves original scope');
+end$$;
+SQL
+race 'select assessment_source_test.refuse_estate()' 'select assessment_source_test.enqueue(214)'
+grep -q run_id "$result_dir/second"
+[ "$(sql -c 'select count(*)from public.public_control_assessment_sources where job_id=assessment_source_test.id(214)and estate_id is null')" = 1 ]
 sql -c 'update public.engagements set estate_id=null where id=assessment_source_test.id(41)'
 prior=$(sql -c "select value->>'id' from assessment_source_test.review")
 race "select assessment_source_test.save(assessment_source_test.request(53,'$prior'))" 'select assessment_source_test.enqueue(215)'
 grep -q review_source_changed "$result_dir/second"
-[ "$(sql -c 'select count(*) from public.assessment_dispatch_jobs where id in (assessment_source_test.id(212),assessment_source_test.id(213),assessment_source_test.id(214),assessment_source_test.id(215))')" = 0 ]
-echo 'Public control assessment races: one stable-key dispatch; late role/internal/estate and head changes block new dispatch without partial writes.'
+[ "$(sql -c 'select count(*) from public.assessment_dispatch_jobs where id in (assessment_source_test.id(212),assessment_source_test.id(213),assessment_source_test.id(215))')" = 0 ]
+echo 'Public control assessment races: one stable-key dispatch; late role/internal/head changes block new dispatch; refused estate mutation preserves existing receipts and admits only unchanged in-scope new work.'
 
 # Restore the current head used by both competing exact intents.
 sql -c "update assessment_source_test.review set value=(select to_jsonb(r)||jsonb_build_object('receipt_id',r.receipt_id::text) from public.public_control_review_sets r where tenant_id=assessment_source_test.id(31) and not exists(select 1 from public.public_control_review_sets n where n.previous_review_id=r.id))"

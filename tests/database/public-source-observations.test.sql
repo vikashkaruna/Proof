@@ -95,7 +95,10 @@ select pg_temp.ok(pg_temp.runtime(pg_temp.run())->>'error'='forbidden','revoked 
 update public.tenant_users set role='owner' where tenant_id=pg_temp.id(11) and user_id=pg_temp.id(1);
 update public.engagements set status='cancelled' where id=pg_temp.id(31);
 select pg_temp.ok(pg_temp.runtime(pg_temp.run())->>'error'='context_refused','cancelled context before transport');
-update public.engagements set status='intake',estate_id=pg_temp.id(21) where id=pg_temp.id(31);
+-- Restore the synthetic cancellation probe before first estate attachment;
+-- cancelled engagements cannot change their admitted scope.
+update public.engagements set status='intake' where id=pg_temp.id(31);
+update public.engagements set estate_id=pg_temp.id(21) where id=pg_temp.id(31);
 select pg_temp.ok(not pg_temp.runtime(pg_temp.run())?'error','explicit current estate validated');
 select pg_temp.ok((select estate_id is null from public.public_source_bindings where id=pg_temp.binding()),'captured NULL estate never rewritten');
 select pg_temp.ok(pg_temp.claim(pg_temp.run(),jsonb_build_object('dispatch',pg_temp.id(999)))->>'error'='dispatch_refused','wrong claim dispatch refused');

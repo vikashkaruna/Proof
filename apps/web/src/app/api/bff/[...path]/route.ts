@@ -1,3 +1,4 @@
+import { readOrganizationContexts } from '@/lib/organization-contexts';
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseServerClient } from '@axiom/supabase';
 import {
@@ -107,11 +108,7 @@ async function forward(request: NextRequest, context: RouteContext) {
           { status: 401 },
         );
       }
-      const { data, error } = await supabase
-        .from('tenant_users')
-        .select('tenant_id, tenants:tenant_id(slug)')
-        .eq('user_id', user.id);
-      if (error) throw new Error('membership_lookup_failed');
+      const { rows: data } = await readOrganizationContexts(supabase, user.id);
       const selected = selectTenantMembership(
         (data ?? []) as unknown as TenantMembership[],
         request.cookies.get('axiom_active_tenant')?.value,
@@ -141,7 +138,7 @@ async function forward(request: NextRequest, context: RouteContext) {
     }
   }
   // Explicit headers are intentional selections. The BFF independently checks
-  // current membership and MFA for them, as it does for resolved cookies.
+  // current founder-or-membership authority and MFA, as for resolved cookies.
   // The browser is the client here, and a client is entitled to generate its
   // own idempotency key — but it must be stable across a retry or it buys
   // nothing. `Date.now()` + `Math.random()` is unique per attempt, so a

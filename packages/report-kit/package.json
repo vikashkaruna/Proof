@@ -30,7 +30,8 @@
     "./test-fixtures/board-v2": "./src/board-v2.fixture.ts",
     "./full-closure": "./src/full-closure.ts",
     "./test-fixtures/full-closure": "./src/full-closure.test-helper.ts",
-    "./branded-report": "./src/branded-report.ts"
+    "./branded-report": "./src/branded-report.ts",
+    "./clarified-report": "./src/clarified-report.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

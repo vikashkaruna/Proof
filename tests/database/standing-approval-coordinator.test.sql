@@ -230,7 +230,7 @@ update standing173_saved set name='archived_'||name where name in('request','app
 insert into standing173_saved select 'request',jsonb_build_object('text',controller_security.canonical_questionnaire_json(jsonb_build_object('phase','request','request',
  (v->>'text')::jsonb->'request'||jsonb_build_object('operationKey',pg_temp.pg_id(912),'previousRevisionId',pg_temp.pg_id(902),
  'source',controller_security.standing173_source(pg_temp.pg_id(1),(select(receipt->>'planId')::uuid from human167_saved where n=2),((v->>'text')::jsonb#>>'{request,source,policyId}')::uuid),
- 'expiresAt',to_char((clock_timestamp()+interval '4 seconds')at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')))))from standing173_saved where name='archived_request';
+ 'expiresAt',to_char((clock_timestamp()+interval '30 seconds')at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')))))from standing173_saved where name='archived_request';
 insert into standing173_saved values('approve',jsonb_build_object('text',pg_temp.standing173_intent('approve',913)));
 select pg_temp.standing173_record('request',1);
 select pg_temp.standing173_record('approve',6);
@@ -243,8 +243,9 @@ insert into standing173_saved select 'orphanClaim',public.claim_standing_policy_
 select pg_temp.ok(public.reserve_standing_policy_work()=(select v from standing173_saved where name='orphanWork'),'pending handoff blocks another reservation');
 select pg_temp.ok(public.claim_standing_policy_work(pg_temp.pg_id(1),(select(v->>'workId')::uuid from standing173_saved where name='orphanClaim'))->>'state'='unconfirmed','restart reads original claimed handoff without relaunch');
 reset role;
--- Original immutable deadline is allowed to expire naturally, never rewritten.
-select pg_sleep(4.1);
+-- Allow preparation under CPU contention, then wait for the actual immutable
+-- deadline rather than assuming how quickly the preceding SQL will execute.
+select pg_sleep(greatest(0,extract(epoch from (select expires_at from controller_security.standing173_requests where id=pg_temp.pg_id(912))-clock_timestamp()))+0.1);
 set local role agent_ledger_writer;
 select pg_temp.ok(public.read_standing_policy_work(pg_temp.pg_id(1),(select(v->>'workId')::uuid from standing173_saved where name='orphanClaim'))->>'state'='unconfirmed','expired claimed handoff remains uncertain');
 select pg_temp.ok(public.reserve_standing_policy_work()='{"work":[]}'::jsonb,'uncertain revision cannot mint replacement work');

@@ -1,3 +1,4 @@
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
 /**
  * Approval Export Service.
  * Implements querying, formatting, PDF/HTML/JSON/CSV generation,
@@ -67,6 +68,11 @@ export class ApprovalExportService {
     capability: Capability,
     signal?: AbortSignal,
   ) {
+    if (await isLivePlatformFounder(this.db, actorId, signal)) {
+      if (!authorize(capability, { role: 'founder' as UserRole }).allowed)
+        throw new EvidenceError('export_forbidden', 403);
+      return;
+    }
     const query = this.db
       .from('tenant_users')
       .select('role')

@@ -28,7 +28,7 @@ const human = vi.fn(),
 beforeEach(() => {
   vi.clearAllMocks();
   human.mockImplementation((name: string) => {
-    if (!['request_branded_board_report', 'request_branded_auditor_report'].includes(name))
+    if (!['request_clarified_board_report', 'request_clarified_auditor_report'].includes(name))
       throw Error('Human request writer cannot generate or retain proof');
     return abortableResult(Promise.resolve({ data: { requestId }, error: null }));
   });
@@ -67,7 +67,7 @@ for (const kind of ['board', 'auditor'] as const) {
     );
     expect(response.status).toBe(201);
     expect(human).toHaveBeenCalledWith(
-      `request_branded_${kind}_report`,
+      `request_clarified_${kind}_report`,
       expect.objectContaining({ p_actor_id: actor, p_tenant_id: tenant }),
     );
     expect(statutory).not.toHaveBeenCalled();

@@ -4,6 +4,7 @@ import { loadEnv, isAuthBypassEnabled } from '@axiom/config';
 import { logger } from '../lib/logger.js';
 import type { Variables } from '../types.js';
 import type { UserRole } from '@axiom/types';
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
 
 const env = loadEnv();
 
@@ -37,12 +38,13 @@ const SEEDED_E2E_TENANTS = new Set([
 ]);
 
 /**
- * Tenant resolver. Reads X-Tenant-Id, verifies the caller is a member of that
- * tenant, and attaches the membership role to the request context.
+ * Resolve ordinary tenant membership or protected global founder authority.
+ * A live platform founder receives the effective founder role for every
+ * existing organization, including one with a lower explicit membership.
  *
  * The membership lookup runs with the user's own JWT, so RLS does the work and
- * a forged header cannot outrun the database policy. NFR-2 ("tenant isolation
- * — absolute") depends on this being unconditional.
+ * a forged header cannot outrun the database policy. Ordinary users retain
+ * unconditional membership checks; a browser role claim grants nothing.
  */
 export const tenantResolver = createMiddleware<{ Variables: Variables }>(async (c, next) => {
   const path = c.req.path;
@@ -86,6 +88,20 @@ export const tenantResolver = createMiddleware<{ Variables: Variables }>(async (
     auth: { persistSession: false },
     global: { headers: { Authorization: `Bearer ${token}` } },
   });
+
+  try {
+    if (await isLivePlatformFounder(supabase, user.id)) {
+      const tenant = await supabase.from('tenants').select('id').eq('id', tenantId).maybeSingle();
+      if (tenant.error) return c.json({ error: { code: 'tenant_authority_unavailable' } }, 503);
+      if (!tenant.data) return c.json({ error: { code: 'tenant_forbidden' } }, 403);
+      c.set('tenantId', tenantId);
+      c.set('role', 'founder' as UserRole);
+      c.set('approvalScopes', []);
+      return next();
+    }
+  } catch {
+    return c.json({ error: { code: 'tenant_authority_unavailable' } }, 503);
+  }
 
   const { data: membership, error } = await supabase
     .from('tenant_users')

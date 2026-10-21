@@ -144,7 +144,7 @@ export function CatalogueVersionsClient({
         .parse(await send('approve', intent, { challengeId: challenge }));
       setMessage(
         'transition' in intent
-          ? `Version ${result.data.libraryVersion} is now current for new assessments. Audit receipt ${result.data.receiptId}. Existing assessments retain their recorded version.`
+          ? `Version ${result.data.libraryVersion} is now current for first assessments in unaudited organizations. Audit receipt ${result.data.receiptId}. Existing assessments retain their recorded version; audited organizations require an approved re-audit before moving to a revised basis.`
           : `Version ${result.data.libraryVersion} approved. Audit receipt ${result.data.receiptId}. The current version has not been changed.`,
       );
       setIntent(null);
@@ -278,7 +278,7 @@ export function CatalogueVersionsClient({
           </h2>
           <p className="text-sm text-slate-600">
             {selected.approved
-              ? 'This changes the default catalogue for new assessments. Existing assessments keep their recorded version. Select the previous approved version through this same workflow to change the default back.'
+              ? 'This changes the default catalogue for first assessments in unaudited organizations. Existing assessments keep their recorded version. Already-audited organizations need an owner-requested, founder-approved re-audit. Select the previous approved version through this same workflow to change the default back.'
               : 'This global approval authorizes this exact catalogue and mapping. It does not change the current version, revise existing assessments, or adopt sector mappings for any organisation.'}
           </p>
           {selected.approved && (
