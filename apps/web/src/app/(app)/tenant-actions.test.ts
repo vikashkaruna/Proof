@@ -16,6 +16,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const state = vi.hoisted(() => ({
   user: { id: 'user-a' } as { id: string } | null,
   memberships: [] as Array<{ tenant_id: string; tenants: { slug: string } }>,
+  founderLive: false,
+  organizations: [] as Array<{ id: string; slug: string; name: string }>,
   membershipError: null as { message: string } | null,
   cookiesSet: [] as Array<{ name: string; value: string; options: Record<string, unknown> }>,
   revalidated: [] as string[],
@@ -36,8 +38,11 @@ vi.mock('next/cache', () => ({
 vi.mock('@axiom/supabase', () => ({
   createSupabaseServerClient: async () => ({
     auth: { getUser: async () => ({ data: { user: state.user } }) },
+    rpc: () => ({ abortSignal: async () => ({ data: state.founderLive, error: null }) }),
     from: () => ({
       select: () => ({
+        then: (resolve: (v: unknown) => unknown) =>
+          Promise.resolve(resolve({ data: state.organizations, error: state.membershipError })),
         eq: async () => ({ data: state.memberships, error: state.membershipError }),
       }),
     }),
@@ -53,6 +58,8 @@ beforeEach(() => {
     { tenant_id: 'tenant-c', tenants: { slug: 'gamma' } },
   ];
   state.membershipError = null;
+  state.founderLive = false;
+  state.organizations = [];
   state.cookiesSet = [];
   state.revalidated = [];
 });
@@ -99,4 +106,15 @@ describe('switchTenantAction', () => {
     // the other, which is the worst failure mode this switcher has.
     expect(state.revalidated).toContain('/');
   });
+});
+
+it('switches a live global founder to an existing nonmember organization and refuses it immediately after revocation', async () => {
+  state.founderLive = true;
+  state.memberships = [];
+  state.organizations = [{ id: 'foreign', slug: 'foreign', name: 'Foreign organization' }];
+  expect(await switchTenantAction('foreign')).toEqual({ ok: true, slug: 'foreign' });
+  state.cookiesSet = [];
+  state.founderLive = false;
+  expect(await switchTenantAction('foreign')).toEqual({ ok: false, reason: 'not_a_member' });
+  expect(state.cookiesSet).toHaveLength(0);
 });

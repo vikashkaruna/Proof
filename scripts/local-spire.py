@@ -27,16 +27,21 @@ Usage:
   python3 scripts/local-spire.py status
   python3 scripts/local-spire.py down      # stop only; volumes are kept
   python3 scripts/local-spire.py reattest
+  python3 scripts/local-spire.py reattest --expired-agent  # explicit stopped/server-only recovery
   python3 scripts/local-spire.py reattest --resume /protected/recovery/intent.json
 """
 
 from __future__ import annotations
 
+import base64
+import fcntl
 import hashlib
+import io
 import json
 import os
 import re
 import secrets
+import ssl
 import stat
 import subprocess  # nosec B404 - fixed docker/curl argv lists, no shell
 import sys
@@ -229,7 +234,7 @@ COPY --chmod=0755 spire-server spire-agent /usr/local/bin/
 COPY --chmod=0644 server.conf agent.conf /etc/spire/
 COPY --chmod=0644 spire_health.py spire_recovery.py /usr/local/lib/axiom/
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/axiom-spire-entrypoint
-RUN chmod 0755 /usr/local/lib/axiom
+RUN chmod 0755 /usr/local/lib/axiom /etc/spire
 USER 0
 ENTRYPOINT ["/usr/local/bin/axiom-spire-entrypoint"]
 """)
@@ -299,16 +304,18 @@ def up(image: str = IMAGE) -> None:
     raise RuntimeError("SPIRE agent did not become healthy")
 
 
-def node_id() -> str:
-    return run(["docker", "exec", NAME, "cat", "/var/lib/spire/node-id"]).stdout.strip()
+def node_id(target: str | None = None) -> str:
+    target = NAME if target is None else target
+    return run(["docker", "exec", target, "cat", "/var/lib/spire/node-id"]).stdout.strip()
 
 
-def entries() -> list[dict]:
+def entries(target: str | None = None) -> list[dict]:
+    target = NAME if target is None else target
     shown = run(
         [
             "docker",
             "exec",
-            NAME,
+            target,
             "spire-server",
             "entry",
             "show",
@@ -518,64 +525,296 @@ def container_meta(name: str) -> dict | None:
     return meta
 
 
-def reattest(resume: Path | None = None) -> None:
-    """Explicit recovery with an immutable grant snapshot and protected resume journal.
+def grants_sha256(current: list[dict]) -> str:
+    """Parent node may rotate; every other existing registration byte stays bound."""
+    rows = sorted(({key: value for key, value in item.items() if key != "parent_id"}
+                   for item in current), key=lambda item: item["id"])
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
-    Resume never issues another token. Failed/uncertain token generation needs
-    operator review; expired unconsumed tokens are refused without resetting state.
-    """
+
+def reviewed_roles(old: str, current: list[dict]) -> dict:
+    roles = dict(LEGACY_ROLES)
+    for name, (_uid, sid) in ROLES.items():
+        if name not in LEGACY_ROLES and any(
+            item.get("parent_id", {}).get("path") == old.split(TRUST_DOMAIN, 1)[1]
+            and item.get("spiffe_id", {}).get("path") == sid.split(TRUST_DOMAIN, 1)[1]
+            for item in current
+        ):
+            roles[name] = ROLES[name]
+    recovery_entries(old, current, roles)
+    return roles
+
+
+def public_node_certificate(target: str) -> tuple[str, dict]:
+    try:
+        return _public_node_certificate(target)
+    except Exception:  # noqa: BLE001 - sanitize bounded public-cache parsing; never expose retained metadata
+        raise RuntimeError("Cached public node certificate refused") from None
+
+
+def _public_node_certificate(target: str) -> tuple[str, dict]:
+    """Decode only the cached public certificate, never agent key material."""
+    value = subprocess.run(
+        ["docker", "cp", target + ":/var/lib/spire/agent/agent-data.json", "-"],
+        capture_output=True, timeout=30, check=True,
+    )  # nosec B603 B607 - fixed Docker public-certificate path, no shell
+    if len(value.stdout) > 262144:
+        raise RuntimeError("Cached public certificate oversized")
+    with tarfile.open(fileobj=io.BytesIO(value.stdout), mode="r:*") as archive:
+        members = archive.getmembers()
+        if len(members) != 1 or not members[0].isfile() or not 0 < members[0].size <= 131072:
+            raise RuntimeError("Cached public certificate refused")
+        stream = archive.extractfile(members[0])
+        if stream is None:
+            raise RuntimeError("Cached public certificate unavailable")
+        cached = json.loads(stream.read(131073))
+    chain = cached.get("svid") if isinstance(cached, dict) else None
+    if not isinstance(chain, list) or not 1 <= len(chain) <= 8 or not all(
+        isinstance(item, str) and 0 < len(item) <= 32768 for item in chain
+    ):
+        raise RuntimeError("Cached public certificate chain refused")
+    public_pem = base64.b64decode(chain[0], validate=True).decode("ascii")
+    der = ssl.PEM_cert_to_DER_cert(public_pem)
+    if not 0 < len(der) <= 24576:
+        raise RuntimeError("Cached public leaf certificate oversized")
+    with tempfile.TemporaryDirectory(prefix="axiom-spire-public-cert-") as directory:
+        pem = Path(directory) / "certificate.pem"
+        pem.write_text(ssl.DER_cert_to_PEM_cert(der))
+        pem.chmod(0o600)
+        # CPython's OpenSSL-backed decoder is pinned by the reviewed Python tool.
+        decoded = ssl._ssl._test_decode_cert(str(pem))
+    return hashlib.sha256(der).hexdigest(), decoded
+
+
+def expired_node_proof(meta: dict) -> dict:
+    if not re.fullmatch(r"[a-f0-9]{64}", meta.get("Id", "")) or not re.fullmatch(
+        r"sha256:[a-f0-9]{64}", meta.get("Image", "")
+    ):
+        raise RuntimeError("Pinned original SPIRE identity required")
+    mounts = meta.get("Mounts", [])
+    expected = {(name, target) for name, target in VOLUMES.items()}
+    actual = {(m.get("Name"), m.get("Destination")) for m in mounts}
+    if actual != expected or len(mounts) != len(expected) or any(
+        m.get("Type") != "volume" or m.get("RW") is not True for m in mounts
+    ):
+        raise RuntimeError("Exact retained SPIRE volumes required")
+    if run(["docker", "exec", NAME, "spire-agent", "healthcheck", "-socketPath",
+            "/run/workload/api.sock"], check=False).returncode == 0:
+        raise RuntimeError("Healthy agent must not be re-attested")
+    # docker cp can read a stopped/restarting container without a timing race.
+    # node-id is read separately below using a public-file reader; never decode tar as text.
+    old = read_node_id_from_container(NAME)
+    sha, cert = public_node_certificate(NAME)
+    uris = [value for kind, value in cert.get("subjectAltName", ()) if kind == "URI"]
+    if uris != [old] or not re.fullmatch(
+        re.escape(f"spiffe://{TRUST_DOMAIN}/spire/agent/join_token/") + r"[A-Za-z0-9_-]+", old
+    ):
+        raise RuntimeError("Cached certificate node binding refused")
+    expiry = int(ssl.cert_time_to_seconds(cert["notAfter"]))
+    if expiry > time.time():
+        raise RuntimeError("Cached node certificate is not expired")
+    return {"oldNodeId": old, "certificateSha256": sha, "certificateExpiredAt": expiry,
+            "originalImage": meta["Image"]}
+
+
+def read_node_id_from_container(target: str) -> str:
+    try:
+        return _read_node_id_from_container(target)
+    except Exception:  # noqa: BLE001 - sanitize bounded public-cache parsing; never expose retained metadata
+        raise RuntimeError("Retained node metadata refused") from None
+
+
+def _read_node_id_from_container(target: str) -> str:
+    result = subprocess.run(["docker", "cp", target + ":/var/lib/spire/node-id", "-"],
+                            capture_output=True, timeout=30, check=True)  # nosec B603 B607
+    if len(result.stdout) > 16384:
+        raise RuntimeError("Node metadata oversized")
+    with tarfile.open(fileobj=io.BytesIO(result.stdout), mode="r:*") as archive:
+        members = archive.getmembers()
+        if len(members) != 1 or not members[0].isfile() or not 1 <= members[0].size <= 2048:
+            raise RuntimeError("Node metadata refused")
+        stream = archive.extractfile(members[0])
+        if stream is None:
+            raise RuntimeError("Node metadata unavailable")
+        return stream.read(2049).decode().strip()
+
+
+def offline_original(intent: dict) -> dict:
+    meta = container_meta(NAME)
+    if meta is None or meta["Id"] != intent["oldContainerId"] or meta.get("Image") != intent["originalImage"]:
+        raise RuntimeError("Original offline recovery identity changed")
+    expected = {(name, target) for name, target in VOLUMES.items()}
+    if {(m.get("Name"), m.get("Destination")) for m in meta.get("Mounts", [])} != expected:
+        raise RuntimeError("Original offline recovery volumes changed")
+    return meta
+
+
+def offline_helper_meta(intent: dict, allow_missing: bool = False) -> dict | None:
+    helper = intent["offlineServer"]
+    target = helper.get("id") or helper["name"]
+    result = run(["docker", "inspect", target], check=False)
+    if result.returncode:
+        named = run(["docker", "inspect", helper["name"]], check=False)
+        if named.returncode and allow_missing:
+            return None
+        raise RuntimeError("Owned recovery server identity unavailable")
+    values = json.loads(result.stdout)
+    if len(values) != 1:
+        raise RuntimeError("Owned recovery server metadata refused")
+    meta = values[0]
+    if (meta.get("Name") != "/" + helper["name"] or meta.get("Image") != intent["recoveryImage"]
+        or (helper.get("id") is not None and meta.get("Id") != helper["id"])
+        or meta.get("Config", {}).get("Labels", {}).get("axiom.recovery.owner") != helper["nonce"]
+        or meta.get("Config", {}).get("Labels", {}).get("axiom.purpose") != "local-spire-recovery-server"
+        or meta.get("Config", {}).get("Entrypoint") != ["spire-server"]
+        or meta.get("Config", {}).get("Cmd") != ["run", "-config", "/etc/spire/server.conf"]
+        or meta.get("HostConfig", {}).get("NetworkMode") != "none"
+        or meta.get("HostConfig", {}).get("PortBindings")
+        or meta.get("HostConfig", {}).get("Binds")
+        or meta.get("HostConfig", {}).get("Privileged") is not False
+        or meta.get("HostConfig", {}).get("ReadonlyRootfs") is not True
+        or meta.get("HostConfig", {}).get("CapDrop") != ["ALL"]
+        or meta.get("HostConfig", {}).get("PidMode") not in ("", None)
+        or meta.get("HostConfig", {}).get("RestartPolicy", {}).get("Name") != "no"
+        or meta.get("HostConfig", {}).get("SecurityOpt") != ["no-new-privileges:true"]
+        or meta.get("HostConfig", {}).get("Tmpfs") != {"/run/spire-server": "rw,nosuid,noexec,size=16m,mode=0700"}
+        or meta.get("Mounts") is None
+        or len(meta["Mounts"]) != 1
+        or meta["Mounts"][0].get("Type") != "volume"
+        or meta["Mounts"][0].get("Name") != next(name for name, path in VOLUMES.items() if path == "/var/lib/spire")
+        or meta["Mounts"][0].get("Destination") != "/var/lib/spire"
+        or meta["Mounts"][0].get("RW") is not True
+    ):
+        raise RuntimeError("Foreign recovery server refused")
+    return meta
+
+
+def offline_prepare(record: Path, intent: dict) -> None:
+    """Explicit server-only preparation. No agent or workload socket is exposed."""
+    def checkpoint(phase: str, **values) -> None:
+        intent.setdefault("history", []).append({"phase": phase, "at": int(time.time())})
+        intent.update(phase=phase, **values)
+        save_intent(record, intent)
+    if intent["phase"] == "offline_prepared":
+        # The reviewed recovery build fixes directory traversal permissions
+        # without granting capabilities to bypass an immutable image defect.
+        if "approvedRecoveryImage" not in intent:
+            build(force=True)
+        selected_image = intent.get("approvedRecoveryImage", IMAGE)
+        image = run(["docker", "image", "inspect", selected_image, "--format", "{{.Id}}"]).stdout.strip()
+        if "approvedRecoveryImage" in intent and image != intent["approvedRecoveryImage"]:
+            raise RuntimeError("Approved recovery image changed")
+        if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
+            raise RuntimeError("Reviewed recovery image unavailable")
+        checkpoint("offline_image_ready", recoveryImage=image)
+    if intent["phase"] == "offline_image_ready":
+        original = offline_original(intent)
+        if original["State"]["Running"]:
+            if run(["docker", "exec", NAME, "spire-agent", "healthcheck", "-socketPath",
+                    "/run/workload/api.sock"], check=False).returncode == 0:
+                raise RuntimeError("Agent recovered; offline re-attestation refused")
+            run(["docker", "stop", intent["oldContainerId"]])
+        original = offline_original(intent)
+        if original["State"]["Running"]:
+            raise RuntimeError("Original SPIRE must be stopped")
+        sha, _cert = public_node_certificate(NAME)
+        if sha != intent["certificateSha256"] or read_node_id_from_container(NAME) != intent["oldNodeId"]:
+            raise RuntimeError("Expired node proof changed before stopping")
+        checkpoint("offline_helper_creating")
+        helper = intent["offlineServer"]
+        created = run(["docker", "create", "--name", helper["name"], "--network", "none",
+            "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+            "--memory", "512m", "--pids-limit", "128", "--tmpfs", "/run/spire-server:rw,nosuid,noexec,size=16m,mode=0700", "--label", "axiom.purpose=local-spire-recovery-server",
+            "--label", "axiom.recovery.owner=" + helper["nonce"], "--mount",
+            "type=volume,src=" + next(name for name, path in VOLUMES.items() if path == "/var/lib/spire") + ",dst=/var/lib/spire", "--entrypoint", "spire-server",
+            intent["recoveryImage"], "run", "-config", "/etc/spire/server.conf"])
+        cid = created.stdout.strip()
+        if not re.fullmatch(r"[a-f0-9]{64}", cid):
+            raise RuntimeError("Recovery server creation outcome unknown")
+        helper["id"] = cid
+        checkpoint("offline_helper_created")
+    if intent["phase"] == "offline_helper_creating":
+        # Only the unpredictable, journalled ownership nonce can reconcile an
+        # uncertain create. A colliding foreign name is never adopted or removed.
+        meta = offline_helper_meta(intent)
+        intent["offlineServer"]["id"] = meta["Id"]
+        checkpoint("offline_helper_created")
+    if intent["phase"] == "offline_helper_created":
+        if offline_original(intent)["State"]["Running"]:
+            raise RuntimeError("Original must remain stopped beside recovery server")
+        meta = offline_helper_meta(intent)
+        if not meta["State"]["Running"]:
+            run(["docker", "start", meta["Id"]])
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            meta = offline_helper_meta(intent)
+            if not meta["State"]["Running"]:
+                raise RuntimeError("Owned recovery server exited before readiness")
+            if run(["docker", "exec", meta["Id"], "spire-server", "healthcheck",
+                    "-socketPath", SERVER_SOCKET], check=False).returncode == 0:
+                break
+            time.sleep(1)
+        else:
+            raise RuntimeError("Owned recovery server did not become ready")
+        current = entries(meta["Id"])
+        roles = reviewed_roles(intent["oldNodeId"], current)
+        children = recovery_entries(intent["oldNodeId"], current, roles)
+        if "expectedGrantsSha256" in intent and grants_sha256(current) != intent["expectedGrantsSha256"]:
+            raise RuntimeError("Approved registration snapshot changed")
+        checkpoint("prepared", roles=roles, entries=[item for item, _, _ in children])
+
+
+def reattest(resume: Path | None = None, *, expired_agent: bool = False, recovery_image: str | None = None, expected_grants: str | None = None) -> None:
+    CACHE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_path(CACHE, directory=True)
+    lock = CACHE / "recovery.lock"
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        private_path(lock)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError("Another explicit recovery is in progress") from None
+        _reattest(resume, expired_agent=expired_agent, recovery_image=recovery_image, expected_grants=expected_grants)
+    finally:
+        os.close(fd)
+
+
+def _reattest(resume: Path | None = None, *, expired_agent: bool = False, recovery_image: str | None = None, expected_grants: str | None = None) -> None:
+    if (recovery_image is not None or expected_grants is not None) and (not expired_agent or resume is not None or not re.fullmatch(r"sha256:[a-f0-9]{64}", recovery_image or "") or not re.fullmatch(r"[a-f0-9]{64}", expected_grants or "")):
+        raise RuntimeError("Exact approved recovery image and grants required")
     if resume is None:
-        CACHE.mkdir(parents=True, exist_ok=True, mode=0o700)
         for prior in CACHE.glob("recovery-*/intent.json"):
             private_path(prior.parent, directory=True)
             private_path(prior)
             if json.loads(prior.read_text()).get("phase") != COMPLETE:
-                raise RuntimeError(
-                    "Unfinished recovery exists; use reattest --resume with its private intent"
-                )
+                raise RuntimeError("Unfinished recovery exists; explicitly resume its private intent")
         meta = container_meta(NAME)
         if meta is None:
             raise RuntimeError("Existing local SPIRE container required")
-        processes = run(["docker", "top", NAME, "-eo", "pid,comm"]).stdout.splitlines()[
-            1:
-        ]
-        if any(
-            item.split() and item.split()[-1] == "spire-agent" for item in processes
-        ):
-            raise RuntimeError(
-                "Stop and investigate the existing agent before re-attestation"
-            )
-        old = node_id()
-        current = entries()
-        roles = dict(LEGACY_ROLES)
-        # Capture only optional reviewed children which ACTUALLY exist. Recovery
-        # never registers a new role or expands the retained four-role intent.
-        for name, (_uid, sid) in ROLES.items():
-            if name in LEGACY_ROLES:
-                continue
-            if any(
-                item.get("parent_id", {}).get("path") == old.split(TRUST_DOMAIN, 1)[1]
-                and item.get("spiffe_id", {}).get("path")
-                == sid.split(TRUST_DOMAIN, 1)[1]
-                for item in current
-            ):
-                roles[name] = ROLES[name]
-        children = recovery_entries(old, current, roles)
-        stamp = (
-            time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + secrets.token_hex(6)
-        )
+        stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + secrets.token_hex(6)
         backup = CACHE / ("recovery-" + stamp)
+        if expired_agent:
+            proof = expired_node_proof(meta)
+            intent = dict(proof, schemaVersion=1, stamp=stamp,
+                oldContainerId=meta["Id"], phase="offline_prepared",
+                offlineServer={"name": "axiom-proof-local-spire-offline-" + stamp.lower(),
+                               "nonce": secrets.token_hex(16)})
+            if recovery_image:
+                intent.update(approvedRecoveryImage=recovery_image, expectedGrantsSha256=expected_grants)
+        else:
+            processes = run(["docker", "top", NAME, "-eo", "pid,comm"]).stdout.splitlines()[1:]
+            if any(item.split() and item.split()[-1] == "spire-agent" for item in processes):
+                raise RuntimeError("Stop and investigate the existing agent before re-attestation")
+            old = node_id()
+            current = entries()
+            roles = reviewed_roles(old, current)
+            children = recovery_entries(old, current, roles)
+            intent = {"schemaVersion": 1, "stamp": stamp, "oldNodeId": old,
+                "oldContainerId": meta["Id"], "roles": roles,
+                "entries": [item for item, _, _ in children], "phase": "prepared"}
         backup.mkdir(mode=0o700)
         record = backup / "intent.json"
-        intent = {
-            "schemaVersion": 1,
-            "stamp": stamp,
-            "oldNodeId": old,
-            "oldContainerId": meta["Id"],
-            "roles": roles,
-            "entries": [item for item, _, _ in children],
-            "phase": "prepared",
-        }
         save_intent(record, intent)
     else:
         record = Path(os.path.abspath(resume))
@@ -586,9 +825,9 @@ def reattest(resume: Path | None = None) -> None:
         intent = json.loads(record.read_text())
         backup = record.parent
         if intent.get("schemaVersion") != 1:
-            raise RuntimeError(
-                "Legacy journal needs explicit operator review; no token regeneration permitted"
-            )
+            raise RuntimeError("Legacy journal needs explicit operator review; no token regeneration permitted")
+    if intent["phase"].startswith("offline_") and intent["phase"] not in {"offline_helper_stopping", "offline_helper_removing"}:
+        offline_prepare(record, intent)
     roles = intent["roles"]
     children = recovery_entries(intent["oldNodeId"], intent["entries"], roles)
     if len({item["id"] for item, _, _ in children}) != len(children):
@@ -605,10 +844,15 @@ def reattest(resume: Path | None = None) -> None:
         save_intent(record, intent)
 
     if intent["phase"] == "prepared":
-        build(force=True)
-        image = run(
-            ["docker", "image", "inspect", IMAGE, "--format", "{{.Id}}"]
-        ).stdout.strip()
+        if "recoveryImage" in intent:
+            image = intent["recoveryImage"]
+            if run(["docker", "image", "inspect", image, "--format", "{{.Id}}"]).stdout.strip() != image:
+                raise RuntimeError("Pinned recovery image changed")
+        else:
+            build(force=True)
+            image = run(
+                ["docker", "image", "inspect", IMAGE, "--format", "{{.Id}}"]
+            ).stdout.strip()
         if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
             raise RuntimeError("Recovery image identity unavailable")
         # Verify installation before issuing or consuming any token.
@@ -632,12 +876,23 @@ def reattest(resume: Path | None = None) -> None:
         )
         checkpoint("image_ready", image=image)
     if intent["phase"] == "image_ready":
+        target = NAME
+        if "offlineServer" in intent:
+            if offline_original(intent)["State"]["Running"]:
+                raise RuntimeError("Original restarted before token issuance")
+            server = offline_helper_meta(intent)
+            if not server["State"]["Running"]:
+                raise RuntimeError("Recovery server is not running")
+            observed = recovery_entries(intent["oldNodeId"], entries(server["Id"]), roles)
+            if sorted((item for item, _, _ in observed), key=lambda x: x["id"]) != sorted(intent["entries"], key=lambda x: x["id"]):
+                raise RuntimeError("Retained grants changed before token issuance")
+            target = server["Id"]
         checkpoint("token_issuing", expiresAt=int(time.time()) + 600)
         issued = run(
             [
                 "docker",
                 "exec",
-                NAME,
+                target,
                 "spire-server",
                 "token",
                 "generate",
@@ -685,7 +940,30 @@ def reattest(resume: Path | None = None) -> None:
         "backup_ready",
         "state_ready",
         "container_retiring",
+        "offline_helper_stopping",
+        "offline_helper_removing",
     }
+    if "offlineServer" in intent and intent["phase"] in {"token_issued", "offline_helper_stopping", "offline_helper_removing"}:
+        if offline_original(intent)["State"]["Running"]:
+            raise RuntimeError("Original restarted during offline recovery")
+        if intent["phase"] == "token_issued":
+            checkpoint("offline_helper_stopping")
+        if intent["phase"] == "offline_helper_stopping":
+            server = offline_helper_meta(intent)
+            if server["State"]["Running"]:
+                run(["docker", "stop", server["Id"]])
+            if offline_helper_meta(intent)["State"]["Running"]:
+                raise RuntimeError("Recovery server stop unconfirmed")
+            checkpoint("offline_helper_removing")
+        if intent["phase"] == "offline_helper_removing":
+            server = offline_helper_meta(intent, allow_missing=True)
+            if server is not None:
+                if server["State"]["Running"]:
+                    raise RuntimeError("Recovery server unexpectedly restarted")
+                run(["docker", "rm", server["Id"]])
+            if offline_helper_meta(intent, allow_missing=True) is not None:
+                raise RuntimeError("Recovery server removal unconfirmed")
+            checkpoint("node_stopped", offlineHelperRemoved=True)
     if intent["phase"] in pre_start and time.time() >= intent["expiresAt"]:
         raise RuntimeError(
             "Unconsumed attestation token expired; preserve recovery state for review"
@@ -728,9 +1006,9 @@ def reattest(resume: Path | None = None) -> None:
                 "--cap-drop",
                 "ALL",
                 "--mount",
-                "type=volume,src=axiom-spire-data,dst=/var/lib/spire",
+                "type=volume,src=" + next(name for name, target in VOLUMES.items() if target == "/var/lib/spire") + ",dst=/var/lib/spire",
                 "--mount",
-                "type=volume,src=axiom-spire-health,dst=/run/spire-health",
+                "type=volume,src=" + next(name for name, target in VOLUMES.items() if target == "/run/spire-health") + ",dst=/run/spire-health",
                 "--entrypoint",
                 "python3",
                 image,
@@ -900,6 +1178,24 @@ if __name__ == "__main__":
         "migrate-parikshan-uid": migrate_parikshan_uid,
         "reattest": reattest,
     }
+    if len(sys.argv) in (6, 9) and sys.argv[-2] == "--cache-dir":
+        selected_cache = Path(sys.argv[-1])
+        if not selected_cache.is_absolute():raise SystemExit("Absolute protected SPIRE cache required")
+        private_path(selected_cache, directory=True)
+        CACHE = selected_cache
+        sys.argv = sys.argv[:-2]
+    if len(sys.argv) == 7 and sys.argv[1:3] == ["reattest", "--expired-agent"] and sys.argv[3] == "--recovery-image" and sys.argv[5] == "--expected-grants-sha256":
+        try:
+            reattest(expired_agent=True, recovery_image=sys.argv[4], expected_grants=sys.argv[6])
+        except (Exception, KeyboardInterrupt):  # noqa: BLE001 - sanitized operator CLI boundary
+            raise SystemExit("Approved local SPIRE recovery refused; retain protected journal") from None
+        raise SystemExit(0)
+    if sys.argv[1:] == ["reattest", "--expired-agent"]:
+        try:
+            reattest(expired_agent=True)
+        except (Exception, KeyboardInterrupt):  # noqa: BLE001 - sanitized operator CLI boundary  # never expose retained node/token diagnostics
+            raise SystemExit("Expired local SPIRE recovery refused; retain the private journal for review") from None
+        raise SystemExit(0)
     if len(sys.argv) == 4 and sys.argv[1:3] == ["reattest", "--resume"]:
         try:
             reattest(Path(sys.argv[3]))

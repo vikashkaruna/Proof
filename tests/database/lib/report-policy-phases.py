@@ -179,6 +179,10 @@ def plan(root: Path = ROOT) -> dict:
         (175, {"scheduled-coverage-reassessment.test.sql"}, "scheduled_coverage175_suite_required"),
         (176, {"founder-onboarding-authority.test.sql"}, "founder_onboarding176_suite_required"),
         (177, {"branded-board-lifecycle.test.sql", "branded-auditor-lifecycle.test.sql", "branded-report-parity.test.sql"}, "branding177_suites_required"),
+        (178, {"catalogue-reaudit.test.sql"}, "catalogue178_suite_required"),
+        (179, {"public-coverage-clarifications.test.sql"}, "coverage179_suite_required"),
+        (180, {"clarified-report-parity.test.sql", "clarified-report-lifecycle.test.sql"}, "clarified180_suite_required"),
+        (181, {"global-founder-visibility.test.sql"}, "founder181_suite_required"),
         (170, {"owned-effect-observations.test.sql"}, "owned_effect170_suite_required"),
         (
             171,

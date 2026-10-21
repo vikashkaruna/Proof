@@ -1,0 +1,80 @@
+-- Synthetic authorization fixtures only; no real founder account or reports.
+begin;
+-- SQL-only session stand-in; no GoTrue or human MFA claim.
+create table if not exists auth.sessions(id uuid primary key,user_id uuid not null,created_at timestamptz not null,updated_at timestamptz,not_after timestamptz);
+create function pg_temp.u(n integer)returns uuid language sql immutable as $$select('18110000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
+create function pg_temp.ok(v boolean,m text)returns void language plpgsql as $$begin if v is distinct from true then raise exception 'ASSERTION181: %',m;end if;end$$;
+create function pg_temp.claim(a int,t int default 12)returns void language plpgsql as $$begin
+ perform set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.u(a),'role','authenticated','tenant_id',pg_temp.u(t),'session_id',pg_temp.u(101))::text,true);
+end$$;
+select pg_temp.ok((select count(*)=167 from pg_policies where schemaname='public'and policyname='founder181_global_read'and cmd='SELECT'),'exact reviewed visibility inventory installed');
+select pg_temp.ok(not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public'and c.relkind='r'and c.relrowsecurity and(c.relname in('tenants','users')or exists(select 1 from pg_attribute a where a.attrelid=c.oid and a.attname='tenant_id'and not a.attisdropped))and not exists(select 1 from pg_policies p where p.schemaname='public'and p.tablename=c.relname and p.policyname='founder181_global_read')),'every reviewed current relation covered');
+-- Future relations receive no automatic founder policy or SELECT grant.
+create table public.founder181_future_fixture(id uuid primary key,tenant_id uuid);
+alter table public.founder181_future_fixture enable row level security;
+grant select on public.founder181_future_fixture to authenticated;
+insert into public.founder181_future_fixture values(pg_temp.u(99),pg_temp.u(12));
+insert into auth.users(id,email)select pg_temp.u(n),'founder181-'||n||'@test.invalid'from generate_series(1,5)n;
+insert into public.users(id,email,is_axiom_internal)select pg_temp.u(n),'founder181-'||n||'@test.invalid',n in(1,3,5)from generate_series(1,5)n;
+insert into public.tenants(id,slug,name)select pg_temp.u(n),'founder181-'||n,'Synthetic organization181 '||n from generate_series(11,13)n;
+insert into public.tenant_users(tenant_id,user_id,role)values(pg_temp.u(11),pg_temp.u(1),'viewer'),(pg_temp.u(11),pg_temp.u(2),'owner'),(pg_temp.u(11),pg_temp.u(5),'founder');
+select public.designate_platform_founder(pg_temp.u(1),'test','Synthetic global visibility fixture181');
+-- Deliberately model stale derived-membership cache through the existing
+-- privileged maintenance context; no guard or application grant is changed.
+select set_config('axiom.platform_founder_sync','on',true);
+delete from public.tenant_users where tenant_id=pg_temp.u(12)and user_id=pg_temp.u(1)and membership_source='platform_founder';
+select set_config('axiom.platform_founder_sync','off',true);
+select pg_temp.ok(not exists(select 1 from public.tenant_users where tenant_id=pg_temp.u(12)and user_id=pg_temp.u(1)),'missing derived cache is genuine');
+insert into public.control_libraries(version,published_at,published_by,change_log,control_count)values('founder181-fixture',now(),'fixture','Synthetic authorization only',0);
+insert into public.engagements(id,tenant_id,library_version,title,status)values(pg_temp.u(21),pg_temp.u(12),'founder181-fixture','Synthetic completed visibility','completed'),(pg_temp.u(22),pg_temp.u(13),'founder181-fixture','Synthetic cancelled visibility','cancelled');
+insert into public.estates(id,tenant_id,slug,name,status)values(pg_temp.u(31),pg_temp.u(12),'founder181-archived','Synthetic archived estate','archived');
+insert into public.reports(id,tenant_id,kind,title,storage_uri,content,library_version,generated_by_agent,status,created_by)
+values(pg_temp.u(41),pg_temp.u(12),'custom','Synthetic private draft','fixture://not-an-artifact','{"syntheticAuthorizationFixture":true}','founder181-fixture','fixture','draft',pg_temp.u(2)),(pg_temp.u(42),pg_temp.u(13),'custom','Synthetic archived report','fixture://not-an-artifact','{"syntheticAuthorizationFixture":true}','founder181-fixture','fixture','archived',pg_temp.u(2));
+insert into auth.sessions(id,user_id,created_at,updated_at)values(pg_temp.u(101),pg_temp.u(1),clock_timestamp()-interval '2 days',clock_timestamp());
+select pg_temp.ok(public.report_founder_allowed(pg_temp.u(11),pg_temp.u(1))and public.report_founder_allowed(pg_temp.u(12),pg_temp.u(1)),'live global report authority overrides lower/missing memberships');
+select pg_temp.ok(public.report_founder_allowed(pg_temp.u(11),pg_temp.u(5))and not public.report_founder_allowed(pg_temp.u(12),pg_temp.u(5)),'legacy local founder remains local');
+select controller_security.catalogue178_authority(pg_temp.u(12),pg_temp.u(1),pg_temp.u(101),'founder');
+do $$begin begin perform controller_security.catalogue178_authority(pg_temp.u(12),pg_temp.u(1),pg_temp.u(101),'owner');raise exception 'global founder impersonated customer owner';exception when insufficient_privilege then null;end;end$$;
+select pg_temp.claim(1);
+set local role authenticated;
+select pg_temp.ok(public.platform_founder_visibility_allowed(),'real live designation accepted');
+select pg_temp.ok(not public.is_tenant_member(pg_temp.u(999))and not public.has_tenant_role(pg_temp.u(999),array['founder']::public.user_role[]),'nonexistent tenant never authorized');
+select pg_temp.ok((select count(*)=0 from public.founder181_future_fixture),'future table remains closed despite live founder');
+select pg_temp.ok(public.current_tenant_roles()=array['founder']::public.user_role[]and public.has_role(array['founder']::public.user_role[]),'effective founder without materialized membership');
+select pg_temp.ok(public.has_tenant_role(pg_temp.u(11),array['founder']::public.user_role[])and not public.has_tenant_role(pg_temp.u(11),array['owner']::public.user_role[]),'effective founder precedes explicit viewer and never owner substitution');
+select pg_temp.ok((select count(*)=3 from public.tenants where id in(pg_temp.u(11),pg_temp.u(12),pg_temp.u(13))),'all organizations visible');
+select pg_temp.ok((select count(*)=2 from public.engagements where id in(pg_temp.u(21),pg_temp.u(22))),'closed engagement statuses visible');
+select pg_temp.ok((select count(*)=1 from public.estates where id=pg_temp.u(31)),'archived estate visible');
+select pg_temp.ok((select count(*)=2 from public.reports where id in(pg_temp.u(41),pg_temp.u(42))),'draft and archived reports visible');
+select pg_temp.ok(not has_table_privilege('authenticated','public.connector_credentials','SELECT'),'no credential read privilege introduced');
+select pg_temp.ok(not has_table_privilege('authenticated','public.catalogue_reaudit_decisions','INSERT')and not has_function_privilege('authenticated','public.submit_catalogue_reaudit(uuid,uuid,uuid,text,uuid,boolean)','EXECUTE'),'no private writer grant introduced');
+reset role;
+select pg_temp.ok((select role='viewer'and membership_source='explicit'from public.tenant_users where tenant_id=pg_temp.u(11)and user_id=pg_temp.u(1)),'explicit lower role preserved verbatim');
+savepoint revoked181;
+select public.revoke_platform_founder(pg_temp.u(1),'test','Synthetic revoke181');
+select pg_temp.claim(1);set local role authenticated;
+select pg_temp.ok(not public.platform_founder_visibility_allowed()and not public.is_tenant_member(pg_temp.u(12)),'revoked designation loses global visibility');
+select pg_temp.ok((select count(*)=0 from public.reports where id in(pg_temp.u(41),pg_temp.u(42))),'revoked cannot read foreign report history');
+reset role;rollback to revoked181;
+savepoint internal181;
+update public.users set is_axiom_internal=false where id=pg_temp.u(1);
+select pg_temp.claim(1);set local role authenticated;
+select pg_temp.ok(not public.platform_founder_visibility_allowed()and(select count(*)=0 from public.engagements where id in(pg_temp.u(21),pg_temp.u(22))),'internal withdrawal loses global visibility');
+reset role;rollback to internal181;
+savepoint fence181;
+insert into public.mfa_account_fences(user_id,sessions_valid_after)values(pg_temp.u(1),clock_timestamp());
+select pg_temp.claim(1);set local role authenticated;
+select pg_temp.ok(not public.platform_founder_visibility_allowed()and public.current_tenant_roles()='{}'::public.user_role[],'old founder session fenced');
+select pg_temp.ok((select count(*)=0 from public.tenants where id in(pg_temp.u(11),pg_temp.u(12),pg_temp.u(13))),'fenced session cannot read even explicit membership');
+reset role;rollback to fence181;
+select pg_temp.claim(3);set local role authenticated;
+select pg_temp.ok(not public.platform_founder_visibility_allowed()and(select count(*)=0 from public.tenants where id in(pg_temp.u(11),pg_temp.u(12),pg_temp.u(13))),'internal flag without designation gives no global access');
+reset role;
+select pg_temp.claim(4);select set_config('request.jwt.claims',(current_setting('request.jwt.claims')::jsonb||'{"role":"founder"}'::jsonb)::text,true);set local role authenticated;
+select pg_temp.ok(not public.platform_founder_visibility_allowed()and(select count(*)=0 from public.reports where id in(pg_temp.u(41),pg_temp.u(42))),'forged role claim gives no global access');
+reset role;
+select pg_temp.claim(2,11);set local role authenticated;
+select pg_temp.ok((select count(*)=1 from public.tenants where id in(pg_temp.u(11),pg_temp.u(12),pg_temp.u(13))),'ordinary owner sees only own company');
+select pg_temp.ok((select count(*)=0 from public.reports where id in(pg_temp.u(41),pg_temp.u(42))),'ordinary owner cannot read reports in other companies');
+reset role;
+rollback;

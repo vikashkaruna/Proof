@@ -108,7 +108,7 @@ begin
    and src.source_text::jsonb->>'report_kind'='auditor','new auditor request freezes source6');
  perform pg_temp.ok(src.source_text::jsonb->'presentation'=controller_security.brand177_policy(),'exact immutable brand assets and contact binding');
  perform pg_temp.ok(not has_function_privilege('service_role','public.request_branded_auditor_report(uuid,uuid,uuid,uuid,uuid,text,uuid)','EXECUTE'),'generic service cannot request branded report');
- perform pg_temp.ok(has_function_privilege('human_action_writer','public.request_branded_auditor_report(uuid,uuid,uuid,uuid,uuid,text,uuid)','EXECUTE'),'existing human writer only');
+ perform pg_temp.ok(not has_function_privilege('human_action_writer','public.request_branded_auditor_report(uuid,uuid,uuid,uuid,uuid,text,uuid)','EXECUTE'),'retired creation RPC is no longer a human-writable bypass; historic source codec remains valid');
  perform pg_temp.ok(not has_function_privilege('human_action_writer','controller_security.brand177_document(text,text,text,uuid,uuid,uuid,uuid,text,text)','EXECUTE'),'no private projector grant');
  content:=controller_security.canonical_questionnaire_json(controller_security.brand177_document('auditor',
   src.source_text,src.source_sha256,t,req.engagement_id,req.assessment_run_id,req.id,req.title,'2026-10-17T06:00:00.000Z'));

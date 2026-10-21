@@ -27,13 +27,14 @@ it.each([
   UserRole.REVIEWER,
   UserRole.VIEWER,
   UserRole.AXIOM_ANALYST,
-])('refuses %s without borrowing a live designation response', async (role) => {
-  expect(await hasLiveFounderReportAccess({ ...context(), role })).toBe(false);
-  expect(rpc).not.toHaveBeenCalled();
+])('uses live global authority independently of lower explicit tenant role %s', async (role) => {
+  expect(await hasLiveFounderReportAccess({ ...context(), role })).toBe(true);
+  expect(rpc).toHaveBeenCalled();
 });
-it('refuses a noninternal account carrying the founder role label', async () => {
+it('refuses an internal-looking legacy role when authoritative global designation says false', async () => {
+  abortSignal.mockResolvedValue({ data: false, error: null });
   expect(await hasLiveFounderReportAccess({ ...context(), isAxiomInternal: false })).toBe(false);
-  expect(rpc).not.toHaveBeenCalled();
+  expect(rpc).toHaveBeenCalled();
 });
 it.each([
   { data: false, error: null },

@@ -52,26 +52,46 @@ export interface GraphFilter {
   estateId?: string;
   agentName?: string;
   access?: 'all' | 'read' | 'write';
+  /** Display-only inventory history; current access edges remain strict. */
+  includeInactive?: boolean;
 }
 
 export function buildEstateGraph(input: GraphInput, filter: GraphFilter = {}) {
   const now = input.now ?? new Date();
   const estates = input.estates.filter(
-    (e) => e.status === 'active' && (!filter.estateId || e.id === filter.estateId),
+    (e) =>
+      (filter.includeInactive || e.status === 'active') &&
+      (!filter.estateId || e.id === filter.estateId),
   );
   const estateIds = new Set(estates.map((e) => e.id));
-  const systems = input.systems.filter((s) => s.status === 'active' && estateIds.has(s.estateId));
+  const systems = input.systems.filter(
+    (s) => (filter.includeInactive || s.status === 'active') && estateIds.has(s.estateId),
+  );
   const systemIds = new Set(systems.map((s) => s.id));
   const connectors = input.connectors.filter(
-    (c) => c.status !== 'archived' && systemIds.has(c.systemId),
+    (c) => (filter.includeInactive || c.status !== 'archived') && systemIds.has(c.systemId),
   );
   const connectorIds = new Set(connectors.map((c) => c.id));
+  const activeEstateIds = new Set(
+    input.estates.filter((e) => e.status === 'active').map((e) => e.id),
+  );
+  const activeSystemIds = new Set(
+    input.systems
+      .filter((s) => s.status === 'active' && activeEstateIds.has(s.estateId))
+      .map((s) => s.id),
+  );
+  const activeConnectorIds = new Set(
+    input.connectors
+      .filter((c) => c.status === 'active' && activeSystemIds.has(c.systemId))
+      .map((c) => c.id),
+  );
   const access = filter.access ?? 'all';
   const grants = input.grants.filter(
     (g) =>
       g.revokedAt === null &&
       new Date(g.expiresAt) > now &&
       connectorIds.has(g.connectorId) &&
+      activeConnectorIds.has(g.connectorId) &&
       (!filter.agentName || g.agentName === filter.agentName) &&
       (access === 'all' || g.scope === `connector.${access}`),
   );
@@ -97,14 +117,14 @@ export function buildEstateGraph(input: GraphInput, filter: GraphFilter = {}) {
       id: `system:${s.id}`,
       kind: 'system' as const,
       label: s.name,
-      detail: { categories: s.categories.join(', ') || 'none recorded' },
+      detail: { status: s.status, categories: s.categories.join(', ') || 'none recorded' },
       derivation: input.provenance?.bySystem[s.id] ?? { state: 'unavailable' as const },
     })),
     ...estates.map((e) => ({
       id: `estate:${e.id}`,
       kind: 'estate' as const,
       label: e.name,
-      detail: {},
+      detail: { status: e.status },
     })),
   ];
   const categories = [...new Set(systems.flatMap((s) => s.categories))].sort();

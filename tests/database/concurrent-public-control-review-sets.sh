@@ -38,13 +38,30 @@ race 'update public.users set is_axiom_internal=false where id=review_set_race.i
 grep -q forbidden "$result_dir/second"
 sql -c 'update public.users set is_axiom_internal=true where id=review_set_race.id(1)'
 sql -c "insert into public.estates(id,tenant_id,slug,name) values(review_set_race.id(60),review_set_race.id(31),'review-race-estate','Synthetic estate')"
-race 'update public.engagements set estate_id=review_set_race.id(60) where id=review_set_race.id(41)' "$request"
-grep -q invalid_record "$result_dir/second"
-sql -c 'update public.engagements set estate_id=null where id=review_set_race.id(41)'
+# A first estate attachment remains legal before assessment. Exercise its
+# stale-source refusal in an aborted subtransaction, then prove the original
+# exact receipt still replays behind the retained engagement lock.
+sql <<'SQL'
+create function review_set_race.aborted_first_estate()returns void language plpgsql as $$begin
+ perform id from public.engagements where id=review_set_race.id(41)for update;
+ begin
+  update public.engagements set estate_id=review_set_race.id(60)where id=review_set_race.id(41);
+  if review_set_race.save(review_set_race.request(103,(select id from public.public_control_review_sets where tenant_id=review_set_race.id(31)and previous_review_id is not null)))->>'error' is distinct from 'invalid_record'then raise exception 'changed estate accepted';end if;
+  raise exception using errcode='P1781',message='Synthetic first attachment rollback';
+ exception when sqlstate 'P1781'then null;end;
+ if(select estate_id is not null from public.engagements where id=review_set_race.id(41))then raise exception 'first estate rollback leaked';end if;
+end$$;
+create function review_set_race.refuse_repin()returns void language plpgsql as $$begin
+ perform id from public.engagements where id=review_set_race.id(41)for update;
+ begin update public.engagements set library_version='review-race-other'where id=review_set_race.id(41);raise exception 'repin accepted';exception when check_violation then null;end;
+ if(select library_version<>'0.1.1'from public.engagements where id=review_set_race.id(41))then raise exception 'refused repin changed basis';end if;
+end$$;
+SQL
+race 'select review_set_race.aborted_first_estate()' "$same"
+grep -q '"replayed": true' "$result_dir/second"
 sql -c "insert into public.control_libraries(version,published_at,published_by,change_log,control_count,status) values('review-race-other',now(),'fixture','Synthetic only',0,'published')"
-race "update public.engagements set library_version='review-race-other' where id=review_set_race.id(41)" "$request"
-grep -q catalogue_refused "$result_dir/second"
-sql -c "update public.engagements set library_version='0.1.1' where id=review_set_race.id(41)"
+race 'select review_set_race.refuse_repin()' "$same"
+grep -q '"replayed": true' "$result_dir/second"
 race "update public.engagements set status='cancelled' where id=review_set_race.id(41)" "$request"
 grep -q context_refused "$result_dir/second"
 [ "$(sql -c 'select count(*) from public.public_control_review_sets where tenant_id=review_set_race.id(31)')" = 2 ]
@@ -67,4 +84,4 @@ grep -q '"replayed": false' "$result_dir/first"
 grep -q '"state": "recorded"' "$result_dir/second"
 [ "$(sql -c 'select count(*) from public.public_control_review_sets where tenant_id=review_set_race.id(31)')" = 3 ]
 [ "$(sql -c 'select count(*) from public.public_control_review_cancellations where tenant_id=review_set_race.id(31)')" = 1 ]
-echo 'Public review concurrency: exact replay, one CAS winner, late membership/internal/estate/catalogue/cancellation refusals and both record/cancel race orders passed.'
+echo 'Public review concurrency: exact replay, one CAS winner, late membership/internal/cancellation refusals, aborted first attachment and immutable catalogue basis and both record/cancel race orders passed.'

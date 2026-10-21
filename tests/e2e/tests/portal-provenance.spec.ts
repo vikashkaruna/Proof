@@ -1,3 +1,4 @@
+import { insertOwnedEngagementFixtures } from '../local-db';
 import { test, expect } from '@playwright/test';
 import { createMfaAccount, signInAs, state } from '../fixtures';
 import { tenantCookie } from '../target';
@@ -16,6 +17,15 @@ test('portal withholds unsupported posture and never substitutes demo figures', 
     'Content-Type': 'application/json',
   };
   async function seed(table: string, body: unknown) {
+    if (table === 'engagements') {
+      insertOwnedEngagementFixtures(
+        Array.isArray(body) ? body : [body],
+        state.supabaseUrl,
+        state.serviceKey,
+      );
+      return;
+    }
+
     const response = await fetch(`${state.supabaseUrl}/rest/v1/${table}`, {
       method: 'POST',
       headers,

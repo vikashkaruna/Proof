@@ -61,6 +61,8 @@ export function createSupabaseDouble(options: {
   auth?: AuthOutcome;
   membership?: MembershipOutcome;
   idempotencyHit?: { response_status: number; response_body: unknown } | null;
+  globalFounder?: { userId: string; revokedAt: string | null; internal: boolean };
+  tenantExists?: boolean;
 }) {
   const state = {
     auth: options.auth ?? { kind: 'user' as const, id: FOUNDER_ID },
@@ -69,6 +71,8 @@ export function createSupabaseDouble(options: {
     inserted: [] as unknown[],
     claimDecision: null as Record<string, unknown> | null,
     failRpc: null as string | null,
+    globalFounder: options.globalFounder ?? null,
+    tenantExists: options.tenantExists ?? true,
   };
 
   const createClient = vi.fn(() => ({
@@ -121,9 +125,13 @@ export function createSupabaseDouble(options: {
     },
     from: (table: string) => {
       const builder: Record<string, unknown> = {};
+      const filters = new Map<string, unknown>();
       const chain = () => builder;
       builder.select = chain;
-      builder.eq = chain;
+      builder.eq = (column: string, value: unknown) => {
+        filters.set(column, value);
+        return builder;
+      };
       builder.insert = (rows: unknown) => {
         state.inserted.push({ table, rows });
         return Promise.resolve({ data: null, error: null });
@@ -132,10 +140,22 @@ export function createSupabaseDouble(options: {
         state.membership
           ? { data: state.membership, error: null }
           : { data: null, error: { message: 'no rows' } };
-      builder.maybeSingle = async () =>
-        table === 'idempotency_keys'
+      builder.maybeSingle = async () => {
+        if (table === 'platform_founders')
+          return {
+            data: state.globalFounder
+              ? { user_id: state.globalFounder.userId, revoked_at: state.globalFounder.revokedAt }
+              : null,
+            error: null,
+          };
+        if (table === 'users' && state.globalFounder)
+          return { data: { is_axiom_internal: state.globalFounder.internal }, error: null };
+        if (table === 'tenants' && state.globalFounder)
+          return { data: state.tenantExists ? { id: filters.get('id') } : null, error: null };
+        return table === 'idempotency_keys'
           ? { data: state.idempotencyHit, error: null }
           : { data: state.membership, error: null };
+      };
       return builder;
     },
   }));

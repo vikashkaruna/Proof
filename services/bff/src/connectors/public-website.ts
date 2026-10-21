@@ -20,6 +20,16 @@ const TIMEOUT_MS = 8_000;
 const MAX_REDIRECTS = 3;
 const AUDIT_KINDS = ['privacy', 'contact', 'terms'] as const;
 type AuditKind = (typeof AUDIT_KINDS)[number];
+// Two ordinary navigation candidates per critical kind, never a whole-site crawl.
+const NOTICE_PATHS = {
+  privacy: ['/privacy', '/privacy-policy'],
+  contact: ['/contact', '/contact-us'],
+  terms: ['/terms', '/terms-of-service'],
+  consent: ['/consent', '/cookie-policy'],
+} as const;
+function fallbackNotices(base: URL, kind: keyof typeof NOTICE_PATHS): URL[] {
+  return NOTICE_PATHS[kind].map((path) => parsePublicUrl(new URL(path, base.origin).href));
+}
 
 export class PublicWebsiteRefused extends Error {
   constructor(readonly code: string) {
@@ -325,6 +335,7 @@ async function collectPublicWebsite(
   signal: AbortSignal,
   deps: WebsiteDeps,
   capture?: CapturePage,
+  probeUnlinkedNotices = false,
 ): Promise<WebsiteCheck> {
   const root = await checkSinglePage(
     parsePublicUrl(rawUrl),
@@ -343,49 +354,64 @@ async function collectPublicWebsite(
       observations.push({ kind, status: 'retrieved' });
       continue;
     }
-    const candidate = root.publicLinks.find((link) => {
-      if (auditKind(link) !== kind) return false;
+    const linked = root.publicLinks.flatMap((link) => {
+      if (auditKind(link) !== kind) return [];
       try {
         const url = parsePublicUrl(link.url);
-        return url.origin === origin && !seen.has(url.href);
+        return url.origin === origin && !seen.has(url.href) ? [url] : [];
       } catch {
-        return false;
+        return [];
       }
     });
-    if (!candidate) {
+    const candidates = [
+      ...linked,
+      ...(probeUnlinkedNotices ? fallbackNotices(new URL(root.finalUrl), kind) : []),
+    ]
+      .filter(
+        (url, i, values) =>
+          !seen.has(url.href) && values.findIndex((v) => v.href === url.href) === i,
+      )
+      .slice(0, probeUnlinkedNotices ? 2 : 1);
+    if (!candidates.length) {
       observations.push({ kind, status: 'not_linked' });
       continue;
     }
-    const url = parsePublicUrl(candidate.url);
-    seen.add(url.href);
-    try {
-      const page = await checkSinglePage(
-        url,
-        signal,
-        deps,
-        origin,
-        capture ? (body, digest, finalUrl) => capture(kind, body, digest, finalUrl) : undefined,
-      );
-      auditPages.push({
-        kind,
-        requestedUrl: url.href,
-        status: 'checked',
-        finalUrl: page.finalUrl,
-        title: page.title,
-        contentSha256: page.contentSha256,
-        formMetadata: page.formMetadata,
-      });
-      observations.push({ kind, status: 'retrieved' });
-    } catch (cause) {
-      if (signal.aborted) throw new PublicWebsiteRefused('timeout');
-      auditPages.push({
-        kind,
-        requestedUrl: url.href,
-        status: 'unavailable',
-        errorCode: cause instanceof PublicWebsiteRefused ? cause.code : 'unreachable',
-      });
-      observations.push({ kind, status: 'unavailable' });
+    let accepted = false;
+    for (const url of candidates) {
+      seen.add(url.href);
+      try {
+        const page = await checkSinglePage(
+          url,
+          signal,
+          deps,
+          origin,
+          capture ? (body, digest, finalUrl) => capture(kind, body, digest, finalUrl) : undefined,
+        );
+        auditPages.push({
+          kind,
+          requestedUrl: url.href,
+          status: 'checked',
+          finalUrl: page.finalUrl,
+          title: page.title,
+          contentSha256: page.contentSha256,
+          formMetadata: page.formMetadata,
+        });
+        observations.push({ kind, status: 'retrieved' });
+        accepted = true;
+        break;
+      } catch (cause) {
+        if (signal.aborted) throw new PublicWebsiteRefused('timeout');
+        // Retain the final attempted failure; no response body becomes evidence.
+        if (url === candidates.at(-1))
+          auditPages.push({
+            kind,
+            requestedUrl: url.href,
+            status: 'unavailable',
+            errorCode: cause instanceof PublicWebsiteRefused ? cause.code : 'unreachable',
+          });
+      }
     }
+    if (!accepted) observations.push({ kind, status: 'unavailable' });
   }
   return { ...root, auditPages, observations };
 }
@@ -437,7 +463,8 @@ function consentTarget(body: Buffer, base: URL, seen: ReadonlySet<string>): URL 
 
 /** Fresh v2 evidence is extracted from the same accepted response bytes before
  * discarding them, never by rereading or enriching historical v1 checks. Only
- * v2 adds one separately linked same-origin Consent page (five pages maximum).
+ * v2 probes up to two linked or canonical same-origin paths per notice kind.
+ * At most five accepted page kinds are retained, under the original shared deadline.
  * No tenant, engagement, check ID or date is fabricated here. The caller owns
  * authentication, real scope binding and durable/recoverable settlement.
  */
@@ -457,6 +484,7 @@ export async function checkPublicWebsiteEvidenceV2(
         // Maximum five accepted pages of 512KiB each, retained only in this call.
         captured.set(kind, { body: Buffer.from(body), contentSha256, finalUrl });
       },
+      true,
     );
     if (signal.aborted) throw new PublicWebsiteRefused('timeout');
     const root = captured.get('root');
@@ -469,13 +497,34 @@ export async function checkPublicWebsiteEvidenceV2(
       ]),
     ]);
     const origin = new URL(check.finalUrl).origin;
-    const consent = consentTarget(root.body, new URL(check.finalUrl), seen);
+    const startingKind = auditKind({ label: '', url: check.finalUrl });
+    if (startingKind) captured.set(startingKind, root);
+    if (/\b(?:consent|cookies?)\b/i.test(new URL(check.finalUrl).pathname))
+      captured.set('consent', root);
+    const linkedConsent = consentTarget(root.body, new URL(check.finalUrl), seen);
+    const consentCandidates = (
+      captured.has('consent')
+        ? []
+        : [
+            ...(linkedConsent ? [linkedConsent] : []),
+            ...fallbackNotices(new URL(check.finalUrl), 'consent'),
+          ]
+    )
+      .filter(
+        (url, i, values) =>
+          !seen.has(url.href) && values.findIndex((v) => v.href === url.href) === i,
+      )
+      .slice(0, 2);
+    let consent: URL | undefined;
     let consentUnavailable = false;
-    if (consent) {
+    for (const target of consentCandidates) {
+      consent = target;
       try {
-        await checkSinglePage(consent, signal, deps, origin, (body, contentSha256, finalUrl) => {
+        await checkSinglePage(target, signal, deps, origin, (body, contentSha256, finalUrl) => {
           captured.set('consent', { body: Buffer.from(body), contentSha256, finalUrl });
         });
+        consentUnavailable = false;
+        break;
       } catch {
         if (signal.aborted) throw new PublicWebsiteRefused('timeout');
         consentUnavailable = true;
@@ -506,11 +555,13 @@ export async function checkPublicWebsiteEvidenceV2(
     const pageSources = pages.map((page) => {
       const accepted = captured.get(page.page);
       const requestedUrl =
-        page.page === 'root'
+        accepted?.finalUrl === check.finalUrl
           ? check.requestedUrl
-          : page.page === 'consent'
-            ? (consent?.href ?? null)
-            : (check.auditPages.find((audit) => audit.kind === page.page)?.requestedUrl ?? null);
+          : page.page === 'root'
+            ? check.requestedUrl
+            : page.page === 'consent'
+              ? (consent?.href ?? null)
+              : (check.auditPages.find((audit) => audit.kind === page.page)?.requestedUrl ?? null);
       return {
         page: page.page,
         requestedUrl: page.state === 'unexamined' ? null : requestedUrl,

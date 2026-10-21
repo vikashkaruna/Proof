@@ -1,4 +1,5 @@
 import { BrandedSourceV6Schema, verifyBrandedSource } from './branded-report';
+import { ClarifiedSourceV8Schema, verifyClarifiedSource } from './clarified-report';
 import {
   CoverageFirstSourceV4Schema,
   parseCoverageFirstJson,
@@ -41,7 +42,7 @@ export type PramaanBoardArchiveInput = PramaanSourceArchiveInput;
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
-/** Only source4/source5 are unwrapped for validation; the ZIP always retains the original
+/** Versioned envelopes are unwrapped only for validation; the ZIP retains the original
  * exact provider source bytes and digest, never this derived inner view. */
 function archiveValidationSource(
   kind: 'board' | 'auditor',
@@ -50,6 +51,26 @@ function archiveValidationSource(
 ): string {
   const text = Buffer.from(input.sourceBytes).toString('utf8');
   const version = JSON.parse(text).schema_version;
+  if (version === 8) {
+    const envelope = ClarifiedSourceV8Schema.parse(parseCoverageFirstJson(text, 4 * 1024 * 1024));
+    if (envelope.report_kind !== kind) throw Error('Clarified archive kind refused');
+    z.object({ schema_version: z.literal(6) }).parse(
+      parseCoverageFirstJson(envelope.retained_source.text, 4 * 1024 * 1024),
+    );
+    const validation = archiveValidationSource(
+      kind,
+      { ...input, sourceBytes: Buffer.from(envelope.retained_source.text) },
+      { ...scope, source: { ...scope.source, sha256: envelope.retained_source.sha256 } },
+    );
+    const original = z.object({ assessment_run_id: uuid }).parse(JSON.parse(validation));
+    verifyClarifiedSource(text, scope.source.sha256, {
+      tenantId: scope.tenantId,
+      engagementId: scope.engagementId,
+      requestId: scope.requestId,
+      assessmentRunId: original.assessment_run_id,
+    });
+    return validation;
+  }
   if (version === 6) {
     const envelope = BrandedSourceV6Schema.parse(parseCoverageFirstJson(text, 4 * 1024 * 1024));
     if (

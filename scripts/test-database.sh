@@ -88,6 +88,17 @@ while IFS= read -r suite; do
     # The production migration deliberately grants no issuer membership to
     # postgres. Only this disposable test session assumes the private role.
     docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q < "tests/database/$suite" > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [ "$suite" = clarified-report-lifecycle.test.sql ]; then
+    python3 tests/database/lib/clarified-report-lifecycle.py | sql
+  elif [[ "$suite" = founder-onboarding-authority.test.sql || "$suite" = onboarding.test.sql ]]; then
+    # Real human onboarding requires a released current catalogue after178.
+    { echo "begin;"; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; sed '/^begin;$/d' "tests/database/$suite"; } | sql
+  elif [ "$suite" = catalogue-reaudit.test.sql ]; then
+    # The exact immutable catalogue, genuine approval, and current-selection
+    # helpers precede this suite's real worker assessment and human-role gates.
+    { echo "begin;"; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; sed '/^rollback;$/d' tests/database/catalogue-founder-approval.test.sql; awk '/^select pg_temp.ok\(not exists/{exit} {print}' tests/database/catalogue-current-version.test.sql; cat "tests/database/$suite"; } | sql
+  elif [ "$suite" = public-coverage-clarifications.test.sql ]; then
+    { awk '/^-- Only the constrained writer/{exit}{print}' tests/database/public-website-control-evidence.test.sql; cat "tests/database/$suite"; } | sql
   elif [ "$suite" = catalogue-current-version.test.sql ]; then
     { echo "begin;"; pnpm exec tsx scripts/lib/catalogue-version-sql-fixture.ts; sed '/^rollback;$/d' tests/database/catalogue-founder-approval.test.sql; cat "tests/database/$suite"; } | sql
   elif [ "$suite" = catalogue-founder-approval.test.sql ]; then

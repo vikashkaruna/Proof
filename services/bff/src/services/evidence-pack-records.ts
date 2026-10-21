@@ -1,3 +1,4 @@
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
 import { z } from 'zod';
 import { UserRole, Capability, can } from '@axiom/types';
 import { EvidenceError, type EvidenceDatabase, receiptSchema } from './evidence-ingestion.js';
@@ -131,6 +132,14 @@ export async function accessFor(
   actorId: string,
   signal: AbortSignal = AbortSignal.timeout(15_000),
 ): Promise<PackAccess> {
+  if (await isLivePlatformFounder(db, actorId, signal))
+    return {
+      actorId,
+      tenantId,
+      manager: true,
+      founder: true,
+      canExport: can(Capability.EVIDENCE_EXPORT, { role: UserRole.FOUNDER }),
+    };
   const { data, error } = await db
     .from('tenant_users')
     .select('role')

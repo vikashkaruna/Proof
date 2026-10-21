@@ -220,6 +220,89 @@ class NamespaceTests(unittest.TestCase):
             self.assertFalse(calls)
             self.assertTrue(result[0]["runtimeConfigurationUnconfirmed"])
 
+    def unavailable_reconciliation(self, namespace_error=None, metadata_error=None):
+        with (
+            patch.object(m, "stable_bff", return_value=(self.bff, "net:[9]")),
+            patch.object(m, "peer_specs", return_value=[
+                {k: v for k, v in self.peer.items() if k != "image"}
+            ]),
+            patch.object(m, "metadata", side_effect=metadata_error,
+                         return_value=self.value),
+            patch.object(m, "namespace", side_effect=namespace_error),
+            patch.object(m, "run") as command,
+            patch.object(m, "worker_idle_state") as workers,
+        ):
+            result = m.reconcile_namespaces(self.config)
+        command.assert_not_called()
+        workers.assert_not_called()
+        return result
+
+    def test_unavailable_namespace_reports_reviewed_peer_without_private_diagnostics(self):
+        for error in (
+            ValueError("Runtime peer is not running"),
+            subprocess.CalledProcessError(1, ["PRIVATE_TOKEN"]),
+            subprocess.TimeoutExpired(["PRIVATE_TOKEN"], 30),
+            OSError("PRIVATE_TOKEN"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                result = self.unavailable_reconciliation(namespace_error=error)
+                self.assertEqual(result, [{
+                    "component": "network", "peer": self.peer["name"],
+                    "ok": False, "namespaceUnavailable": True,
+                }])
+                self.assertNotIn("PRIVATE_TOKEN", json.dumps(result))
+
+    def test_missing_peer_reports_unavailable_without_inferring_identity_or_repair(self):
+        result = self.unavailable_reconciliation(
+            metadata_error=subprocess.CalledProcessError(1, ["PRIVATE_TOKEN"])
+        )
+        self.assertTrue(result[0]["peerUnavailable"])
+        self.assertTrue(result[0]["namespaceUnavailable"])
+        self.assertNotIn("PRIVATE_TOKEN", json.dumps(result))
+
+    def test_unknown_namespace_defers_even_a_proven_stale_peer(self):
+        controller = dict(self.peer, name="axiom-assessment-controller-kosha",
+                          kind="controller", tenant="kosha")
+        scheduler = dict(controller, name=controller["name"] + "-scheduler",
+                         kind="scheduler")
+        peers = [self.peer, controller, scheduler]
+        self.config["runtimeBindings"]["peers"] = peers
+        with (
+            patch.object(m, "stable_bff", return_value=(self.bff, "net:[9]")),
+            patch.object(m, "peer_specs", return_value=[
+                {k: v for k, v in peer.items() if k != "image"} for peer in peers
+            ]),
+            patch.object(m, "metadata", return_value=self.value),
+            patch.object(m, "namespace", side_effect=[
+                "net:[1]", subprocess.CalledProcessError(1, ["private"]),
+                ValueError("Runtime peer is not running"),
+            ]),
+            patch.object(m, "run") as command,
+            patch.object(m, "worker_idle_state") as workers,
+        ):
+            result = m.reconcile_namespaces(self.config)
+        command.assert_not_called()
+        workers.assert_not_called()
+        self.assertEqual([r["peer"] for r in result],
+                         [controller["name"], scheduler["name"], self.peer["name"]])
+        self.assertTrue(all(not r["ok"] for r in result))
+        self.assertTrue(result[-1]["stale"])
+        self.assertTrue(result[-1]["deferredForRuntime"])
+
+    def test_unavailable_peer_does_not_relax_binding_or_metadata_guards(self):
+        for field, wrong in (("image", "sha256:" + "0" * 64),
+                             ("network", "container:" + "0" * 64)):
+            with self.subTest(field=field):
+                old = self.value[field]
+                self.value[field] = wrong
+                with self.assertRaises(ValueError):
+                    self.unavailable_reconciliation(
+                        namespace_error=subprocess.CalledProcessError(1, ["private"])
+                    )
+                self.value[field] = old
+        with self.assertRaises(ValueError):
+            self.unavailable_reconciliation(metadata_error=ValueError("foreign identity"))
+
     def test_current_namespace_does_not_restart(self):
         result, calls = self.reconciliation(fresh=True)
         self.assertEqual((result, calls), ([], []))

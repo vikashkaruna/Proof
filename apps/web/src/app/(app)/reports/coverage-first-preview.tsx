@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { publicCoverageClarificationSnapshotSchema } from '@axiom/types';
 import { reportPreviewVersion } from './report-preview-version';
 import type { ReportDetail } from './report-contract';
 
@@ -7,6 +8,8 @@ import type { ReportDetail } from './report-contract';
 const count = z.number().int().min(0).max(100000);
 const projection = z.object({
   schema_version: z.literal(5),
+  owner_coverage_clarification: publicCoverageClarificationSnapshotSchema.nullable().optional(),
+  owner_clarification_receipt: z.string().optional().nullable(),
   kind: z.enum(['board_report', 'auditor_pack']),
   title: z.string(),
   engagement_id: z.uuid(),
@@ -100,6 +103,45 @@ export function CoverageFirstPreview({ report }: { report: ReportDetail }) {
           </li>
         ))}
       </ul>
+      {parsed.owner_coverage_clarification && (
+        <section
+          aria-label="Owner explanations for incomplete public pages"
+          className="space-y-2 rounded border border-slate-200 p-3"
+        >
+          <h5 className="font-semibold">Owner explanations and follow-up</h5>
+          <p className="text-sm">
+            These owner declarations are unverified. They do not mark pages as examined, establish a
+            control pass, or change the retained findings.
+          </p>
+          <dl className="space-y-3 text-sm">
+            {parsed.owner_coverage_clarification.request.clarifications.map((item) => (
+              <div key={item.page}>
+                <dt className="font-medium">
+                  {
+                    {
+                      root: 'Home page',
+                      privacy: 'Privacy notice',
+                      contact: 'Contact and grievance channels',
+                      terms: 'Terms',
+                      consent: 'Consent and withdrawal information',
+                    }[item.page]
+                  }{' '}
+                  — {item.sourceState}
+                  {item.sourceTruncated ? ' (partial extraction)' : ''}
+                </dt>
+                <dd>{item.reason}</dd>
+                {item.proposedPublicUrl && (
+                  <dd>Proposed follow-up address (unexamined): {item.proposedPublicUrl}</dd>
+                )}
+              </div>
+            ))}
+          </dl>
+          <p className="text-xs text-slate-600">
+            Frozen owner revision {parsed.owner_coverage_clarification.revisionId} · audit receipt{' '}
+            {parsed.owner_clarification_receipt}. Later explanations do not rewrite this report.
+          </p>
+        </section>
+      )}
       {parsed.coverage.candidatesTruncated && (
         <p className="text-sm">The saved evidence candidate list is truncated.</p>
       )}

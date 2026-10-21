@@ -88,7 +88,7 @@ it('captures fresh five-page evidence with actual body hashes, same requests and
   expect(result.check.auditPages).toHaveLength(3);
   expect(result.check.observations).toHaveLength(3);
 });
-it('marks absent links unexamined with null provenance and never follows an action or hidden consent link', async () => {
+it('probes bounded canonical paths without following action or hidden links', async () => {
   const { deps, calls } = dependencies({
     '/': '<script>const link="<a href=/consent>Consent</a>"</script><form action=/consent><input value="secret"></form><template><a href=/consent>Consent</a></template>',
   });
@@ -97,14 +97,17 @@ it('marks absent links unexamined with null provenance and never follows an acti
     new AbortController().signal,
     deps,
   );
-  expect(calls).toEqual(['https://public.org/']);
+  expect(calls).toEqual([
+    'https://public.org/',
+    ...['privacy', 'contact', 'terms', 'consent'].map((p) => `https://public.org/${p}`),
+  ]);
   expect(result.evidence.pageSources.slice(1)).toEqual(
     ['privacy', 'contact', 'terms', 'consent'].map((page) => ({
       page,
-      requestedUrl: null,
-      finalUrl: null,
-      state: 'unexamined',
-      contentSha256: null,
+      requestedUrl: `https://public.org/${page}`,
+      finalUrl: `https://public.org/${page}`,
+      state: 'examined',
+      contentSha256: hash('<p>Privacy policy and retention notice.</p>'),
     })),
   );
 });
@@ -131,6 +134,10 @@ it.each([
     deps.resolve4.mockResolvedValueOnce(['8.8.8.8']).mockResolvedValue(['169.254.169.254']);
   const original = deps.fetchPage.getMockImplementation()!;
   deps.fetchPage.mockImplementation(async (url, address) => {
+    if (url.pathname === '/cookie-policy') {
+      calls.push(url.href);
+      return { ...response(''), status: 404 };
+    }
     if (url.pathname !== '/consent') return original(url, address);
     calls.push(url.href);
     if (mode === 'offsite_redirect')
@@ -145,14 +152,10 @@ it.each([
     deps,
   );
   const consent = result.evidence.pageSources.find((p) => p.page === 'consent')!;
-  expect(consent.state).toBe(
-    ['off_site', 'query', 'userinfo'].includes(mode) ? 'unexamined' : 'unavailable',
-  );
+  expect(consent.state).toBe('unavailable');
   expect(consent.finalUrl).toBeNull();
   expect(consent.contentSha256).toBeNull();
-  expect(consent.requestedUrl).toBe(
-    consent.state === 'unavailable' ? 'https://public.org/consent' : null,
-  );
+  expect(consent.requestedUrl).toBe('https://public.org/cookie-policy');
   expect(calls.every((url) => url.startsWith('https://public.org/'))).toBe(true);
   expect(calls).not.toContain('https://other.org/consent');
 });
@@ -195,6 +198,9 @@ it('retains only accepted final consent body hash and vetted redirect provenance
   });
   expect(calls).toEqual([
     'https://public.org/',
+    'https://public.org/privacy',
+    'https://public.org/contact',
+    'https://public.org/terms',
     'https://public.org/legal/consent',
     'https://public.org/consent-final',
   ]);
@@ -223,7 +229,7 @@ it('refuses unsafe root before any transport and preserves unavailable notice so
   expect(unsafe.deps.fetchPage).not.toHaveBeenCalled();
   const { deps } = dependencies({ '/': '<a href=/privacy>Privacy</a>' });
   deps.fetchPage.mockImplementation(async (url) => {
-    if (url.pathname === '/privacy') throw new Error('private diagnostic');
+    if (url.pathname.startsWith('/privacy')) throw new Error('private diagnostic');
     return response('<a href=/privacy>Privacy</a>');
   });
   const result = await checkPublicWebsiteEvidenceV2(
@@ -234,7 +240,7 @@ it('refuses unsafe root before any transport and preserves unavailable notice so
   expect(result.evidence.pageSources[1]).toMatchObject({
     page: 'privacy',
     state: 'unavailable',
-    requestedUrl: 'https://public.org/privacy',
+    requestedUrl: 'https://public.org/privacy-policy',
     finalUrl: null,
     contentSha256: null,
   });
@@ -248,12 +254,13 @@ it('deduplicates consent against checked pages and limits distinct consent links
     new AbortController().signal,
     shared.deps,
   );
-  expect(shared.calls).toEqual(['https://public.org/', 'https://public.org/privacy']);
+  expect(shared.calls).toHaveLength(5);
+  expect(shared.calls.filter((p) => p.endsWith('/privacy'))).toHaveLength(1);
   expect(reused.evidence.pageSources.at(-1)).toMatchObject({
     page: 'consent',
-    state: 'unexamined',
-    requestedUrl: null,
-    finalUrl: null,
+    state: 'examined',
+    requestedUrl: 'https://public.org/consent',
+    finalUrl: 'https://public.org/consent',
   });
   const multiple = dependencies({ '/': root + '<a href=/consent-extra>Other consent page</a>' });
   await checkPublicWebsiteEvidenceV2(
@@ -314,7 +321,52 @@ it.each(['https://other.org/cookies', '/cookies?token=secret', 'https://u:p@publ
       new AbortController().signal,
       deps,
     );
-    expect(calls).toEqual(['https://public.org/']);
-    expect(result.evidence.pageSources.find((p) => p.page === 'consent')?.state).toBe('unexamined');
+    expect(calls).toHaveLength(5);
+    expect(calls).not.toContain(href);
+    expect(
+      calls.every(
+        (url) => url.startsWith('https://public.org/') && !url.includes('?') && !url.includes('@'),
+      ),
+    ).toBe(true);
+    expect(result.evidence.pageSources.find((p) => p.page === 'consent')?.state).toBe('examined');
   },
 );
+
+it('falls through missing canonical notices while SVG root stays partial and final failures remain unavailable', async () => {
+  const calls: string[] = [];
+  const result = await checkPublicWebsiteEvidenceV2(
+    'https://public.org/',
+    new AbortController().signal,
+    {
+      resolve4: async () => ['8.8.8.8'],
+      fetchPage: async (url) => {
+        calls.push(url.pathname);
+        return url.pathname === '/'
+          ? response('<svg><text>Excluded</text></svg><p>Public company</p>')
+          : ['/privacy-policy', '/contact-us', '/terms-of-service', '/cookie-policy'].includes(
+                url.pathname,
+              )
+            ? response('<h1>Public notice</h1><p>Contact us and withdraw consent.</p>')
+            : { ...response('missing'), status: 404 };
+      },
+    },
+  );
+  const payload = publicControlPayloadV2Schema.parse(JSON.parse(result.evidence.payloadText));
+  expect(payload.pages[0]).toMatchObject({ state: 'examined', truncated: true });
+  expect(payload.pages[0]!.coverageReasons).toContain('unsupported_foreign_markup');
+  expect(payload.pages.slice(1).every((p) => p.state === 'examined')).toBe(true);
+  expect(calls).toEqual([
+    '/',
+    '/privacy',
+    '/privacy-policy',
+    '/contact',
+    '/contact-us',
+    '/terms',
+    '/terms-of-service',
+    '/consent',
+    '/cookie-policy',
+  ]);
+  expect(result.evidence.pageSources.map((p) => p.requestedUrl)).toEqual(
+    calls.filter((_, i) => i === 0 || i % 2 === 0).map((p) => 'https://public.org' + p),
+  );
+});

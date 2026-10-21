@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Hono } from 'hono';
 import type { Variables } from '../types.js';
-import { applyEnv, createSupabaseDouble, TENANT_A, TENANT_B } from '../test/harness.js';
+import { applyEnv, createSupabaseDouble, TENANT_A, TENANT_B, FOUNDER_ID } from '../test/harness.js';
 
 /**
  * W9 · Adversarial suite for tenant resolution.
@@ -26,6 +26,7 @@ async function buildApp(
   env: Record<string, string | undefined>,
   double: ReturnType<typeof createSupabaseDouble>,
   token = 'a-valid-jwt',
+  actorId = 'user-a',
 ) {
   applyEnv(env);
   supabase.current = double;
@@ -36,7 +37,7 @@ async function buildApp(
   const app = new Hono<{ Variables: Variables }>();
   // Stand in for authMiddleware, which has its own suite.
   app.use('/v1/*', async (c, next) => {
-    c.set('user', { id: 'user-a' } as never);
+    c.set('user', { id: actorId } as never);
     c.set('token', token as never);
     await next();
   });
@@ -154,5 +155,56 @@ describe('tenantResolver — C-W1-3 · invitation acceptance exemption', () => {
     });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ tenantId: null, role: null });
+  });
+});
+
+describe('global platform founder tenant resolution', () => {
+  it.each([null, { role: 'viewer' }])(
+    'uses protected global authority instead of membership %s',
+    async (membership) => {
+      const app = await buildApp(
+        { ENVIRONMENT: 'production' },
+        createSupabaseDouble({
+          membership,
+          globalFounder: { userId: FOUNDER_ID, revokedAt: null, internal: true },
+        }),
+        'valid-jwt',
+        FOUNDER_ID,
+      );
+      const response = await app.request('/v1/scope', { headers: { 'x-tenant-id': TENANT_B } });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ tenantId: TENANT_B, role: 'founder' });
+    },
+  );
+  it.each([
+    { revokedAt: '2026-10-20T00:00:00Z', internal: true },
+    { revokedAt: null, internal: false },
+  ])('refuses revoked/noninternal global designation %s', async (designation) => {
+    const app = await buildApp(
+      { ENVIRONMENT: 'production' },
+      createSupabaseDouble({
+        membership: null,
+        globalFounder: { userId: FOUNDER_ID, ...designation },
+      }),
+      'valid-jwt',
+      FOUNDER_ID,
+    );
+    expect((await app.request('/v1/scope', { headers: { 'x-tenant-id': TENANT_B } })).status).toBe(
+      403,
+    );
+  });
+  it('does not invent an organization for a founder', async () => {
+    const app = await buildApp(
+      { ENVIRONMENT: 'production' },
+      createSupabaseDouble({
+        globalFounder: { userId: FOUNDER_ID, revokedAt: null, internal: true },
+        tenantExists: false,
+      }),
+      'valid-jwt',
+      FOUNDER_ID,
+    );
+    expect((await app.request('/v1/scope', { headers: { 'x-tenant-id': TENANT_B } })).status).toBe(
+      403,
+    );
   });
 });

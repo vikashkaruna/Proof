@@ -1,3 +1,4 @@
+import { readOrganizationContexts, type OrganizationContextRow } from './organization-contexts';
 import { selectTenantMembership } from './tenant-selection';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
@@ -40,6 +41,8 @@ export interface TenantContext {
   /** From `tenant_users.approval_scopes`. Empty means unrestricted. */
   approvalScopes: string[];
   isAxiomInternal: boolean;
+  /** Server-verified live platform designation, independent of tenant membership. */
+  isGlobalFounder?: boolean;
   /**
    * Whether this tenant may be shown illustrative sample figures.
    *
@@ -66,17 +69,10 @@ interface TenantRel {
   is_demo?: boolean | null;
 }
 
-interface MembershipRow {
-  tenant_id: string;
-  role: UserRole;
-  approval_scopes: string[] | null;
-  tenants: TenantRel | TenantRel[] | null;
-}
-
 /** Supabase types an embedded relation as either an object or an array. */
-function readTenant(rel: MembershipRow['tenants']): TenantRel {
-  if (Array.isArray(rel)) return rel[0] ?? { slug: '', name: 'Unknown' };
-  return rel ?? { slug: '', name: 'Unknown' };
+function readTenant(rel: OrganizationContextRow['tenants']): TenantRel {
+  const tenant = Array.isArray(rel) ? rel[0] : rel;
+  return { slug: tenant?.slug ?? '', name: tenant?.name ?? 'Unknown', is_demo: tenant?.is_demo };
 }
 
 /**
@@ -87,8 +83,7 @@ function readTenant(rel: MembershipRow['tenants']): TenantRel {
  * user belongs to no tenant yet.
  *
  * @param requestedSlug an explicit tenant slug (e.g. from a query param).
- *        Still subject to the membership check — naming a tenant is not the
- *        same as belonging to it.
+ *        It must belong to the authenticated caller's verified organization scope.
  */
 /**
  * Login-time MFA (W1 · SEC-8).
@@ -191,28 +186,7 @@ export async function requireTenantContext(
   const { user } = authResult.data;
   if (!user) redirect('/login');
 
-  // RLS restricts this to the caller's own memberships, so the list is already
-  // the set of tenants they may act in.
-  const readMemberships = () =>
-    supabase
-      .from('tenant_users')
-      .select('tenant_id, role, approval_scopes, tenants:tenant_id(slug, name, is_demo)')
-      .eq('user_id', user.id);
-  let { data: memberships, error: membershipsError } = await readMemberships();
-  if (
-    membershipsError?.code === 'PGRST303' &&
-    membershipsError.message === 'JWT issued at future'
-  ) {
-    // GoTrue and PostgREST can straddle a one-second boundary just after
-    // sign-in. Retry that specific refusal; never interpret it as no tenant.
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-    ({ data: memberships, error: membershipsError } = await readMemberships());
-  }
-  if (membershipsError || !memberships) {
-    throw new Error('Tenant memberships are unavailable');
-  }
-
-  const rows = memberships as unknown as MembershipRow[];
+  const { rows, globalFounder } = await readOrganizationContexts(supabase, user.id);
   const firstMembership = selectTenantMembership(rows);
   if (!firstMembership) redirect('/onboarding');
 
@@ -220,9 +194,8 @@ export async function requireTenantContext(
   const cookieSlug = cookieStore.get('axiom_active_tenant')?.value;
   const wanted = requestedSlug || cookieSlug;
 
-  // The cookie is a *preference*, not an authorisation. If it names a tenant
-  // the user is not a member of, it is ignored rather than honoured — the
-  // previous code queried whatever slug the cookie carried.
+  // The cookie is a preference. Its selection must appear in the user-scoped
+  // inventory: all organizations for live founders, memberships for others.
   const selected = selectTenantMembership(rows, wanted) ?? firstMembership;
 
   const tenant = readTenant(selected.tenants);
@@ -245,7 +218,8 @@ export async function requireTenantContext(
     tenantName: tenant.name,
     role: selected.role,
     approvalScopes: selected.approval_scopes ?? [],
-    isAxiomInternal: Boolean(profile?.is_axiom_internal),
+    isAxiomInternal: globalFounder || Boolean(profile?.is_axiom_internal),
+    isGlobalFounder: globalFounder,
     isDemo: Boolean(tenant.is_demo),
     supabase,
   };
@@ -285,7 +259,7 @@ export async function requireInternalContext(requestedSlug?: string): Promise<Te
   // says what you may do. Migration 0016 stripped the flag of its RLS powers
   // precisely so it would stop standing in for authority, and a page that
   // still gated on the flag alone would be the last place it did.
-  if (!ctx.isAxiomInternal) redirect('/portal');
+  if (!ctx.isGlobalFounder) redirect('/portal');
   if (!can(Capability.WORKBENCH_ACCESS, { role: ctx.role })) redirect('/portal');
   return ctx;
 }

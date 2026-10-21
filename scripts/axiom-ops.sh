@@ -16,6 +16,7 @@
 #   stop        soft stop: cut idle cost, delete nothing, keep every object ID
 #   start       reverse of stop
 #   status      what is running and what still costs money
+#   cleanup     preprod only: explicitly selected old backups/images/storage (preview first)
 #
 # Options
 #                      stop/start/status only. `all` = every NON-production env that has an
@@ -25,6 +26,7 @@
 #   --env-file <path>  explicit env file (also AXIOM_ENV_FILE)
 #   --dry-run          show what would change; mutate nothing
 #   --yes, -y          do not ask for confirmation (needed when not on a TTY)
+#   --smallest-sql     stop preprod only: use db-f1-micro where compatible
 #   --skip-security --skip-python --skip-config   (ci only) skip a gate
 #   -- <args>          passed unchanged to the underlying deploy/build script
 #
@@ -60,6 +62,7 @@ shift
 
 ENV_NAME=""; DRY_RUN=false; ASSUME_YES=false; EXTRA=(); CONFIRM_PRODUCTION=""
 SKIP_SECURITY=false; SKIP_PYTHON=false; SKIP_CONFIG=false
+SMALLEST_SQL=false
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_NAME="${2:-}"; shift 2 ;;
@@ -67,6 +70,7 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY_RUN=true; shift ;;
     --confirm-production) CONFIRM_PRODUCTION="${2:-}"; shift 2 ;;
     --yes|-y) ASSUME_YES=true; shift ;;
+    --smallest-sql) SMALLEST_SQL=true; shift ;;
     --skip-security) SKIP_SECURITY=true; shift ;;
     --skip-python) SKIP_PYTHON=true; shift ;;
     --skip-config) SKIP_CONFIG=true; shift ;;
@@ -75,7 +79,11 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$COMMAND" in env-check|ci|build|deploy|stop|start|status) ;; *) die "unknown command: $COMMAND (see --help)" ;; esac
+case "$COMMAND" in env-check|ci|build|deploy|stop|start|status|cleanup) ;; *) die "unknown command: $COMMAND (see --help)" ;; esac
+[ "$COMMAND" != cleanup ] || [ "$ENV_NAME" = preprod ] || die "cleanup is restricted to --env preprod"
+if [ "$SMALLEST_SQL" = true ]; then
+  [ "$COMMAND" = stop ] && [ "$ENV_NAME" = preprod ] || die "--smallest-sql requires stop --env preprod"
+fi
 [ "$COMMAND" = ci ] && [ -z "$ENV_NAME" ] && SKIP_CONFIG=true
 [ -n "$ENV_NAME" ] || [ "$COMMAND" = ci ] || die "--env is required (local | staging | preprod)"
 
@@ -282,7 +290,9 @@ cmd_softstop() { # stop | start | status
     gcp_params
     local args=("$COMMAND" --env "$ENV_NAME" --project "$PROJECT_ID" --region "$REGION")
     [ "$DRY_RUN" = true ] && args+=(--dry-run)
+    [ "$SMALLEST_SQL" = true ] && args+=(--smallest-sql)
     [ "$COMMAND" != status ] && confirm "$COMMAND the '${ENV_NAME}' environment in project ${PROJECT_ID}? (nothing is deleted)"
+    [ ${#EXTRA[@]} -eq 0 ] || die "stop/start/status do not accept extra arguments"
     python3 scripts/softstop-gcp.py "${args[@]}"
   else
     link_docker_env
@@ -294,10 +304,31 @@ cmd_softstop() { # stop | start | status
   fi
 }
 
+cmd_cleanup() {
+  load_env
+  gcp_params
+  local extra
+  for extra in ${EXTRA[@]+"${EXTRA[@]}"}; do
+    case "$extra" in
+      --project|--project=*|--region|--region=*|--env|--env=*|--confirm-project|--confirm-project=*|--dry-run)
+        die "cleanup target/confirmation is controlled by --env and --dry-run before --" ;;
+    esac
+  done
+  local args=(--env preprod --project "$PROJECT_ID" --region "$REGION")
+  if [ "$DRY_RUN" = true ]; then
+    args+=(--dry-run)
+  else
+    confirm "Permanently delete the explicitly selected old PREPROD resources in ${PROJECT_ID}?"
+    args+=(--confirm-project "$PROJECT_ID")
+  fi
+  python3 scripts/cleanup-preprod.py "${args[@]}" ${EXTRA[@]+"${EXTRA[@]}"}
+}
+
 case "$COMMAND" in
   env-check) cmd_env_check ;;
   ci) cmd_ci ;;
   build) cmd_build ;;
   deploy) cmd_deploy ;;
   stop|start|status) cmd_softstop ;;
+  cleanup) cmd_cleanup ;;
 esac

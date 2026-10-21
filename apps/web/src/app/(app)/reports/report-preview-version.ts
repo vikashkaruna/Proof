@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PUBLIC_COVERAGE_PAGES, publicCoverageClarificationSnapshotSchema } from '@axiom/types';
 // Immutable V1 display pins only; no font bytes or Node-only renderer imports.
 export const PREVIEW_BRANDED_PRESENTATION_V1 = Object.freeze({
   revision: 'axiom-report-brand-1',
@@ -41,6 +42,74 @@ const branded = z.object({
     .unknown()
     .refine((value) => matchesPinnedObject(value, PREVIEW_BRANDED_PRESENTATION_V1)),
 });
+const digest = z.string().regex(/^[a-f0-9]{64}$/);
+const clarified = branded.extend({
+  schema_version: z.literal(8),
+  branded_source_sha256: digest,
+  tenant_id: z.uuid(),
+  engagement_id: z.uuid(),
+  owner_coverage_clarification: publicCoverageClarificationSnapshotSchema.nullable(),
+  owner_clarification_sha256: digest.nullable(),
+  owner_clarification_receipt: z
+    .string()
+    .max(40)
+    .regex(/^[1-9][0-9]*$/)
+    .nullable(),
+});
+const publicCoverage = z.object({
+  coverage: z.object({
+    pages: z
+      .array(
+        z.object({
+          page: z.enum(PUBLIC_COVERAGE_PAGES),
+          state: z.enum(['examined', 'unavailable', 'unexamined']),
+          truncated: z.boolean(),
+        }),
+      )
+      .max(5),
+  }),
+  provenance: z.object({ capturePayloadSha256: digest }),
+});
+function validateClarified(value: unknown) {
+  const doc = clarified.parse(value);
+  const snapshot = doc.owner_coverage_clarification;
+  if (
+    (snapshot === null) !== (doc.owner_clarification_sha256 === null) ||
+    (snapshot === null) !== (doc.owner_clarification_receipt === null)
+  )
+    throw Error('Unsupported report preview');
+  if (doc.underlying_document_version === 6) {
+    if (snapshot) throw Error('Unsupported report preview');
+    return doc;
+  }
+  const publicDoc = publicCoverage.parse(value);
+  const pages = publicDoc.coverage.pages;
+  if (new Set(pages.map((p) => p.page)).size !== pages.length)
+    throw Error('Unsupported report preview');
+  const incomplete = PUBLIC_COVERAGE_PAGES.map(
+    (page) => pages.find((p) => p.page === page) ?? { page, state: 'unexamined', truncated: false },
+  ).filter((p) => p.state !== 'examined' || p.truncated);
+  if (incomplete.length && !snapshot) throw Error('Unsupported report preview');
+  if (
+    snapshot &&
+    (snapshot.tenantId !== doc.tenant_id ||
+      snapshot.request.engagementId !== doc.engagement_id ||
+      snapshot.request.payloadSha256 !== publicDoc.provenance.capturePayloadSha256 ||
+      snapshot.request.expectedPreviousRevisionId !== snapshot.previousRevisionId ||
+      snapshot.request.clarifications.length !== incomplete.length ||
+      incomplete.some(
+        (p) =>
+          !snapshot.request.clarifications.some(
+            (item) =>
+              item.page === p.page &&
+              item.sourceState === p.state &&
+              item.sourceTruncated === p.truncated,
+          ),
+      ))
+  )
+    throw Error('Unsupported report preview');
+  return doc;
+}
 /** Display-only adaptation. Source/review/hash authority remains at authenticated
  * BFF HTML/PDF endpoints. Legacy projections retain their exact schema gates. */
 export function reportPreviewVersion(
@@ -52,10 +121,10 @@ export function reportPreviewVersion(
     !value ||
     typeof value !== 'object' ||
     !('schema_version' in value) ||
-    value.schema_version !== 7
+    (value.schema_version !== 7 && value.schema_version !== 8)
   )
     return value;
-  const parsed = branded.parse(value);
+  const parsed = value.schema_version === 8 ? validateClarified(value) : branded.parse(value);
   if (!digestBound || parsed.underlying_document_version !== underlying)
     throw Error('Unsupported report preview');
   return { ...value, schema_version: underlying };

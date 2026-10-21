@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { guardedParitySql, loadParityFixture } from './parity-fixture-target-core.js';
 import { createRequire } from 'node:module';
 import { closeSync, fstatSync, openSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -184,4 +186,55 @@ export async function updateLocalFixtureRow(
     );
     if (result.rowCount !== 1) throw new Error(`Fixture update of ${table} affected no row`);
   });
+}
+
+/** Historical synthetic parents only; genuine intake must use the authenticated BFF workflow. */
+export function insertOwnedFixtureEngagements(input: {
+  repoRoot: string;
+  stateDir: string;
+  apiUrl: string;
+  serviceKey: string;
+  rows: unknown;
+}): void {
+  const parsed = z
+    .array(
+      z
+        .object({
+          id: z.uuid(),
+          tenant_id: z.uuid(),
+          library_version: z.string().min(1).max(100),
+          title: z.string().min(1).max(500),
+          estate_id: z.uuid().nullable().optional(),
+          status: z
+            .enum(['intake', 'assessment', 'remediation', 'completed', 'archived'])
+            .optional(),
+          created_at: z.iso.datetime({ offset: true }).optional(),
+          estimated_exposure_inr: z.number().finite().nonnegative().optional(),
+          posture_score: z.number().finite().min(0).max(100).optional(),
+        })
+        .strict(),
+    )
+    .min(1)
+    .max(100)
+    .parse(input.rows);
+  const environment = { ...process.env, AXIOM_PARITY_STATE_DIR: input.stateDir };
+  const fixture = loadParityFixture(input.repoRoot, environment);
+  if (
+    fixture.apiOrigin !== new URL(input.apiUrl).origin ||
+    fixture.status.SERVICE_ROLE_KEY !== input.serviceKey
+  )
+    throw new Error('Engagement fixture API differs from owned parity');
+  const inserts = parsed.map((row) => {
+    const columns = Object.keys(row);
+    const encoded = JSON.stringify(row).replaceAll("'", "''");
+    return `insert into public.engagements (${columns.join(',')}) select ${columns.join(',')} from jsonb_populate_record(null::public.engagements, '${encoded}'::jsonb);`;
+  });
+  // The migration's explicit database-owner import branch preserves historical
+  // fixtures. No service grant, current-version exception or fabricated intake receipt.
+  guardedParitySql(
+    `begin;\n${inserts.join('\n')}\ncommit;`,
+    'postgres',
+    input.repoRoot,
+    environment,
+  );
 }

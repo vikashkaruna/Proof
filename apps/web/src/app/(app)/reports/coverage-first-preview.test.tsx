@@ -141,3 +141,57 @@ it.each(['board', 'auditor'] as const)(
     expect(screen.getByText('Scores and financial exposure estimates are withheld.')).toBeTruthy();
   },
 );
+it('shows frozen document8 owner reasons as unverified with no mutation controls', () => {
+  const reason = 'Owner requests further examination; the public page remains unexamined.';
+  const snapshot = {
+    version: 1,
+    disposition: 'owner_declarations_unverified',
+    tenantId: id,
+    actorId: id,
+    revisionId: id,
+    previousRevisionId: null,
+    recordedAt: '2026-10-21T00:00:00Z',
+    request: {
+      version: 1,
+      operationKey: id,
+      engagementId: id,
+      checkId: id,
+      payloadSha256: 'b'.repeat(64),
+      expectedPreviousRevisionId: null,
+      clarifications: ['root', 'privacy', 'contact', 'terms', 'consent'].map((page) => ({
+        page,
+        sourceState: 'unexamined',
+        sourceTruncated: false,
+        reasonCategory: 'needs_investigation',
+        reason,
+        proposedPublicUrl: page === 'privacy' ? 'https://example.org/privacy' : null,
+      })),
+    },
+  };
+  const content = {
+    ...document(),
+    schema_version: 8,
+    underlying_document_version: 5,
+    tenant_id: id,
+    source_sha256: 'c'.repeat(64),
+    underlying_source_sha256: 'd'.repeat(64),
+    branded_source_sha256: 'e'.repeat(64),
+    organization_name: 'Synthetic Company',
+    presentation: PREVIEW_BRANDED_PRESENTATION_V1,
+    owner_coverage_clarification: snapshot,
+    owner_clarification_sha256: 'f'.repeat(64),
+    owner_clarification_receipt: '31',
+    coverage: { ...document().coverage, pages: [] },
+    provenance: { ...document().provenance, capturePayloadSha256: 'b'.repeat(64) },
+  };
+  render(<CoverageFirstPreview report={record({ contentText: JSON.stringify(content) })} />);
+  const region = screen.getByRole('region', {
+    name: 'Owner explanations for incomplete public pages',
+  });
+  expect(within(region).getAllByText(reason)).toHaveLength(5);
+  expect(region.textContent).toContain('unverified');
+  expect(region.textContent).toContain('Consent and withdrawal information — unexamined');
+  expect(region.textContent).toContain('audit receipt 31');
+  expect(within(region).queryByRole('button')).toBeNull();
+  expect(within(region).queryByRole('link')).toBeNull();
+});

@@ -71,6 +71,7 @@ const MENUS: Record<string, string[]> = {
     '/assessment',
     '/engagements',
     '/controls',
+    '/catalogue',
     '/plans',
     '/evidence',
     '/ledger',
@@ -94,6 +95,7 @@ const MENUS: Record<string, string[]> = {
     '/assessment',
     '/engagements',
     '/controls',
+    '/catalogue',
     '/plans',
     '/approval',
     '/execution',
@@ -114,6 +116,7 @@ const MENUS: Record<string, string[]> = {
   [UserRole.VIEWER]: [
     '/dashboard',
     '/datamap/flows',
+    '/catalogue',
     '/plans',
     '/evidence',
     '/ledger',
@@ -124,6 +127,7 @@ const MENUS: Record<string, string[]> = {
   [UserRole.PARTNER]: [
     '/dashboard',
     '/datamap/flows',
+    '/catalogue',
     '/plans',
     '/evidence',
     '/reports',
@@ -134,6 +138,7 @@ const MENUS: Record<string, string[]> = {
   [UserRole.APPROVER]: [
     '/dashboard',
     '/datamap/flows',
+    '/catalogue',
     '/plans',
     '/approval',
     '/evidence',
@@ -153,6 +158,7 @@ const MENUS: Record<string, string[]> = {
     '/assessment',
     '/engagements',
     '/controls',
+    '/catalogue',
     '/plans',
     '/evidence',
     '/ledger',

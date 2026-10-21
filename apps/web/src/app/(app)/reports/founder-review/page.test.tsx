@@ -42,14 +42,15 @@ it.each([
   'refuses direct workspace access for %s even if a client can forge a menu flag',
   async (role) => {
     state.role = role;
+    state.live = false;
     await expect(Page()).rejects.toThrow('/reports?error=founder_required');
-    expect(state.rpc).not.toHaveBeenCalled();
+    expect(state.rpc).toHaveBeenCalled();
   },
 );
 it('refuses former-live explicit founder labels, noninternal profiles and RPC failures', async () => {
   state.live = false;
   await expect(Page()).rejects.toThrow('founder_required');
-  state.live = true;
+  state.live = false;
   state.internal = false;
   await expect(Page()).rejects.toThrow('founder_required');
   state.internal = true;
@@ -65,4 +66,12 @@ it('binds the live founder workspace to only the selected organization and authe
     actorId: 'actor',
     tenantName: 'Selected organization',
   });
+});
+
+it('allows a globally designated founder despite a lower explicit organization role', async () => {
+  state.role = UserRole.VIEWER;
+  state.live = true;
+  const result = await Page();
+  expect(result.key).toBe('tenant:actor');
+  expect(result.props.tenantId).toBe('tenant');
 });

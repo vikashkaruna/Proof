@@ -1,3 +1,4 @@
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
 /** Independently retained, exact-version approval and maker-checker proof. */
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
@@ -162,6 +163,7 @@ export class ApprovalProofArchiveService {
     founder: boolean,
     signal?: AbortSignal,
   ) {
+    if (await isLivePlatformFounder(this.db, actorId, signal)) return;
     const member = await this.queryRow(
       'tenant_users',
       tenantId,

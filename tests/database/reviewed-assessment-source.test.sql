@@ -19,9 +19,9 @@ insert into public.workload_identities(id,tenant_id,agent_name,spiffe_id,status)
 create temporary table policy(value jsonb);
 grant select on policy to human_action_writer,service_role,agent_ledger_writer;
 grant insert on policy to human_action_writer;
-create function pg_temp.enqueue(job int default 51, hash text default repeat('a',64), rev integer default 1, fp text default null) returns jsonb language sql as $$
+create function pg_temp.enqueue(job int default 51, hash text default repeat('a',64), rev integer default 1, fp text default null, expected_library text default 'reviewed-source-fixture-v1') returns jsonb language sql as $$
  select public.enqueue_reviewed_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash,encode(sha256(convert_to(job::text,'UTF8')),'hex'),clock_timestamp()+interval '5 minutes',
- 'arn:aws:kms:ap-south-1:123456789012:key/'||pg_temp.id(61)::text,decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),rev,coalesce(fp,(select value->>'fingerprint' from policy)), 'reviewed-source-fixture-v1', (select value->>'digest' from policy))$$;
+ 'arn:aws:kms:ap-south-1:123456789012:key/'||pg_temp.id(61)::text,decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),rev,coalesce(fp,(select value->>'fingerprint' from policy)), expected_library, (select value->>'digest' from policy))$$;
 create function pg_temp.recover(job int default 51, hash text default repeat('a',64)) returns jsonb language sql as $$
  select public.recover_assessment_dispatch(pg_temp.id(job),pg_temp.id(11),pg_temp.id(1),pg_temp.id(31),pg_temp.id(22),pg_temp.id(21),pg_temp.id(41),hash)$$;
 select pg_temp.ok(encode(sha256(convert_to(controller_security.canonical_questionnaire_json('{"libraryVersion": "reviewed-source-fixture-v1", "controls": [{"id": "WA-1", "title": "Fixture", "questions": []}, {"id": "WA-2", "title": "Fixture", "questions": []}]}'::jsonb),'UTF8')),'hex')='f91b195aaaf22a8b825589fb5949b69bb0bf3586a96b41f456ccb29b7c03685e','TS canonical ordered projection digest exact');
@@ -43,9 +43,9 @@ reset role;
 update policy set value=jsonb_set(value,'{digest}',to_jsonb('f91b195aaaf22a8b825589fb5949b69bb0bf3586a96b41f456ccb29b7c03685e'::text));
 savepoint changed_pin;
 insert into public.control_libraries(version,published_at,published_by,change_log,control_count) values('reviewed-source-other',now(),'test','fixture',2);
-update public.engagements set library_version='reviewed-source-other' where id=pg_temp.id(21);
+select pg_temp.reject('update public.engagements set library_version=''reviewed-source-other'' where id=pg_temp.id(21)','23514');
 set local role human_action_writer;
-select pg_temp.ok(pg_temp.enqueue()->>'error'='questionnaire_source_changed','atomic engagement pin mismatch refused');
+select pg_temp.ok(pg_temp.enqueue(51,repeat('a',64),1,null,'reviewed-source-other')->>'error'='questionnaire_source_changed','mismatched reviewed library refused independently of immutable pin');
 reset role;
 select pg_temp.ok((select count(*)=0 from public.assessment_dispatch_jobs where tenant_id=pg_temp.id(11)),'refusal left no outbox or dispatch');
 rollback to changed_pin;
@@ -76,9 +76,9 @@ select pg_temp.reject('update public.control_libraries set status=''published'' 
 insert into public.controls select id,'reviewed-source-draft',title,obligation,domain,severity,citations,evidence_required,assessment_questions,scoring,remediation_patterns,tags,sdf_only,children_only,'reviewed-source-draft',revised_in_version,notes,created_at from public.controls where library_version='reviewed-source-fixture-v1';
 update public.control_libraries set status='published' where version='reviewed-source-draft';
 select pg_temp.reject('delete from public.controls where library_version=''reviewed-source-draft''','42501');
-update public.engagements set library_version='reviewed-source-draft' where id=pg_temp.id(21);
+select pg_temp.reject('update public.engagements set library_version=''reviewed-source-draft'' where id=pg_temp.id(21)','23514');
 set local role human_action_writer;
-select pg_temp.ok(pg_temp.enqueue()=(select value from issued),'recorded reviewed receipt survives engagement repinning');
+select pg_temp.ok(pg_temp.enqueue()=(select value from issued),'recorded reviewed receipt survives refused engagement repinning');
 reset role;
 select pg_temp.ok((select detail->'expected_questionnaire' = jsonb_build_object('libraryVersion','reviewed-source-fixture-v1','questionnaireDigest',(select value->>'digest' from policy)) from public.audit_ledger where tenant_id=pg_temp.id(11) and action_type='assessment.requested'),'immutable receipt binds reviewed projection digest');
 select pg_temp.ok((select count(*)=1 from public.audit_ledger where tenant_id=pg_temp.id(11) and action_type='assessment.requested'),'one human request receipt');

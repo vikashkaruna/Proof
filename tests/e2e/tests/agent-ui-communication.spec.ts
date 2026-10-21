@@ -1,3 +1,4 @@
+import { insertOwnedEngagementFixtures } from '../local-db';
 import { AssessmentConfigurationSchema } from '../../../packages/types/src/assessment-request';
 /**
  * E2E: Agent ↔ UI communication.
@@ -109,6 +110,15 @@ test('assessment waits for confirmation and never invents score improvements or 
   const engagement = crypto.randomUUID();
   const library = `ui-invocation-${engagement}`;
   async function seed(table: string, body: unknown) {
+    if (table === 'engagements') {
+      insertOwnedEngagementFixtures(
+        Array.isArray(body) ? body : [body],
+        state.supabaseUrl,
+        state.serviceKey,
+      );
+      return;
+    }
+
     const response = await fetch(`${state.supabaseUrl}/rest/v1/${table}`, {
       method: 'POST',
       headers: {

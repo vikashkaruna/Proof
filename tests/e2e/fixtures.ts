@@ -1,6 +1,12 @@
 import {
+  designateOwnedFixtureFounder,
+  assertLocalFounderFixtureTarget,
+  wantsGlobalFounder,
+} from '../../scripts/lib/owned-founder-fixture';
+import {
   browserMfaPoolEnabled,
   mfaPoolFactorReadPath,
+  mfaPoolMembershipReadPath,
   verifyMfaPoolAccountRows,
   leaseBrowserMfaAccount,
   prepareBrowserMfaPool,
@@ -10,7 +16,13 @@ import {
 } from '../../scripts/lib/browser-mfa-pool';
 import { dirname, join } from 'node:path';
 import { withFreshMfaFixtureCounter } from './fixtures/login-mfa-counter';
-import { acceptanceTarget, personaStatePath, assertPersonaTarget, tenantCookie } from './target';
+import {
+  acceptanceTarget,
+  personaStatePath,
+  assertPersonaTarget,
+  tenantCookie,
+  repoRoot,
+} from './target';
 import { localRoleBearer } from './local-writer';
 import { insertLocalFixtureRow } from './local-db';
 import { enrolTestMfa } from '../../scripts/lib/enrol-test-mfa';
@@ -53,7 +65,21 @@ async function verifyPoolAccount(who: MfaPoolAccount): Promise<boolean> {
     return response.json() as Promise<unknown>;
   }
   const profile = await read(`users?id=eq.${who.id}&select=id,email,is_axiom_internal`);
-  const memberships = await read(`tenant_users?user_id=eq.${who.id}&select=user_id,tenant_id,role`);
+  let livePlatformFounder = false;
+  if (who.role === 'founder' && who.internal) {
+    const result = await fetch(`${state.supabaseUrl}/rest/v1/rpc/is_live_platform_founder`, {
+      method: 'POST',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify({ p_user_id: who.id }),
+      redirect: 'error',
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!result.ok || (await result.json()) !== true) return false;
+    livePlatformFounder = true;
+  }
+  const memberships = await read(
+    mfaPoolMembershipReadPath(who, poolBinding(), livePlatformFounder),
+  );
   const factors = await read(mfaPoolFactorReadPath(who.id));
   return verifyMfaPoolAccountRows(who, poolBinding(), { profile, memberships, factors });
 }
@@ -377,10 +403,12 @@ export async function createMfaAccount(
   opts: {
     withFactor?: boolean;
     isInternal?: boolean;
+    globalFounder?: boolean;
     role?: 'approver' | 'founder' | 'owner' | 'admin' | 'axiom_analyst' | 'viewer';
   } = {},
 ): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
-  if (usesBrowserMfaPool && opts.withFactor) {
+  wantsGlobalFounder(opts); // Validate contradictory authority intent before provisioning or leasing.
+  if (usesBrowserMfaPool && opts.withFactor && opts.globalFounder !== false) {
     return leaseBrowserMfaAccount({
       directory: poolDirectory,
       binding: poolBinding(),
@@ -401,10 +429,12 @@ async function provisionMfaAccount(
   opts: {
     withFactor?: boolean;
     isInternal?: boolean;
+    globalFounder?: boolean;
     role?: 'approver' | 'founder' | 'owner' | 'admin' | 'axiom_analyst' | 'viewer';
   } = {},
   readiness?: { wait: boolean; activated: (counter: number) => void },
 ): Promise<{ id: string; email: string; password: string; totpSecret?: string }> {
+  if (wantsGlobalFounder(opts)) assertLocalFounderFixtureTarget(acceptanceTarget?.topology);
   const suffix = crypto.randomUUID().slice(0, 8);
   const email = `journey-${label}-${suffix}@example.invalid`;
   const password = `Pw-${crypto.randomUUID()}`;
@@ -454,6 +484,26 @@ async function provisionMfaAccount(
     'journey membership',
     201,
   );
+
+  if (wantsGlobalFounder(opts)) {
+    assertLocalFounderFixtureTarget(acceptanceTarget?.topology);
+    await designateOwnedFixtureFounder({
+      root: repoRoot,
+      supabaseUrl: state.supabaseUrl,
+      serviceKey: state.serviceKey,
+      userId: id,
+      email,
+      designate: async (request) => {
+        const response = await admin(
+          '/rest/v1/rpc/designate_platform_founder',
+          request,
+          'journey founder designation',
+          204,
+        );
+        if (response.status !== 204) throw new Error('Founder designation unconfirmed');
+      },
+    });
+  }
 
   let totpSecret: string | undefined;
   if (opts.withFactor && acceptanceTarget) {

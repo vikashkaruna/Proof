@@ -4,11 +4,9 @@ begin if actual is distinct from expected then raise exception 'Expected %, got 
 insert into auth.users(id,email) values('00000000-0000-0000-0000-000000000061','onboard@test.invalid');
 insert into public.users(id,email) values('00000000-0000-0000-0000-000000000061','onboard@test.invalid');
 -- Publication fixture: completeness, not legal correctness, is under test.
-insert into public.control_libraries(version,published_at,published_by,change_log,control_count,is_current)
- values('test-onboarding',now(),'test','fixture',1,true);
-insert into public.controls(id,library_version,title,obligation,domain,severity,citations,evidence_required,assessment_questions,scoring,remediation_patterns,introduced_in_version)
- values('TEST','test-onboarding','Test','Test','GOV','low','[]','[]','[]','{}','{}','test-onboarding');
-create function pg_temp.onboard(tier public.tenant_tier default 'growth',library text default 'test-onboarding') returns jsonb language plpgsql as $$
+-- The harness emits the exact approved production catalogue before this suite.
+update public.control_libraries set is_current=true where version='0.1.1';
+create function pg_temp.onboard(tier public.tenant_tier default 'growth',library text default '0.1.1') returns jsonb language plpgsql as $$
 declare r jsonb;
 begin
  set local role human_action_writer;
@@ -36,7 +34,7 @@ begin
   if r ? 'error' then raise exception 'Onboarding failed: %',r; end if;
   tid := (r->'tenant'->>'id')::uuid;
   perform pg_temp.check_result((select role::text from public.tenant_users where tenant_id=tid),'owner');
-  perform pg_temp.check_result((select library_version from public.engagements where tenant_id=tid),'test-onboarding');
+  perform pg_temp.check_result((select library_version from public.engagements where tenant_id=tid),'0.1.1');
   perform pg_temp.check_result((select dpo_email from public.tenant_onboarding_intakes where tenant_id=tid),'dpo@test.invalid');
   perform pg_temp.check_result((select proposed_systems->0->>'name' from public.tenant_onboarding_intakes where tenant_id=tid),'proposed db');
   perform pg_temp.check_result((select action_type::text from public.audit_ledger where tenant_id=tid),'tenant.created');
@@ -66,7 +64,7 @@ begin
   end;
   if (select count(*) from public.tenants) <> before_count then raise exception 'Orphan tenant after ledger failure'; end if;
   if (select count(*) from public.tenant_onboarding_intakes) <> 1 then raise exception 'Orphan intake'; end if;
-  if (select count(*) from public.engagements where library_version='test-onboarding') <> 1 then raise exception 'Orphan engagement'; end if;
+  if (select count(*) from public.engagements where library_version='0.1.1') <> 1 then raise exception 'Orphan engagement'; end if;
 end $$;
 reset role;
 do $$ begin

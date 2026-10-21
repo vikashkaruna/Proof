@@ -24,7 +24,15 @@ const GREY = '#94A3B8';
 const COLUMN_LABELS = ['Agents', 'Connectors', 'Systems', 'Estates', 'Data categories'];
 const fieldClass = 'rounded-md border border-input bg-background p-2 text-sm';
 
-export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: GraphSnapshot }) {
+export function EstateGraph({
+  input,
+  snapshot,
+  canViewInactive = false,
+}: {
+  input: GraphInput;
+  snapshot: GraphSnapshot;
+  canViewInactive?: boolean;
+}) {
   const router = useRouter();
   const [refreshing, startRefresh] = useTransition();
   const refresh = useCallback(() => startRefresh(() => router.refresh()), [router]);
@@ -39,7 +47,10 @@ export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: 
       window.removeEventListener('focus', refreshVisible);
     };
   }, [refresh]);
-  const [filter, setFilter] = useState<GraphFilter>({ access: 'all' });
+  const [filter, setFilter] = useState<GraphFilter>({
+    access: 'all',
+    includeInactive: canViewInactive,
+  });
   const [currentTime, setCurrentTime] = useState(() => new Date(snapshot.capturedAt));
   const effectiveTime = Math.max(currentTime.getTime(), Date.parse(snapshot.capturedAt));
   useEffect(() => {
@@ -59,8 +70,12 @@ export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: 
   const [selected, setSelected] = useState<string | null>(null);
   const svg = useRef<SVGSVGElement>(null);
   const graph = useMemo(
-    () => buildEstateGraph({ ...input, now: new Date(effectiveTime) }, filter),
-    [input, filter, effectiveTime],
+    () =>
+      buildEstateGraph(
+        { ...input, now: new Date(effectiveTime) },
+        { ...filter, includeInactive: canViewInactive && filter.includeInactive },
+      ),
+    [input, filter, effectiveTime, canViewInactive],
   );
   const { positions, height } = useMemo(() => layout(graph.nodes, WIDTH), [graph.nodes]);
   const node = graph.nodes.find((n) => n.id === selected) ?? null;
@@ -122,7 +137,10 @@ export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: 
 
   function exportedGraph() {
     const estate =
-      input.estates.find((e) => e.id === filter.estateId)?.name ?? 'All active estates';
+      input.estates.find((e) => e.id === filter.estateId)?.name ??
+      (canViewInactive && filter.includeInactive
+        ? 'All estates and statuses'
+        : 'All active estates');
     const agent =
       input.agents.find((a) => a.name === filter.agentName)?.displayName ?? 'All agents';
     const access =
@@ -131,12 +149,36 @@ export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: 
         : filter.access === 'write'
           ? 'Write only'
           : 'Read and write';
-    return serializeEstateGraph(svg.current!, snapshot, `${estate} · ${agent} · ${access}`);
+    return serializeEstateGraph(
+      svg.current!,
+      snapshot,
+      `${estate} · ${agent} · ${access}${canViewInactive && filter.includeInactive ? ' · All inventory statuses' : ''}`,
+    );
   }
 
   return (
     <div className="flex flex-col gap-4" data-testid="estate-graph">
+      {canViewInactive && (
+        <p className="text-sm text-slate-600">
+          Founder inventory includes inactive and archived records. Access lines show only active
+          grants with active estates, systems and connectors.
+        </p>
+      )}
       <div className="flex flex-wrap items-end gap-3">
+        {canViewInactive && (
+          <label className="flex flex-col text-sm">
+            Inventory visibility
+            <select
+              aria-label="Inventory visibility"
+              className={fieldClass}
+              value={filter.includeInactive ? 'all' : 'active'}
+              onChange={(e) => setFilter({ ...filter, includeInactive: e.target.value === 'all' })}
+            >
+              <option value="all">All statuses, including inactive and archived</option>
+              <option value="active">Active inventory</option>
+            </select>
+          </label>
+        )}
         <label className="flex flex-col text-sm">
           Estate
           <select
@@ -145,9 +187,13 @@ export function EstateGraph({ input, snapshot }: { input: GraphInput; snapshot: 
             value={filter.estateId ?? ''}
             onChange={(e) => setFilter({ ...filter, estateId: e.target.value || undefined })}
           >
-            <option value="">All active estates</option>
+            <option value="">
+              {canViewInactive && filter.includeInactive
+                ? 'All estates and statuses'
+                : 'All active estates'}
+            </option>
             {input.estates
-              .filter((e) => e.status === 'active')
+              .filter((e) => (canViewInactive && filter.includeInactive) || e.status === 'active')
               .map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.name}

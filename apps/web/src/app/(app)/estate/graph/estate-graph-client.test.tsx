@@ -659,3 +659,29 @@ it('shows actual recorded category source in relationships, and does not invent 
     'Creation provenance is unavailable',
   );
 });
+it('exposes historical inventory only with server-verified founder visibility and immediately removes it when authority changes', () => {
+  const historical = structuredClone(input);
+  historical.estates.push({ id: 'old-estate', name: 'Archived estate', status: 'archived' });
+  historical.systems.push({
+    id: 'old-system',
+    estateId: 'old-estate',
+    name: 'Archived system',
+    status: 'archived',
+    categories: [],
+  });
+  const view = render(<EstateGraph input={historical} snapshot={snapshot} canViewInactive />);
+  expect(
+    (screen.getByRole('combobox', { name: 'Inventory visibility' }) as HTMLSelectElement).value,
+  ).toBe('all');
+  expect(screen.getByRole('button', { name: 'estate Archived estate' })).not.toBeNull();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Inventory visibility' }), {
+    target: { value: 'active' },
+  });
+  expect(screen.queryByRole('button', { name: 'estate Archived estate' })).toBeNull();
+  fireEvent.change(screen.getByRole('combobox', { name: 'Inventory visibility' }), {
+    target: { value: 'all' },
+  });
+  view.rerender(<EstateGraph input={historical} snapshot={snapshot} canViewInactive={false} />);
+  expect(screen.queryByRole('combobox', { name: 'Inventory visibility' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'estate Archived estate' })).toBeNull();
+});

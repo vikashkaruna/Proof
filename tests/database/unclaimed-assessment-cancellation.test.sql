@@ -96,9 +96,11 @@ select pg_temp.ok((select rows=(select count(*) from public.audit_ledger where t
 -- Verify ordinary append paths retain their existing validation and grants.
 set local role human_action_writer;select pg_temp.ok(pg_temp.append_generic('human','workload.task_revoked')>0,'ordinary human append still works');reset role;
 set local role agent_ledger_writer;select pg_temp.ok(pg_temp.append_generic('agent','discovery.started')>0,'ordinary agent append still works');select pg_temp.ok(pg_temp.append_generic('system','discovery.started')>0,'ordinary system append still works');reset role;
--- A later legitimate engagement pin change cannot invalidate original cancellation.
+-- An admitted catalogue cannot be repinned; a refused attempt must preserve
+-- the original request and its independently valid cancellation.
 insert into public.control_libraries(version,published_at,published_by,change_log,control_count) values('cancel-fixture-v2',now(),'test','Synthetic changed pin',1);
-update public.engagements set library_version='cancel-fixture-v2' where id=pg_temp.id(21);
+select pg_temp.reject('update public.engagements set library_version=''cancel-fixture-v2'' where id=pg_temp.id(21)','23514');
+select pg_temp.ok((select library_version='cancel-fixture-v1'from public.engagements where id=pg_temp.id(21)),'refused repin preserves original basis');
 create temporary table cancelled(value jsonb);
 grant insert,select on cancelled to human_action_writer;
 set local role human_action_writer;
@@ -108,7 +110,7 @@ select pg_temp.ok(pg_temp.cancel()=(select value from cancelled),'lost response 
 select pg_temp.ok(pg_temp.cancel(51,1,repeat('b',64))->>'error'='cancellation_conflict','changed retry body refused after resolution');
 reset role;
 select pg_temp.ok((select count(*)=1 from public.assessment_request_resolutions where tenant_id=pg_temp.id(11)),'one immutable resolution');
-select pg_temp.ok((select library_version='cancel-fixture-v1' from public.assessment_request_resolutions where job_id=pg_temp.id(51)),'resolution retains original human library after current engagement pin changes');
+select pg_temp.ok((select library_version='cancel-fixture-v1' from public.assessment_request_resolutions where job_id=pg_temp.id(51)),'resolution retains original human library after refused repin');
 select pg_temp.ok((select count(*)=1 from public.audit_ledger where tenant_id=pg_temp.id(11) and action_type='assessment.request_cancelled'),'one human cancellation receipt');
 select pg_temp.ok((select r.status='cancelled' and r.completed_at=c.resolved_at and r.output_redacted_hash is null and r.error is null and t.revoked_at=c.resolved_at and j.claimed_at is null
  from public.assessment_request_resolutions c join public.agent_runs r on r.id=c.run_id join public.workload_task_delegations t on t.run_id=c.run_id join public.assessment_dispatch_jobs j on j.id=c.job_id where c.job_id=pg_temp.id(51)),'resolved cancelled run and revoked unclaimed task share exact timestamp');

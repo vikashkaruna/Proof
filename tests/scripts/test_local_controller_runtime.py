@@ -9,8 +9,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -401,67 +401,69 @@ class LauncherTests(unittest.TestCase):
     def test_uncertain_issuance_fences_new_request_and_explicit_resume_reuses_exact_request(
         self,
     ):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            with (
-                patch.object(launcher, "BASE", root),
-                patch.object(launcher, "settings", return_value=({}, "a" * 64)),
-                patch.object(launcher.issuer, "ancestry"),
-                patch.object(
-                    launcher, "run", side_effect=RuntimeError("uncertain")
-                ) as execute,
-            ):
-                with self.assertRaises(RuntimeError):
-                    launcher.issue("kosha", ID)
-                pending_file = root / "kosha/credentials/pending.json"
-                pending = json.loads(pending_file.read_bytes())
-                request_file = pending_file.parent / (
-                    pending["credentialId"] + ".request.json"
-                )
-                original = request_file.read_bytes()
-                with self.assertRaisesRegex(ValueError, "resume"):
-                    launcher.issue("kosha", ID)
-                self.assertEqual(execute.call_count, 1)
-
-                def success(args):
-                    self.assertIn("--resume-issue", args)
-                    self.assertEqual(request_file.read_bytes(), original)
-                    value = json.loads(original)
-                    target = Path(args[-1])
-                    target.mkdir(mode=0o700)
-                    ready = {
-                        key: value[key]
-                        for key in (
-                            "schemaVersion",
-                            "credentialId",
-                            "tenantId",
-                            "predecessorId",
-                            "issuedAt",
-                            "expiresAt",
-                        )
-                    }
-                    ready.update(
-                        requestSha256=pending["requestSha256"], status="active"
+        for target_created in (False, True):
+            with tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                with (
+                    patch.object(launcher, "BASE", root),
+                    patch.object(launcher, "settings", return_value=({}, "a" * 64)),
+                    patch.object(launcher.issuer, "ancestry"),
+                    patch.object(
+                        launcher, "run", side_effect=RuntimeError("uncertain")
+                    ) as execute,
+                ):
+                    with self.assertRaises(RuntimeError):
+                        launcher.issue("kosha", ID)
+                    pending_file = root / "kosha/credentials/pending.json"
+                    pending = json.loads(pending_file.read_bytes())
+                    request_file = pending_file.parent / (
+                        pending["credentialId"] + ".request.json"
                     )
-                    for name, data in (
-                        ("ready.json", json.dumps(ready).encode()),
-                        ("backend.key", b'{"protectedIssuerOutput":true}'),
-                    ):
-                        path = target / name
-                        path.write_bytes(data)
-                        path.chmod(0o600)
-                    return completed()
+                    original = request_file.read_bytes()
+                    if target_created:(pending_file.parent / pending["credentialId"]).mkdir(mode=0o700)
+                    with self.assertRaisesRegex(ValueError, "resume"):
+                        launcher.issue("kosha", ID)
+                    self.assertEqual(execute.call_count, 1)
 
-                execute.side_effect = success
-                with patch("builtins.print"):
-                    launcher.issue("kosha", None, resume=pending["credentialId"])
-                self.assertFalse(pending_file.exists())
-                self.assertEqual(
-                    (pending_file.parent / "current.json").read_bytes(), original
-                )
-                self.assertEqual(
-                    (pending_file.parent / "backend.key").stat().st_mode & 0o777, 0o600
-                )
+                    def success(args, target_created=target_created, request_file=request_file, original=original, pending=pending):
+                        self.assertIn("--resume-issue" if target_created else "--issue", args)
+                        self.assertEqual(request_file.read_bytes(), original)
+                        value = json.loads(original)
+                        target = Path(args[-1])
+                        target.mkdir(mode=0o700, exist_ok=True)
+                        ready = {
+                            key: value[key]
+                            for key in (
+                                "schemaVersion",
+                                "credentialId",
+                                "tenantId",
+                                "predecessorId",
+                                "issuedAt",
+                                "expiresAt",
+                            )
+                        }
+                        ready.update(
+                            requestSha256=pending["requestSha256"], status="active"
+                        )
+                        for name, data in (
+                            ("ready.json", json.dumps(ready).encode()),
+                            ("backend.key", b'{"protectedIssuerOutput":true}'),
+                        ):
+                            path = target / name
+                            path.write_bytes(data)
+                            path.chmod(0o600)
+                        return completed()
+
+                    execute.side_effect = success
+                    with patch("builtins.print"):
+                        launcher.issue("kosha", None, resume=pending["credentialId"])
+                    self.assertFalse(pending_file.exists())
+                    self.assertEqual(
+                        (pending_file.parent / "current.json").read_bytes(), original
+                    )
+                    self.assertEqual(
+                        (pending_file.parent / "backend.key").stat().st_mode & 0o777, 0o600
+                    )
 
 
 if __name__ == "__main__":

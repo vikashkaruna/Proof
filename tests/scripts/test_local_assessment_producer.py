@@ -198,12 +198,10 @@ class ProducerLaunchTests(unittest.TestCase):
                     [{"Config": {"Labels": {"axiom.purpose": "somebody-else"}}}]
                 )
             ),
-        ):
-            with self.assertRaises(ValueError):
-                launcher.remove_owned(launcher.NAME)
-        with patch.object(launcher, "run") as execute:
-            with self.assertRaises(ValueError):
-                launcher.remove_owned("axiom-bff")
+        ), self.assertRaises(ValueError):
+            launcher.remove_owned(launcher.NAME)
+        with patch.object(launcher, "run") as execute, self.assertRaises(ValueError):
+            launcher.remove_owned("axiom-bff")
         execute.assert_not_called()
 
     def test_existing_foreign_volume_cannot_be_reused(self):
@@ -213,9 +211,8 @@ class ProducerLaunchTests(unittest.TestCase):
             return_value=result(
                 stdout=json.dumps([{"Labels": {"axiom.purpose": "foreign"}}])
             ),
-        ) as execute:
-            with self.assertRaises(ValueError):
-                launcher.ensure_volume(launcher.CONF_VOLUME)
+        ) as execute, self.assertRaises(ValueError):
+            launcher.ensure_volume(launcher.CONF_VOLUME)
         self.assertEqual(execute.call_count, 1)
 
     def test_image_is_resolved_immutably_before_service_replacement(self):
@@ -242,10 +239,9 @@ class ProducerLaunchTests(unittest.TestCase):
             patch.object(
                 launcher, "owned_container", return_value={"State": {"Running": True}}
             ),
-            patch.object(launcher, "run") as execute,
+            patch.object(launcher, "run") as execute,self.assertRaises(ValueError)
         ):
-            with self.assertRaises(ValueError):
-                launcher.stage()
+            launcher.stage()
         execute.assert_not_called()
 
     def test_stage_files_are_0600_and_backend_never_enters_argv_or_logs(self):
@@ -289,16 +285,30 @@ class ProducerLaunchTests(unittest.TestCase):
         self.assertIn("none", helper)
         self.assertIn("chmod 0600", helper[-1])
 
+    def test_recovery_creation_preserves_collisions_and_pins_owner(self):
+        nonce = "b" * 32
+        with patch.object(launcher, "reviewed_image", return_value=IMAGE), patch.object(launcher, "owned_container", return_value={"Id": "foreign"}), patch.object(launcher, "remove_owned") as remove, patch.object(launcher, "run") as execute:
+            with self.assertRaisesRegex(ValueError, "absent"):
+                launcher.container("serve", IMAGE, nonce)
+            remove.assert_not_called(); execute.assert_not_called()
+        args = launcher.container_args("serve", IMAGE, nonce)
+        self.assertIn("axiom.recovery.owner=" + nonce, args)
+        for action, owner in (("check", nonce), ("serve", "invalid")):
+            with self.assertRaises(ValueError):launcher.container_args(action, IMAGE, owner)
+        with patch.object(launcher, "owned_container", return_value={"State": {"Running": True}}), patch.object(launcher, "run") as execute:
+            with self.assertRaisesRegex(ValueError, "Stop the producer"):
+                launcher.stage()
+            execute.assert_not_called()
+
     def test_cli_sanitizes_failures(self):
         with (
             patch.object(sys, "argv", ["launcher", "stage"]),
             patch.object(
                 launcher, "stage", side_effect=RuntimeError("private-secret-marker")
             ),
-            patch("builtins.print") as output,
+            patch("builtins.print") as output,self.assertRaises(SystemExit) as refusal
         ):
-            with self.assertRaises(SystemExit) as refusal:
-                launcher.main()
+            launcher.main()
         self.assertEqual(refusal.exception.code, 1)
         self.assertNotIn("private-secret-marker", str(output.call_args_list))
 

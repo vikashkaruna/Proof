@@ -1,5 +1,6 @@
 'use server';
 
+import { readOrganizationContexts } from '@/lib/organization-contexts';
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '@axiom/supabase';
@@ -9,8 +10,8 @@ import { createSupabaseServerClient } from '@axiom/supabase';
  *
  * Previously the switcher wrote `axiom_active_tenant` from client JavaScript,
  * non-httpOnly, with no check of any kind. `requireTenantContext()` already
- * treats that cookie as a *preference* and ignores a slug the caller is not a
- * member of, so this was never an escalation — but it left a
+ * treats that cookie as a preference and verifies the caller's organization
+ * scope, so this was never an escalation — but it left a
  * browser-writable cookie steering server rendering, and "it is ignored
  * downstream" is a property that has to keep being true at every call site
  * forever.
@@ -28,16 +29,12 @@ export async function switchTenantAction(slug: string): Promise<SwitchTenantResu
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, reason: 'unauthenticated' };
 
-  // RLS confines this to the caller's own memberships, so a slug that comes
-  // back is one they belong to. Naming a tenant is not the same as belonging
-  // to it, and this is where that distinction is enforced.
-  const { data: memberships, error } = await supabase
-    .from('tenant_users')
-    .select('tenant_id, tenants:tenant_id(slug)')
-    .eq('user_id', user.id);
-
-  if (error) return { ok: false, reason: 'lookup_failed' };
-
+  let memberships;
+  try {
+    memberships = (await readOrganizationContexts(supabase, user.id)).rows;
+  } catch {
+    return { ok: false, reason: 'lookup_failed' };
+  }
   const match = (memberships ?? []).find((row) => {
     const rel = row.tenants as unknown;
     const tenant = Array.isArray(rel) ? rel[0] : rel;
