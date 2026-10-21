@@ -1,3 +1,5 @@
+import { designateOwnedFixtureFounder } from './owned-founder-fixture.js';
+import { loadParityFixture } from './parity-fixture-target-core.js';
 import {
   PUBLIC_COVERAGE_PAGES,
   publicControlAssessmentV2Schema,
@@ -270,6 +272,7 @@ export function reportAcceptanceCodeSha256(repositoryRoot = '.') {
     [
       'scripts/verify-workload-assessment.ts',
       'scripts/lib/acceptance-public-control-reports.ts',
+      'scripts/lib/owned-founder-fixture.ts',
       'infra/supabase/migrations/0137_public_control_assessment_sources.sql',
       'infra/supabase/migrations/0138_public_control_report_provenance.sql',
       'infra/supabase/migrations/0141_public_control_review_asset_sources.sql',
@@ -661,6 +664,17 @@ export async function verifyPublicControlReports(deps: {
       { tenant_id: deps.foreignTenantId, user_id: user.id, role: 'founder' },
     ]),
   );
+  const owned = loadParityFixture();
+  await designateOwnedFixtureFounder({
+    root: owned.root,
+    supabaseUrl: deps.authUrl,
+    serviceKey: owned.status.SERVICE_ROLE_KEY!,
+    userId: user.id,
+    email: user.email!,
+    designate: async (request) => {
+      check(await deps.db.rpc('designate_platform_founder', request));
+    },
+  });
   const client = createClient(deps.authUrl, deps.anonKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });

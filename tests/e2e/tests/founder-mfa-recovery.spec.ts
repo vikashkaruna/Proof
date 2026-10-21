@@ -25,27 +25,6 @@ import {
  * from deployed acceptance, which forbids skipped journeys).
  */
 
-async function designateFounder(userId: string): Promise<void> {
-  const res = await fetch(`${state.supabaseUrl}/rest/v1/rpc/designate_platform_founder`, {
-    method: 'POST',
-    redirect: 'error',
-    signal: AbortSignal.timeout(30_000),
-    headers: {
-      apikey: state.publishableKey,
-      Authorization: `Bearer ${state.serviceKey}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      p_user_id: userId,
-      p_designated_by: 'e2e founder-mfa-recovery',
-      p_reason: 'browser recovery journey',
-    }),
-  });
-  if (res.status !== 204 && res.status !== 200) {
-    throw new Error(`founder designation: ${res.status} — ${(await res.text()).slice(0, 300)}`);
-  }
-}
-
 /** The browser session's current access token, read from its Supabase cookie. */
 async function accessToken(page: Page): Promise<string> {
   const cookies = await page.context().cookies();
@@ -95,8 +74,6 @@ test('a founder recovers another founder who lost their authenticator', async ({
     isInternal: true,
     role: 'founder',
   });
-  await designateFounder(actor.id);
-  await designateFounder(subject.id);
 
   // The subject's existing, MFA-verified browser session.
   const oldSubject = await freshContextPage(browser);
@@ -192,7 +169,6 @@ test('a founder delegates recovery and an owner recovers an approver in their te
     withFactor: true,
     role: 'approver',
   });
-  await designateFounder(founderAccount.id);
 
   // The founder delegates approver recovery in tenant A to the owner.
   const founder = await freshContextPage(browser);

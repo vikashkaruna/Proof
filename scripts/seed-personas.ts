@@ -1,4 +1,8 @@
 import {
+  designateOwnedFixtureFounder,
+  assertLocalFounderFixtureTarget,
+} from './lib/owned-founder-fixture.js';
+import {
   loadAcceptanceTarget,
   acceptanceStatePath,
   verifyAcceptanceTarget,
@@ -37,6 +41,7 @@ import {
 
 async function main() {
   const target = loadAcceptanceTarget();
+  assertLocalFounderFixtureTarget(target?.topology);
   if (target) await verifyAcceptanceTarget(target);
   const remoteDatabaseUrl = target?.topology === 'remote' ? remoteFixtureDatabaseUrl(target) : null;
   const stateDir = process.env.AXIOM_PARITY_STATE_DIR ?? resolve('.axiom-runtime/parity');
@@ -186,6 +191,24 @@ async function main() {
     201,
     'Tenant membership',
   );
+
+  // Designation follows explicit fixture memberships, so the designation trigger
+  // can reconcile derived rows without colliding with the membership bulk insert.
+  const founder = accounts.founder;
+  await designateOwnedFixtureFounder({
+    root: process.cwd(),
+    supabaseUrl: origin,
+    serviceKey: status.SERVICE_ROLE_KEY!,
+    userId: founder.id,
+    email: founder.email,
+    designate: async (request) => {
+      await expectStatus(
+        await api('/rest/v1/rpc/designate_platform_founder', 'POST', request),
+        204,
+        'Founder persona designation',
+      );
+    },
+  });
 
   if (factors.length > 0) {
     await expectStatus(
