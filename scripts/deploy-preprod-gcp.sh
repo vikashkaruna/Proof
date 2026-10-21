@@ -258,7 +258,7 @@ IMAGE_TAG="release-${RELEASE_SHA}"
 AXIOM_RELEASE_MANIFEST_FILE="${AXIOM_RELEASE_MANIFEST_FILE:-${REPO_ROOT}/.axiom-runtime/preprod-release-manifest.json}"
 export AXIOM_RELEASE_MANIFEST_FILE
 python3 scripts/verify-preprod-s3.py || {
-  fail 'Approved ap-south-1 S3 Object Lock Compliance readback is required before cloud changes.'
+  fail 'Approved ap-south-1 evidence storage readback for the selected environment is required before cloud changes.'
   exit 1
 }
 if [ -z "${AXIOM_TF_STATE_BUCKET:-}" ]; then
