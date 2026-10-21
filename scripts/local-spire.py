@@ -35,13 +35,13 @@ from __future__ import annotations
 
 import base64
 import fcntl
-import io
-import ssl
 import hashlib
+import io
 import json
 import os
 import re
 import secrets
+import ssl
 import stat
 import subprocess  # nosec B404 - fixed docker/curl argv lists, no shell
 import sys
@@ -525,6 +525,13 @@ def container_meta(name: str) -> dict | None:
     return meta
 
 
+def grants_sha256(current: list[dict]) -> str:
+    """Parent node may rotate; every other existing registration byte stays bound."""
+    rows = sorted(({key: value for key, value in item.items() if key != "parent_id"}
+                   for item in current), key=lambda item: item["id"])
+    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 def reviewed_roles(old: str, current: list[dict]) -> dict:
     roles = dict(LEGACY_ROLES)
     for name, (_uid, sid) in ROLES.items():
@@ -541,7 +548,7 @@ def reviewed_roles(old: str, current: list[dict]) -> dict:
 def public_node_certificate(target: str) -> tuple[str, dict]:
     try:
         return _public_node_certificate(target)
-    except Exception:
+    except Exception:  # noqa: BLE001 - sanitize bounded public-cache parsing; never expose retained metadata
         raise RuntimeError("Cached public node certificate refused") from None
 
 
@@ -613,7 +620,7 @@ def expired_node_proof(meta: dict) -> dict:
 def read_node_id_from_container(target: str) -> str:
     try:
         return _read_node_id_from_container(target)
-    except Exception:
+    except Exception:  # noqa: BLE001 - sanitize bounded public-cache parsing; never expose retained metadata
         raise RuntimeError("Retained node metadata refused") from None
 
 
@@ -691,8 +698,12 @@ def offline_prepare(record: Path, intent: dict) -> None:
     if intent["phase"] == "offline_prepared":
         # The reviewed recovery build fixes directory traversal permissions
         # without granting capabilities to bypass an immutable image defect.
-        build(force=True)
-        image = run(["docker", "image", "inspect", IMAGE, "--format", "{{.Id}}"]).stdout.strip()
+        if "approvedRecoveryImage" not in intent:
+            build(force=True)
+        selected_image = intent.get("approvedRecoveryImage", IMAGE)
+        image = run(["docker", "image", "inspect", selected_image, "--format", "{{.Id}}"]).stdout.strip()
+        if "approvedRecoveryImage" in intent and image != intent["approvedRecoveryImage"]:
+            raise RuntimeError("Approved recovery image changed")
         if not re.fullmatch(r"sha256:[a-f0-9]{64}", image):
             raise RuntimeError("Reviewed recovery image unavailable")
         checkpoint("offline_image_ready", recoveryImage=image)
@@ -706,7 +717,7 @@ def offline_prepare(record: Path, intent: dict) -> None:
         original = offline_original(intent)
         if original["State"]["Running"]:
             raise RuntimeError("Original SPIRE must be stopped")
-        sha, cert = public_node_certificate(NAME)
+        sha, _cert = public_node_certificate(NAME)
         if sha != intent["certificateSha256"] or read_node_id_from_container(NAME) != intent["oldNodeId"]:
             raise RuntimeError("Expired node proof changed before stopping")
         checkpoint("offline_helper_creating")
@@ -748,10 +759,12 @@ def offline_prepare(record: Path, intent: dict) -> None:
         current = entries(meta["Id"])
         roles = reviewed_roles(intent["oldNodeId"], current)
         children = recovery_entries(intent["oldNodeId"], current, roles)
+        if "expectedGrantsSha256" in intent and grants_sha256(current) != intent["expectedGrantsSha256"]:
+            raise RuntimeError("Approved registration snapshot changed")
         checkpoint("prepared", roles=roles, entries=[item for item, _, _ in children])
 
 
-def reattest(resume: Path | None = None, *, expired_agent: bool = False) -> None:
+def reattest(resume: Path | None = None, *, expired_agent: bool = False, recovery_image: str | None = None, expected_grants: str | None = None) -> None:
     CACHE.mkdir(parents=True, exist_ok=True, mode=0o700)
     private_path(CACHE, directory=True)
     lock = CACHE / "recovery.lock"
@@ -762,12 +775,14 @@ def reattest(resume: Path | None = None, *, expired_agent: bool = False) -> None
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError("Another explicit recovery is in progress") from None
-        _reattest(resume, expired_agent=expired_agent)
+        _reattest(resume, expired_agent=expired_agent, recovery_image=recovery_image, expected_grants=expected_grants)
     finally:
         os.close(fd)
 
 
-def _reattest(resume: Path | None = None, *, expired_agent: bool = False) -> None:
+def _reattest(resume: Path | None = None, *, expired_agent: bool = False, recovery_image: str | None = None, expected_grants: str | None = None) -> None:
+    if (recovery_image is not None or expected_grants is not None) and (not expired_agent or resume is not None or not re.fullmatch(r"sha256:[a-f0-9]{64}", recovery_image or "") or not re.fullmatch(r"[a-f0-9]{64}", expected_grants or "")):
+        raise RuntimeError("Exact approved recovery image and grants required")
     if resume is None:
         for prior in CACHE.glob("recovery-*/intent.json"):
             private_path(prior.parent, directory=True)
@@ -785,6 +800,8 @@ def _reattest(resume: Path | None = None, *, expired_agent: bool = False) -> Non
                 oldContainerId=meta["Id"], phase="offline_prepared",
                 offlineServer={"name": "axiom-proof-local-spire-offline-" + stamp.lower(),
                                "nonce": secrets.token_hex(16)})
+            if recovery_image:
+                intent.update(approvedRecoveryImage=recovery_image, expectedGrantsSha256=expected_grants)
         else:
             processes = run(["docker", "top", NAME, "-eo", "pid,comm"]).stdout.splitlines()[1:]
             if any(item.split() and item.split()[-1] == "spire-agent" for item in processes):
@@ -1161,10 +1178,22 @@ if __name__ == "__main__":
         "migrate-parikshan-uid": migrate_parikshan_uid,
         "reattest": reattest,
     }
+    if len(sys.argv) in (6, 9) and sys.argv[-2] == "--cache-dir":
+        selected_cache = Path(sys.argv[-1])
+        if not selected_cache.is_absolute():raise SystemExit("Absolute protected SPIRE cache required")
+        private_path(selected_cache, directory=True)
+        CACHE = selected_cache
+        sys.argv = sys.argv[:-2]
+    if len(sys.argv) == 7 and sys.argv[1:3] == ["reattest", "--expired-agent"] and sys.argv[3] == "--recovery-image" and sys.argv[5] == "--expected-grants-sha256":
+        try:
+            reattest(expired_agent=True, recovery_image=sys.argv[4], expected_grants=sys.argv[6])
+        except (Exception, KeyboardInterrupt):  # noqa: BLE001 - sanitized operator CLI boundary
+            raise SystemExit("Approved local SPIRE recovery refused; retain protected journal") from None
+        raise SystemExit(0)
     if sys.argv[1:] == ["reattest", "--expired-agent"]:
         try:
             reattest(expired_agent=True)
-        except (Exception, KeyboardInterrupt):  # never expose retained node/token diagnostics
+        except (Exception, KeyboardInterrupt):  # noqa: BLE001 - sanitized operator CLI boundary  # never expose retained node/token diagnostics
             raise SystemExit("Expired local SPIRE recovery refused; retain the private journal for review") from None
         raise SystemExit(0)
     if len(sys.argv) == 4 and sys.argv[1:3] == ["reattest", "--resume"]:

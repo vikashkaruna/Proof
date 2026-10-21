@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-from lib.local_custody_credentials import issue_request  # noqa: E402
+from lib.local_custody_credentials import issue_request
 
 _spec = importlib.util.spec_from_file_location(
     "axiom_local_custody_issuer", ROOT / "infra/local-custody-issuer/issuer.py"
@@ -37,16 +37,16 @@ SHA = hashlib.sha256(TEXT.encode()).hexdigest()
 
 
 def build(**over):
-    args = dict(
-        policy_text=TEXT,
-        policy_sha256=SHA,
-        activation_event_id="44444444-4444-4444-8444-444444444444",
-        activation_epoch=1,
-        configuration_sha256=POLICY["deploymentBindingSha256"],
-        kind="producer",
-        issued_at=1_800_000_000,
-        reason="Local retained runtime",
-    )
+    args = {
+        "policy_text": TEXT,
+        "policy_sha256": SHA,
+        "activation_event_id": "44444444-4444-4444-8444-444444444444",
+        "activation_epoch": 1,
+        "configuration_sha256": POLICY["deploymentBindingSha256"],
+        "kind": "producer",
+        "issued_at": 1_800_000_000,
+        "reason": "Local retained runtime",
+    }
     args.update(over)
     return issue_request(**args)
 
@@ -137,3 +137,37 @@ class RenewalTiming(unittest.TestCase):
             (base / "controller.last").write_text("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
             with self.assertRaises(SystemExit):
                 cli.due_kinds(base, 1_800_000_000, 1200)
+
+
+class ExactIssuanceResume(unittest.TestCase):
+    def test_uncertain_issue_resumes_same_request_and_never_replaces_pending(self):
+        import subprocess
+        import tempfile
+        from unittest.mock import patch
+        spec = importlib.util.spec_from_file_location("custody_resume_cli", ROOT / "scripts/local-custody-credentials.py")
+        cli = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "settings.json").write_text("{}")
+            (root / "settings.sha256").write_text(POLICY["deploymentBindingSha256"])
+            policy = {"policyText": TEXT, "policySha256": SHA, "activationEventId": "44444444-4444-4444-8444-444444444444", "epoch": 1}
+            calls = []
+            def issuer_run(args, **_kwargs):
+                calls.append(args)
+                target = Path(args[-1]); target.mkdir(mode=0o700, exist_ok=True)
+                (target / "backend.key").write_text("synthetic-fixture")
+                if len(calls) == 1:raise subprocess.CalledProcessError(1, args)
+            with patch.object(cli, "ISSUER_ROOT", root), patch.object(cli, "tenant_alias", return_value="fixture"), patch.object(cli, "active_policy", return_value=policy), patch.object(cli, "validate_manifest"), patch.object(cli.subprocess, "run", side_effect=issuer_run):
+                with self.assertRaises(subprocess.CalledProcessError):cli.issue(TENANT, "controller", False)
+                base = root / "credentials" / TENANT
+                pending = json.loads((base / "controller.pending.json").read_text())
+                request = (base / (pending["credentialId"] + ".request.json")).read_bytes()
+                with self.assertRaisesRegex(ValueError, "Uncertain"):
+                    cli.issue(TENANT, "controller", False)
+                self.assertEqual(len(calls), 1)
+                cli.issue(TENANT, "controller", False, pending["credentialId"])
+                self.assertIn("--resume-issue", calls[1])
+                self.assertEqual(calls[0][-1], calls[1][-1])
+                self.assertEqual((base / (pending["credentialId"] + ".request.json")).read_bytes(), request)
+                self.assertFalse((base / "controller.pending.json").exists())
+                self.assertEqual((base / "controller.last").read_text(), pending["credentialId"])

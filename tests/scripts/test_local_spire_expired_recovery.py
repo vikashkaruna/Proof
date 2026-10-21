@@ -109,7 +109,7 @@ class ExpiredRecovery(unittest.TestCase):
         for failure in (None, "stop", "create", "helper_start", "helper_stop", "helper_rm", "helper", "rename", "start", "update"):
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
-                base, health, docker = self.setup_state(root, failure)
+                base, _health, docker = self.setup_state(root, failure)
                 proof = {"oldNodeId": f.PARENT, "certificateSha256": "a" * 64,
                          "certificateExpiredAt": int(time.time()) - 100,
                          "originalImage": f.IMAGE}
@@ -119,8 +119,8 @@ class ExpiredRecovery(unittest.TestCase):
                     patch.object(m, "expired_node_proof", return_value=proof),
                     patch.object(m, "public_node_certificate", return_value=("a" * 64, {})),
                     patch.object(m, "read_node_id_from_container", return_value=f.PARENT),
-                    patch.object(m, "node_id", side_effect=lambda: docker.newnode),
-                    patch.object(m, "entries", side_effect=lambda *args: copy.deepcopy(docker.current)),
+                    patch.object(m, "node_id", side_effect=lambda docker=docker: docker.newnode),
+                    patch.object(m, "entries", side_effect=lambda *args, docker=docker: copy.deepcopy(docker.current)),
                     patch.object(m, "build"), patch.object(m, "up", side_effect=docker.up),
                     patch("builtins.print") as output,
                 ):
@@ -145,6 +145,31 @@ class ExpiredRecovery(unittest.TestCase):
                 self.assertTrue(all(args == ["docker", "rm", docker.helper_id] for args in removes))
                 self.assertFalse(any("volume" in args and "rm" in args for args, _ in docker.calls))
 
+    def test_approved_image_and_grants_are_bound_before_any_token(self):
+        for matches in (True, False):
+            with self.subTest(matches=matches), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                _base, _health, docker = self.setup_state(root)
+                proof = {"oldNodeId": f.PARENT, "certificateSha256": "a" * 64,
+                         "certificateExpiredAt": int(time.time()) - 100, "originalImage": f.IMAGE}
+                with (
+                    patch.object(m, "CACHE", root / "cache"), patch.object(m, "run", side_effect=docker.run),
+                    patch.object(m, "expired_node_proof", return_value=proof),
+                    patch.object(m, "public_node_certificate", return_value=("a" * 64, {})),
+                    patch.object(m, "read_node_id_from_container", return_value=f.PARENT),
+                    patch.object(m, "node_id", side_effect=lambda docker=docker: docker.newnode),
+                    patch.object(m, "entries", side_effect=lambda *args, docker=docker: copy.deepcopy(docker.current)),
+                    patch.object(m, "build") as build, patch.object(m, "up", side_effect=docker.up),
+                    patch("builtins.print"),
+                ):
+                    expected = m.grants_sha256(docker.current) if matches else "0" * 64
+                    if matches:m.reattest(expired_agent=True, recovery_image=f.IMAGE, expected_grants=expected)
+                    else:
+                        with self.assertRaisesRegex(RuntimeError, "snapshot changed"):
+                            m.reattest(expired_agent=True, recovery_image=f.IMAGE, expected_grants=expected)
+                    build.assert_not_called()
+                    self.assertEqual(docker.token_count, 1 if matches else 0)
+
     def test_expired_token_cleans_owned_helper_before_refusing_state_changes(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -158,7 +183,7 @@ class ExpiredRecovery(unittest.TestCase):
                 patch.object(m, "expired_node_proof", return_value=proof),
                 patch.object(m, "public_node_certificate", return_value=("a" * 64, {})),
                 patch.object(m, "read_node_id_from_container", return_value=f.PARENT),
-                patch.object(m, "entries", side_effect=lambda *args: copy.deepcopy(docker.current)),
+                patch.object(m, "entries", side_effect=lambda *args, docker=docker: copy.deepcopy(docker.current)),
                 patch.object(m, "build"), patch.object(m, "up") as start,
                 patch("builtins.print"),
             ):
