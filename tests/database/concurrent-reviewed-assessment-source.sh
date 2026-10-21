@@ -35,17 +35,19 @@ assert first.returncode==0,err
 out,err=second.communicate(timeout=10)
 assert second.returncode!=0 and 'Published control sources' in err, (out,err)
 assert sql(f"select count(*) from public.controls where library_version='{version}'").stdout.strip()=='1'
-# Guarded enqueue must block on a concurrent engagement pin update, then reject
-# the committed new pin before issuing an outbox/task or human receipt.
+# An admitted catalogue refuses repinning. A caller carrying a different pin
+# must still wait on the engagement lock, then refuse without dispatching.
 fixture=open('tests/database/reviewed-assessment-source.test.sql').read()
 fixture=fixture[:fixture.index('select pg_temp.ok(encode')]
 fixture=fixture.replace('begin;','',1).replace('79790000','80800000').replace('reviewed-source-fixture','reviewed-race-fixture')
 sql(fixture+"insert into public.control_libraries(version,published_at,published_by,change_log,control_count) values('reviewed-race-other',now(),'test','fixture',2);")
 # Temporary helpers do not survive sessions, so the guarded request is explicit.
 uid=lambda n:f"80800000-0000-4000-8000-{n:012d}"
-holder=launch(f"begin;update public.engagements set library_version='reviewed-race-other' where id='{uid(21)}';select pg_advisory_lock(114115);select pg_sleep(2);commit;")
+sql(f"do $$begin begin update public.engagements set library_version='reviewed-race-other' where id='{uid(21)}';raise exception 'repin accepted';exception when check_violation then null;end;end$$;")
+assert sql(f"select library_version from public.engagements where id='{uid(21)}'").stdout.strip()=='reviewed-race-fixture-v1'
+holder=launch(f"begin;select id from public.engagements where id='{uid(21)}'for update;select pg_advisory_lock(114115);select pg_sleep(2);commit;")
 await_lock(114115)
-request=f"set role human_action_writer;select public.enqueue_reviewed_assessment_dispatch('{uid(51)}','{uid(11)}','{uid(1)}','{uid(31)}','{uid(22)}','{uid(21)}','{uid(41)}',repeat('a',64),repeat('b',64),now()+interval '5 minutes','fixture',decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),1,repeat('c',64),'reviewed-race-fixture-v1',repeat('d',64))->>'error';"
+request=f"set role human_action_writer;select public.enqueue_reviewed_assessment_dispatch('{uid(51)}','{uid(11)}','{uid(1)}','{uid(31)}','{uid(22)}','{uid(21)}','{uid(41)}',repeat('a',64),repeat('b',64),now()+interval '5 minutes','fixture',decode(repeat('ab',12),'hex'),decode(repeat('ab',100),'hex'),decode(repeat('cd',32),'hex'),1,repeat('c',64),'reviewed-race-other',repeat('d',64))->>'error';"
 blocked=launch(request)
 time.sleep(.15)
 assert blocked.poll() is None, 'Guarded enqueue must wait for current pin row lock'

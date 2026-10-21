@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   registeredBrowserRequested,
+  registeredRuntimeToolchainEnvironment,
   createRegisteredBrowserConfig,
   registeredBrowserConfigSchema,
   writeRegisteredBrowserFile,
@@ -404,4 +405,22 @@ test('an existing incomplete final submission is refused immediately without mal
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('runtime toolchain projects only PATH and optional dynamic library path', () => {
+  assert.deepEqual(
+    registeredRuntimeToolchainEnvironment({
+      PATH: '/trusted/python/bin:/usr/bin',
+      LD_LIBRARY_PATH: '/trusted/python/lib',
+      AWS_SECRET_ACCESS_KEY: 'synthetic-secret',
+      SUPABASE_SERVICE_KEY: 'synthetic-key',
+      PYTHONPATH: '/ambient/injection',
+      LD_PRELOAD: '/ambient/injection.so',
+    }),
+    { PATH: '/trusted/python/bin:/usr/bin', LD_LIBRARY_PATH: '/trusted/python/lib' },
+  );
+  assert.deepEqual(registeredRuntimeToolchainEnvironment({ PATH: '/usr/bin' }), {
+    PATH: '/usr/bin',
+  });
+  assert.deepEqual(registeredRuntimeToolchainEnvironment({}), {});
 });

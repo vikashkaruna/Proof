@@ -232,12 +232,14 @@ def issue(
     elif pending["requestSha256"] != request_sha:
         raise ValueError("Retained request changed")
     # No new request on uncertainty: resume the exact retained request explicitly.
+    # The issuer creates its protected target before any backend write. A crash
+    # before target creation can replay --issue only with this SAME request/ID.
     run(
         [
             sys.executable,
             "-I",
             str(ROOT / "infra/credential-issuer/issuer.py"),
-            "--resume-issue" if resume else "--issue",
+            "--resume-issue" if resume and target.exists() else "--issue",
             str(directory / (credential_id + ".request.json")),
             request_sha,
             str(BASE / "settings.json"),

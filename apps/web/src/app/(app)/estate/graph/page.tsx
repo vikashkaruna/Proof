@@ -150,6 +150,7 @@ export default async function EstateGraphPage() {
         <p role="alert">The estate graph could not be loaded. Refresh to try again.</p>
       ) : (
         <EstateGraph
+          canViewInactive={ctx.isGlobalFounder === true}
           key={tenant}
           input={input}
           snapshot={{ tenantName: ctx.tenantName, capturedAt }}

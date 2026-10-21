@@ -20,7 +20,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def fixture_program(root: Path = ROOT, *, omit_other_designation: bool = False) -> str:
+def fixture_program(
+    root: Path = ROOT, *, omit_other_designation: bool = False, catalogue_sql: str = ""
+) -> str:
     text = (root / "tests/database/founder-onboarding-authority.test.sql").read_text()
     marker = "-- An ordinary customer remains owner"
     if text.count(marker) != 1 or text.count("\nbegin;\n") != 1:
@@ -28,7 +30,9 @@ def fixture_program(root: Path = ROOT, *, omit_other_designation: bool = False) 
     text = text[: text.index(marker)]
     text = text.replace(
         "\nbegin;\n",
-        "\nbegin;\ncreate schema onboarding176_race;\ngrant usage on schema onboarding176_race to human_action_writer;\n",
+        "\nbegin;\n"
+        + catalogue_sql
+        + "\ncreate schema onboarding176_race;\ngrant usage on schema onboarding176_race to human_action_writer;\n",
         1,
     )
     text = text.replace("pg_temp.", "onboarding176_race.")
@@ -103,10 +107,10 @@ def main() -> None:
 
     def statement(kind: str, label: str) -> str:
         mutations = {
-            "onboard": "set local role human_action_writer;select public.onboard_organization(onboarding176_race.u(1),gen_random_uuid()::text,'Synthetic race176','growth',false,false,false,null,null,'[]','onboarding-176',gen_random_uuid());reset role;",
+            "onboard": "set local role human_action_writer;select public.onboard_organization(onboarding176_race.u(1),gen_random_uuid()::text,'Synthetic race176','growth',false,false,false,null,null,'[]','0.1.1',gen_random_uuid());reset role;",
             "revoke": "select public.revoke_platform_founder(onboarding176_race.u(1),'test','synthetic race revoke176');",
             "flag": "update public.users set is_axiom_internal=false where id=onboarding176_race.u(1);",
-            "other_onboard": "set local role human_action_writer;select public.onboard_organization(onboarding176_race.u(3),gen_random_uuid()::text,'Synthetic other-founder race176','growth',false,false,false,null,null,'[]','onboarding-176',gen_random_uuid());reset role;",
+            "other_onboard": "set local role human_action_writer;select public.onboard_organization(onboarding176_race.u(3),gen_random_uuid()::text,'Synthetic other-founder race176','growth',false,false,false,null,null,'[]','0.1.1',gen_random_uuid());reset role;",
             "revoke_other": "select public.revoke_platform_founder(onboarding176_race.u(2),'test','synthetic other founder revoke176');",
             "flag_other": "update public.users set is_axiom_internal=false where id=onboarding176_race.u(2);",
             "restore_other": "update public.users set is_axiom_internal=true where id=onboarding176_race.u(2);",
@@ -118,6 +122,17 @@ def main() -> None:
         )
 
     results = []
+    pnpm = shutil.which("pnpm")
+    if not pnpm:
+        raise ValueError("Canonical catalogue emitter requires pnpm")
+    catalogue_sql = subprocess.run(
+        [pnpm, "exec", "tsx", "scripts/lib/catalogue-version-sql-fixture.ts"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    ).stdout  # nosec B603 -- fixed trusted pure source emitter; no database/network transport
     cases = [
         ("onboard", "onboard"),
         ("revoke", "onboard"),
@@ -137,7 +152,8 @@ def main() -> None:
             sql(
                 database,
                 fixture_program(
-                    omit_other_designation="designate_other" in (first, second)
+                    omit_other_designation="designate_other" in (first, second),
+                    catalogue_sql=catalogue_sql,
                 ),
             )
             if "restore_other" in (first, second):
@@ -309,7 +325,10 @@ def main() -> None:
                 created = True
                 sql(
                     database,
-                    fixture_program(omit_other_designation=mutation == "designate"),
+                    fixture_program(
+                        omit_other_designation=mutation == "designate",
+                        catalogue_sql=catalogue_sql,
+                    ),
                 )
                 label = (
                     "onboard176-isolation-"
@@ -372,7 +391,7 @@ def main() -> None:
                     + "insert into public.tenants(slug,name)values(gen_random_uuid()::text,'Synthetic newer snapshot176');commit;",
                 )
                 old_snapshot.stdin.write(
-                    "set local role human_action_writer;select public.onboard_organization(onboarding176_race.u(3),gen_random_uuid()::text,'Refused stale snapshot176','growth',false,false,false,null,null,'[]','onboarding-176',gen_random_uuid());commit;\n"
+                    "set local role human_action_writer;select public.onboard_organization(onboarding176_race.u(3),gen_random_uuid()::text,'Refused stale snapshot176','growth',false,false,false,null,null,'[]','0.1.1',gen_random_uuid());commit;\n"
                 )
                 old_snapshot.stdin.close()
                 old_snapshot.stdin = None

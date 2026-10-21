@@ -142,6 +142,13 @@ export const APP_NAV_GROUPS: NavGroup[] = [
         phase: 'P0',
         capability: Capability.ASSESSMENT_RUN,
       },
+      {
+        route: '/catalogue',
+        en: 'Catalogue & re-audit',
+        hi: 'कैटलॉग और पुनः ऑडिट',
+        phase: 'P0',
+        capability: Capability.POSTURE_READ,
+      },
     ],
   },
   {

@@ -1,3 +1,10 @@
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
+import {
+  buildClarifiedReport,
+  renderClarifiedDraft,
+  renderReviewedClarifiedReport,
+  ClarifiedDocumentV8Schema,
+} from '@axiom/report-kit/clarified-report';
 import {
   buildBrandedReport,
   renderBrandedDraft,
@@ -88,6 +95,7 @@ export class StatutoryReportService {
   ) {}
 
   private async assertLiveFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
+    if (await isLivePlatformFounder(this.db, actorId, signal)) return;
     let membership = this.db
       .from('tenant_users')
       .select('role')
@@ -140,7 +148,7 @@ export class StatutoryReportService {
     signal?: AbortSignal,
   ) {
     return this.rpc(
-      'request_branded_auditor_report',
+      'request_clarified_auditor_report',
       {
         p_tenant_id: tenantId,
         p_actor_id: actorId,
@@ -200,19 +208,22 @@ export class StatutoryReportService {
       const coverage = version === 4;
       const questionnaireOnly = version === 5;
       const branded = version === 6;
+      const clarified = version === 8;
       if (
-        (coverage || questionnaireOnly || branded) &&
+        (coverage || questionnaireOnly || branded || clarified) &&
         JSON.parse(frozen.data.source_text).report_kind !== 'auditor'
       )
         throw Error();
       content = (
-        branded
-          ? buildBrandedReport
-          : questionnaireOnly
-            ? buildQuestionnaireEvidenceReport
-            : coverage
-              ? buildCoverageFirstReport
-              : buildAuditorAssessmentPack
+        clarified
+          ? buildClarifiedReport
+          : branded
+            ? buildBrandedReport
+            : questionnaireOnly
+              ? buildQuestionnaireEvidenceReport
+              : coverage
+                ? buildCoverageFirstReport
+                : buildAuditorAssessmentPack
       )({
         sourceText: frozen.data.source_text,
         sourceSha256: frozen.data.source_sha256,
@@ -234,8 +245,8 @@ export class StatutoryReportService {
         p_request_id: requestId,
         p_content_text: JSON.stringify(content),
         p_html_text:
-          content.schema_version === 7
-            ? renderBrandedDraft({
+          content.schema_version === 7 || content.schema_version === 8
+            ? (content.schema_version === 8 ? renderClarifiedDraft : renderBrandedDraft)({
                 sourceText: frozen.data.source_text,
                 sourceSha256: frozen.data.source_sha256,
                 requestId,
@@ -282,15 +293,16 @@ export class StatutoryReportService {
     offset: number,
     signal?: AbortSignal,
   ) {
+    const globalFounder = await isLivePlatformFounder(this.db, actorId, signal);
     let membership = this.db
       .from('tenant_users')
       .select('role')
       .eq('tenant_id', tenantId)
       .eq('user_id', actorId);
     if (signal) membership = membership.abortSignal(signal);
-    const member = await membership.maybeSingle();
+    const member = globalFounder ? { data: null, error: null } : await membership.maybeSingle();
     if (member.error) throw new EvidenceError('report_storage_unavailable', 503);
-    const role = member.data?.role;
+    const role = globalFounder ? 'founder' : member.data?.role;
     if (!['founder', 'owner', 'admin'].includes(role)) throw new EvidenceError('forbidden', 403);
     if (role === 'founder') await this.assertLiveFounder(tenantId, actorId, signal);
     let query = this.db
@@ -354,7 +366,8 @@ export class StatutoryReportService {
     if (
       rawContent.schema_version === 5 ||
       rawContent.schema_version === 6 ||
-      rawContent.schema_version === 7
+      rawContent.schema_version === 7 ||
+      rawContent.schema_version === 8
     )
       throw new EvidenceError('source_bound_workflow_required', 409);
     switch (kind) {
@@ -455,7 +468,11 @@ export class StatutoryReportService {
     if (report.kind === 'dpb') {
       throw new EvidenceError('source_bound_workflow_required', 409);
     }
-    if (report.status !== 'published' && report.created_by !== actorId) {
+    if (
+      report.status !== 'published' &&
+      report.created_by !== actorId &&
+      !(await isLivePlatformFounder(this.db, actorId, signal))
+    ) {
       throw new EvidenceError('report_not_found', 404);
     }
     if (report.kind === 'technical') {
@@ -463,9 +480,10 @@ export class StatutoryReportService {
     }
     const raw = report.content_text ? JSON.parse(report.content_text) : report.content;
     const rawVersion = (raw as Record<string, unknown>)?.schema_version;
-    if (rawVersion === 5 || rawVersion === 6 || rawVersion === 7) {
+    if (rawVersion === 5 || rawVersion === 6 || rawVersion === 7 || rawVersion === 8) {
       const questionnaireOnly = rawVersion === 6;
       const branded = rawVersion === 7;
+      const clarified = rawVersion === 8;
       if (report.status === 'published') throw new EvidenceError('retained_pdf_required', 409);
       if (report.kind !== 'board' && report.kind !== 'auditor')
         throw new EvidenceError('source_bound_workflow_required', 409);
@@ -477,11 +495,13 @@ export class StatutoryReportService {
         )
           throw Error();
         const document = (
-          branded
-            ? BrandedDocumentV7Schema
-            : questionnaireOnly
-              ? QuestionnaireEvidenceDocumentV6Schema
-              : CoverageFirstDocumentV5Schema
+          clarified
+            ? ClarifiedDocumentV8Schema
+            : branded
+              ? BrandedDocumentV7Schema
+              : questionnaireOnly
+                ? QuestionnaireEvidenceDocumentV6Schema
+                : CoverageFirstDocumentV5Schema
         ).parse(parseCoverageFirstJson(report.content_text, 4 * 1024 * 1024));
         const requestQuery = this.db
           .from(report.kind === 'board' ? 'board_report_requests' : 'statutory_report_requests')
@@ -537,17 +557,21 @@ export class StatutoryReportService {
           sourceSha256: source.source_sha256,
           generatedAt: document.generated_at,
         };
-        const rebuilt = branded
-          ? buildBrandedReport(input)
-          : questionnaireOnly
-            ? buildQuestionnaireEvidenceReport(input)
-            : buildCoverageFirstReport(input);
+        const rebuilt = clarified
+          ? buildClarifiedReport(input)
+          : branded
+            ? buildBrandedReport(input)
+            : questionnaireOnly
+              ? buildQuestionnaireEvidenceReport(input)
+              : buildCoverageFirstReport(input);
         if (canonicalJson(document) !== canonicalJson(rebuilt)) throw Error();
-        let html = branded
-          ? renderBrandedDraft(input)
-          : questionnaireOnly
-            ? renderQuestionnaireEvidenceDraft(input)
-            : renderCoverageFirstDraft(input);
+        let html = clarified
+          ? renderClarifiedDraft(input)
+          : branded
+            ? renderBrandedDraft(input)
+            : questionnaireOnly
+              ? renderQuestionnaireEvidenceDraft(input)
+              : renderCoverageFirstDraft(input);
         if (report.status === 'approved') {
           const reviewQuery = this.db
             .from('report_reviews')
@@ -563,11 +587,13 @@ export class StatutoryReportService {
             .parse(result.data);
           const { generatedAt: _generatedAt, ...reviewedInput } = input;
           html = (
-            branded
-              ? renderReviewedBrandedReport
-              : questionnaireOnly
-                ? renderReviewedQuestionnaireEvidenceReport
-                : renderReviewedCoverageFirstReport
+            clarified
+              ? renderReviewedClarifiedReport
+              : branded
+                ? renderReviewedBrandedReport
+                : questionnaireOnly
+                  ? renderReviewedQuestionnaireEvidenceReport
+                  : renderReviewedCoverageFirstReport
           )({
             ...reviewedInput,
             reportId: report.id,
@@ -631,8 +657,9 @@ export class StatutoryReportService {
         },
       )
       .eq('tenant_id', tenantId)
-      .or(`status.eq.published,created_by.eq.${actorId}`)
       .in('kind', ['board', 'auditor', 'dpb', 'technical']);
+    if (!(await isLivePlatformFounder(this.db, actorId, signal)))
+      query = query.or(`status.eq.published,created_by.eq.${actorId}`);
 
     if (input.kind) query = query.eq('kind', input.kind);
     if (input.engagementId) query = query.eq('engagement_id', input.engagementId);

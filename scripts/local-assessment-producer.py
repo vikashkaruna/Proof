@@ -338,7 +338,9 @@ def reviewed_image(image: str | None) -> str:
     return resolved
 
 
-def container_args(action: str, image: str) -> list[str]:
+def container_args(action: str, image: str, recovery_owner: str | None = None) -> list[str]:
+    if recovery_owner is not None and (action != "serve" or not re.fullmatch(r"[a-f0-9]{32}", recovery_owner)):
+        raise ValueError("Protected recovery owner refused")
     if action not in ("check", "serve") or not re.fullmatch(
         r"sha256:[a-f0-9]{64}", image
     ):
@@ -349,6 +351,7 @@ def container_args(action: str, image: str) -> list[str]:
         if action == "serve"
         else ["--rm"]
     )
+    if recovery_owner is not None:args += ["--label", "axiom.recovery.owner=" + recovery_owner]
     args += [
         "--label",
         f"axiom.purpose={PURPOSE}",
@@ -395,12 +398,14 @@ def container_args(action: str, image: str) -> list[str]:
     return args
 
 
-def container(action: str, image: str | None) -> None:
+def container(action: str, image: str | None, recovery_owner: str | None = None) -> None:
     resolved = reviewed_image(image)
     if action == "serve":
-        remove_owned(NAME)
+        if recovery_owner is not None:
+            if owned_container(NAME) is not None:raise ValueError("Recovery producer name must remain absent before creation")
+        else:remove_owned(NAME)
     # Existing socket/config volumes must already have been staged explicitly.
-    result = run(container_args(action, resolved), check=False)
+    result = run(container_args(action, resolved, recovery_owner), check=False)
     if result.returncode:
         raise ValueError("Producer launch refused")
     print(
@@ -417,12 +422,15 @@ def main() -> None:
         "--image",
         help="Explicit reviewed, preloaded candidate image; resolved to its local immutable image ID",
     )
+    parser.add_argument("--recovery-owner", help="Protected coordinator nonce; serve from an absent name only")
     args = parser.parse_args()
     try:
+        if args.recovery_owner is not None and args.action != "serve":
+            raise ValueError("Recovery owner applies to serve only")
         if args.action == "stage":
             stage()
         else:
-            container(args.action, args.image)
+            container(args.action, args.image, args.recovery_owner)
     except (Exception, KeyboardInterrupt):  # noqa: BLE001 - credential-bearing failures must be sanitized
         # Never echo docker argv, backend output, file contents or exception text.
         print("Local assessment producer operation refused.", file=sys.stderr)

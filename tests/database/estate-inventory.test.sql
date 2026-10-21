@@ -29,15 +29,23 @@ insert into public.system_data_categories(tenant_id,system_id,category_key) valu
  ('00000000-0000-4000-8000-000000000011','00000000-0000-4000-8000-000000000031','contact-details'),
  ('00000000-0000-4000-8000-000000000012','00000000-0000-4000-8000-000000000032','contact-details');
 insert into public.estate_scans(tenant_id,estate_id) select tenant_id,id from public.estates;
+-- Catalogue178 intentionally removes raw application engagement INSERT.
+-- Retained RLS read fixtures are imported by the actual disposable DB owner.
+select pg_temp.reject($q$insert into public.engagements(tenant_id,library_version,title) values ('00000000-0000-4000-8000-000000000011','estate-test','Raw application bypass')$q$, '42501');
+reset role;
 insert into public.engagements(tenant_id,estate_id,library_version,title) values
  ('00000000-0000-4000-8000-000000000011','00000000-0000-4000-8000-000000000021','estate-test','Assigned'),
  ('00000000-0000-4000-8000-000000000011',null,'estate-test','Legacy unassigned');
+set local role service_role;
 select pg_temp.ok((select count(*)=2 from public.estates), 'BFF reads both estates without BYPASSRLS');
 -- Cross-tenant references fail for privileged writes too, including updates.
 select pg_temp.reject($q$update public.estate_systems set estate_id='00000000-0000-4000-8000-000000000022' where name='A database'$q$, '23503');
 select pg_temp.reject($q$insert into public.system_data_categories(tenant_id,system_id,category_key) values ('00000000-0000-4000-8000-000000000011','00000000-0000-4000-8000-000000000032','wrong')$q$, '23503');
 select pg_temp.reject($q$update public.estate_scans set estate_id='00000000-0000-4000-8000-000000000022' where tenant_id='00000000-0000-4000-8000-000000000011'$q$, '23503');
-select pg_temp.reject($q$update public.engagements set estate_id='00000000-0000-4000-8000-000000000022' where title='Assigned'$q$, '23503');
+-- Initial same-tenant attachment remains supported; its composite FK still
+-- rejects a foreign estate. Already assigned scopes are independently immutable.
+select pg_temp.reject($q$update public.engagements set estate_id='00000000-0000-4000-8000-000000000022' where title='Legacy unassigned'$q$, '23503');
+select pg_temp.reject($q$update public.engagements set estate_id='00000000-0000-4000-8000-000000000022' where title='Assigned'$q$, '23514');
 select pg_temp.reject($q$update public.estate_scans set status='succeeded'$q$, '23514');
 select pg_temp.reject($q$delete from public.estates where name='A production'$q$, '23503');
 select pg_temp.reject($q$insert into public.estates(tenant_id,slug,name) values ('00000000-0000-4000-8000-000000000011','production','duplicate')$q$, '23505');

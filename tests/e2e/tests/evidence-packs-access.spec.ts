@@ -38,6 +38,7 @@ test('real pack access follows current membership and internal authority, includ
     withFactor: true,
   });
   const outsider = await createMfaAccount('pack-access-outsider', {
+    globalFounder: false,
     role: 'founder',
     isInternal: true,
     withFactor: true,

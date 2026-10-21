@@ -272,11 +272,15 @@ def stage(tenant: str, require_active: bool) -> None:
     )
 
 
-def container(tenant: str, mode: str, detach: bool, image: str | None = None) -> None:
+def container(tenant: str, mode: str, detach: bool, image: str | None = None, recovery_owner: str | None = None) -> None:
+    if recovery_owner is not None and (mode != "--serve" or not detach or not re.fullmatch(r"[a-f0-9]{32}", recovery_owner)):
+        raise ValueError("Protected recovery owner required")
     image = service_image(tenant, image)
     name = f"axiom-key-service-{tenant}"
     if mode == "--serve":
-        remove_owned(name, "local-key-service")
+        if recovery_owner is None:remove_owned(name, "local-key-service")
+        elif name in run(["docker", "ps", "-a", "--format", "{{.Names}}"]).stdout.splitlines():
+            raise ValueError("Recovery key service name must remain absent before creation")
     args = [
         "docker",
         "run",
@@ -312,6 +316,7 @@ def container(tenant: str, mode: str, detach: bool, image: str | None = None) ->
         mode,
         f"{CONF}/config.json",
     ]
+    if recovery_owner is not None:args[2:2] = ["--label", "axiom.recovery.owner=" + recovery_owner]
     result = run(args, check=False)
     print((result.stdout or result.stderr).strip())
     if result.returncode != 0:
@@ -327,7 +332,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--image", help="Reviewed local immutable image ID for deployment/upgrade"
     )
+    parser.add_argument("--recovery-owner", help="Protected coordinator nonce; serve from an absent name only")
     args = parser.parse_args()
+    if args.recovery_owner is not None and args.action != "serve":raise ValueError("Recovery owner applies to serve only")
     image = service_image(args.tenant, args.image)
     if args.action == "check":
         stage(args.tenant, require_active=False)
@@ -339,4 +346,4 @@ if __name__ == "__main__":
         container(args.tenant, "--provision", detach=False, image=image)
     else:
         stage(args.tenant, require_active=True)
-        container(args.tenant, "--serve", detach=True, image=image)
+        container(args.tenant, "--serve", detach=True, image=image, recovery_owner=args.recovery_owner)

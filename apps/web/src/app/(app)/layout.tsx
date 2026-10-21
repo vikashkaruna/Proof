@@ -1,4 +1,4 @@
-import { hasLiveFounderReportAccess } from '@/lib/founder-report-access';
+import { readOrganizationContexts } from '@/lib/organization-contexts';
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient } from '@axiom/supabase';
@@ -28,26 +28,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   if (!user) redirect('/login');
 
-  // Tenant membership + role
-  const readMemberships = () =>
-    supabase
-      .from('tenant_users')
-      .select('tenant_id, role, tenants:tenant_id(slug, name)')
-      .eq('user_id', user.id);
-  let { data: memberships, error: membershipsError } = await readMemberships();
-  if (
-    membershipsError?.code === 'PGRST303' &&
-    membershipsError.message === 'JWT issued at future'
-  ) {
-    // GoTrue and PostgREST can straddle a one-second clock boundary immediately
-    // after sign-in. Retry only that specific token-timing refusal, then fail closed.
-    await new Promise((resolve) => setTimeout(resolve, 1100));
-    ({ data: memberships, error: membershipsError } = await readMemberships());
-  }
-  if (membershipsError || !memberships) {
-    throw new Error('Tenant memberships are unavailable');
-  }
-
+  const { rows: memberships, globalFounder } = await readOrganizationContexts(supabase, user.id);
   const tenants = [...(memberships ?? [])]
     .sort((a, b) => a.tenant_id.localeCompare(b.tenant_id))
     .map((m) => {
@@ -72,33 +53,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       };
     });
 
-  // The persona for the tenant currently being acted in — not a union across
-  // memberships. Someone who owns tenant A and merely views tenant B must see
-  // B's navigation while they are in B.
+  // A live platform founder has effective founder authority in every company.
+  // Ordinary users get only the selected membership's role, never a union.
   const active =
     tenants.find((t) => t.slug === activeTenantSlug || t.id === activeTenantSlug) ?? tenants[0];
   const capabilities = active ? capabilitiesFor(active.role as UserRole) : [];
-  let founderIsInternal = false;
-  if (active?.role === UserRole.FOUNDER) {
-    const { data: profile, error: profileError } = await supabase
-      .from('users')
-      .select('is_axiom_internal')
-      .eq('id', user.id)
-      .maybeSingle();
-    founderIsInternal = !profileError && profile?.is_axiom_internal === true;
-  }
   const canViewClosureDossiers = active
-    ? canAccessClosureDossiers(active.role as UserRole, founderIsInternal)
+    ? canAccessClosureDossiers(active.role as UserRole, globalFounder)
     : false;
-
-  const canReviewFounderReports =
-    active?.role === UserRole.FOUNDER &&
-    (await hasLiveFounderReportAccess({
-      userId: user.id,
-      role: UserRole.FOUNDER,
-      isAxiomInternal: founderIsInternal,
-      supabase,
-    }));
+  const canReviewFounderReports = globalFounder;
 
   return (
     <AppShell
@@ -109,6 +72,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       canViewClosureDossiers={canViewClosureDossiers}
       canReviewFounderReports={Boolean(canReviewFounderReports)}
       logoutAction={logoutAction}
+      isGlobalFounder={globalFounder}
     >
       {children}
     </AppShell>

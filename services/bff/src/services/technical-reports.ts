@@ -1,3 +1,4 @@
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
 import { createStatutoryProofWriter } from '@axiom/supabase';
 /** Technical registers are deterministic manifests over recorded, frozen plan data. */
 import { createHash, randomUUID } from 'node:crypto';
@@ -212,6 +213,7 @@ export class TechnicalReportService {
   }
 
   private async isInternalFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
+    if (await isLivePlatformFounder(this.db, actorId, signal)) return true;
     let member = this.db
       .from('tenant_users')
       .select('role')
@@ -229,6 +231,7 @@ export class TechnicalReportService {
   }
 
   private async role(tenantId: string, actorId: string, founder: boolean, signal?: AbortSignal) {
+    if (await isLivePlatformFounder(this.db, actorId, signal)) return;
     let query = this.db
       .from('tenant_users')
       .select('role')

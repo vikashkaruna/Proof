@@ -120,3 +120,29 @@ it('preserves recorded category origin labels without promoting observation to v
     'Category source unknown',
   );
 });
+it('shows founder inventory history with truthful statuses while retired parents cannot produce current access edges', () => {
+  const history = buildEstateGraph(input, { includeInactive: true });
+  expect(history.nodes.find((n) => n.id === 'estate:e2')?.detail.status).toBe('archived');
+  expect(history.nodes.some((n) => n.id === 'system:s2')).toBe(true);
+  expect(history.nodes.some((n) => n.id === 'connector:c2')).toBe(true);
+  expect(history.edges.some((e) => e.id === 'contains:e2:s2')).toBe(true);
+  expect(history.edges.some((e) => e.id === 'grant:g5')).toBe(false);
+  expect(
+    history.edges
+      .filter((e) => e.kind === 'read' || e.kind === 'write')
+      .map((e) => e.id)
+      .sort(),
+  ).toEqual(['grant:g1', 'grant:g2']);
+  const archived = structuredClone(input);
+  archived.connectors[0]!.status = 'archived';
+  expect(
+    buildEstateGraph(archived, { includeInactive: true }).nodes.some(
+      (n) => n.id === 'connector:c1',
+    ),
+  ).toBe(true);
+  expect(
+    buildEstateGraph(archived, { includeInactive: true }).edges.some(
+      (e) => e.to === 'connector:c1' && (e.kind === 'read' || e.kind === 'write'),
+    ),
+  ).toBe(false);
+});

@@ -9,6 +9,7 @@ import { seedAcceptanceLibrary } from './lib/seed-acceptance-library.js';
 import { LIBRARY_VERSION } from '../packages/control-library/src/index.js';
 import {
   insertLocalFixtureRows,
+  insertOwnedFixtureEngagements,
   remoteFixtureDatabaseUrl,
   updateLocalFixtureRow,
   type FixtureTarget,
@@ -20,8 +21,18 @@ import { networkInterfaces } from 'node:os';
 import { resolve } from 'node:path';
 import { mintLocalPostgrestRoleKey } from '../packages/supabase/src/local-proof-writer-key.js';
 
+function requireOwnedFixtureBootstrap(target: ReturnType<typeof loadAcceptanceTarget>): void {
+  // Environment labels below exercise the owned local stack. An actual remote
+  // target requires a separately approved privileged bootstrap, not service DML.
+  if (target?.topology === 'remote')
+    throw new Error(
+      'Remote strict parity fixture bootstrap is unsupported; no remote writes performed',
+    );
+}
+
 async function main() {
   const target = loadAcceptanceTarget();
+  requireOwnedFixtureBootstrap(target);
   const remoteDatabaseUrl = target?.topology === 'remote' ? remoteFixtureDatabaseUrl(target) : null;
   const environment = process.argv[2] ?? target?.environment;
   if (target) {
@@ -394,27 +405,28 @@ async function main() {
     ).status,
     201,
   );
-  assert.equal(
-    (
-      await apiRequest('/rest/v1/engagements', 'POST', [
-        {
-          id: engagementA,
-          tenant_id: tenantA,
-          estate_id: estateA,
-          library_version: library,
-          title: 'Visible A',
-        },
-        {
-          id: engagementB,
-          tenant_id: tenantB,
-          estate_id: estateB,
-          library_version: library,
-          title: 'Private B',
-        },
-      ])
-    ).status,
-    201,
-  );
+  insertOwnedFixtureEngagements({
+    repoRoot: process.cwd(),
+    stateDir,
+    apiUrl: status.API_URL!,
+    serviceKey: status.SERVICE_ROLE_KEY!,
+    rows: [
+      {
+        id: engagementA,
+        tenant_id: tenantA,
+        estate_id: estateA,
+        library_version: library,
+        title: 'Visible A',
+      },
+      {
+        id: engagementB,
+        tenant_id: tenantB,
+        estate_id: estateB,
+        library_version: library,
+        title: 'Private B',
+      },
+    ],
+  });
 
   let request: (path: string, options?: RequestInit) => Promise<Response>;
   if (target)

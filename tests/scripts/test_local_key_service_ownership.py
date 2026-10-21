@@ -208,3 +208,23 @@ class ImagePinTests(unittest.TestCase):
             ],
         ):
             self.assertEqual(m.service_image("kosha", new), new)
+
+
+class RecoveryCreation(unittest.TestCase):
+    def test_nonce_scoped_creation_requires_absent_name_and_never_removes_collision(self):
+        nonce = "a" * 32
+        image = "sha256:" + "b" * 64
+        with patch.object(m, "service_image", return_value=image), patch.object(m, "run", return_value=subprocess.CompletedProcess([], 0, "axiom-key-service-kosha\n", "")) as execute, patch.object(m, "remove_owned") as remove:
+            with self.assertRaisesRegex(ValueError, "absent"):
+                m.container("kosha", "--serve", True, image, nonce)
+            remove.assert_not_called()
+            self.assertEqual(execute.call_count, 1)
+        with patch.object(m, "service_image", return_value=image), patch.object(m, "run", return_value=subprocess.CompletedProcess([], 0, "", "")) as execute, patch.object(m, "remove_owned") as remove, patch("builtins.print"):
+            m.container("kosha", "--serve", True, image, nonce)
+            remove.assert_not_called()
+            launch = execute.call_args.args[0]
+            self.assertIn("axiom.recovery.owner=" + nonce, launch)
+            self.assertIn(image, launch)
+        for mode, detach, owner in (("--check", False, nonce), ("--serve", True, "invalid")):
+            with self.subTest(mode=mode, owner=owner), self.assertRaises(ValueError):
+                m.container("kosha", mode, detach, image, owner)

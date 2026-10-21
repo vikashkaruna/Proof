@@ -13,7 +13,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 REVIEW_SHA = "a221a1fb1c39e3ace5ea36b5347d02de025d1535b895b0288548b76970b3194a"
-ASSET_SHA = "36a95f9fa98cb021f8ca179ae1d286f208fbd4c5a86abf2c81dfd12a1a66f3e3"
+# Reviewed178 test-only immutable-scope rejection; emitted asset setup prefix is unchanged.
+ASSET_SHA = "ae33189bc266771c5dc839caa552e87fc0e7bd1ff2e1daa9261fccd49ada381c"
 SCHEMA = "local147_fixture"
 
 
@@ -113,6 +114,8 @@ do $auth$declare prior text:=current_user;begin
   execute format('set local role %I',prior);
  end if;
 end $auth$;
+-- Raw retained fixture imports use the original disposable DB session.
+reset role;
 """
         + text
         + """

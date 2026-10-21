@@ -21,8 +21,11 @@ the credential per request. Nothing here activates a policy.
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import json
 import os
+import stat
 import subprocess  # nosec B404 - fixed docker/python argv lists, no shell
 import sys
 import time
@@ -78,7 +81,40 @@ def active_policy(tenant: str) -> dict:
     return value
 
 
-def issue(tenant: str, kind: str, renew: bool) -> None:
+def protected_read(path: Path) -> bytes:
+    info = path.lstat()
+    if path.resolve() != path or info.st_uid != os.getuid() or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_size > 65536:
+        raise ValueError("Protected issuance file required")
+    return path.read_bytes()
+
+
+def publish(path: Path, raw: bytes) -> None:
+    if path.exists() or path.is_symlink():
+        protected_read(path)
+    temporary = path.with_name(path.name + ".next-" + str(uuid.uuid4()))
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+    os.replace(temporary, path)
+
+
+def issue(tenant: str, kind: str, renew: bool, resume: str | None = None) -> None:
+    tenant = str(uuid.UUID(tenant))
+    if kind not in KINDS:raise ValueError("Reviewed credential kind required")
+    base = ISSUER_ROOT / "credentials" / tenant
+    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if base.resolve() != base or base.stat().st_uid != os.getuid() or stat.S_IMODE(base.stat().st_mode) != 0o700:
+        raise ValueError("Protected credential directory required")
+    lock = base / f"{kind}.issue.lock"
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        protected_read(lock)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _issue(tenant, kind, renew, resume)
+    finally:os.close(fd)
+
+
+def _issue(tenant: str, kind: str, renew: bool, resume: str | None = None) -> None:
     if kind not in KINDS:
         raise SystemExit("kind must be operator, producer or controller")
     alias = tenant_alias(tenant)
@@ -89,28 +125,44 @@ def issue(tenant: str, kind: str, renew: bool) -> None:
     base = ISSUER_ROOT / "credentials" / tenant
     base.mkdir(parents=True, exist_ok=True, mode=0o700)
     last = base / f"{kind}.last"
-    predecessor = last.read_text().strip() if renew and last.exists() else None
-    if renew and predecessor is None:
-        raise SystemExit("No previous credential to renew; issue first.")
-    raw, digest = issue_request(
-        policy_text=policy["policyText"],
-        policy_sha256=policy["policySha256"],
-        activation_event_id=policy["activationEventId"],
-        activation_epoch=int(policy["epoch"]),
-        configuration_sha256=settings_sha,
-        kind=kind,
-        issued_at=int(time.time()) - 5,
-        reason=f"Local retained runtime {kind} verifier credential",
-        predecessor_id=predecessor,
-    )
-    credential_id = json.loads(raw)["credentialId"]
-    review = base / f"{credential_id}.request.json"
-    fd = os.open(review, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as stream:
-        stream.write(raw)
+    pending_path = base / f"{kind}.pending.json"
+    pending = json.loads(protected_read(pending_path)) if pending_path.exists() else None
+    if pending and pending["credentialId"] != resume:
+        raise ValueError("Uncertain custody issuance; explicitly resume same request")
+    if resume:
+        if not pending or str(uuid.UUID(resume)) != resume:
+            raise ValueError("Exact pending custody request required")
+        credential_id = resume
+        review = base / f"{credential_id}.request.json"
+        raw = protected_read(review)
+        digest = hashlib.sha256(raw).hexdigest()
+        request = json.loads(raw)
+        if (pending["requestSha256"] != digest or request["credentialId"] != resume
+            or request["tenantId"] != tenant or request["principalKind"] != kind
+            or request["policySha256"] != policy["policySha256"]
+            or request["activationEventId"] != policy["activationEventId"]
+            or request["configurationSha256"] != settings_sha):
+            raise ValueError("Pending custody request scope changed")
+    else:
+        predecessor = protected_read(last).decode().strip() if renew and last.exists() else None
+        if renew and predecessor is None:
+            raise SystemExit("No previous credential to renew; issue first.")
+        raw, digest = issue_request(
+            policy_text=policy["policyText"], policy_sha256=policy["policySha256"],
+            activation_event_id=policy["activationEventId"], activation_epoch=int(policy["epoch"]),
+            configuration_sha256=settings_sha, kind=kind, issued_at=int(time.time()) - 5,
+            reason=f"Local retained runtime {kind} verifier credential", predecessor_id=predecessor,
+        )
+        credential_id = json.loads(raw)["credentialId"]
+        review = base / f"{credential_id}.request.json"
+        fd = os.open(review, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as stream:stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+        publish(pending_path, json.dumps({"credentialId": credential_id, "requestSha256": digest}).encode())
     target = base / credential_id
+    # Issuer target creation precedes every backend write. If absent, replay the
+    # identical retained request/ID; existing targets require explicit resume.
     subprocess.run(  # nosec B603 - fixed issuer path, isolated interpreter
-        [sys.executable, "-I", str(ROOT / "infra/local-custody-issuer/issuer.py"), "--issue",
+        [sys.executable, "-I", str(ROOT / "infra/local-custody-issuer/issuer.py"), "--resume-issue" if resume and target.exists() else "--issue",
          str(review), digest, str(settings), settings_sha, str(target)],
         check=True, timeout=120,
     )
@@ -122,8 +174,8 @@ def issue(tenant: str, kind: str, renew: bool) -> None:
         stream.flush()
         os.fsync(stream.fileno())
     os.replace(staged, base / f"{kind}.key")
-    last.write_text(credential_id)
-    last.chmod(0o600)
+    publish(last, credential_id.encode())
+    pending_path.unlink()
     print(f"{kind} credential {credential_id} published at {base / (kind + '.key')}")
 
 
@@ -178,6 +230,7 @@ if __name__ == "__main__":
     p.add_argument("--tenant-id", required=True)
     p.add_argument("--kind", required=True, choices=KINDS)
     p.add_argument("--renew", action="store_true")
+    p.add_argument("--resume", help="Exact pending credential ID; never generates a replacement request")
     r = sub.add_parser("renew-due")
     r.add_argument("--tenant-id")
     r.add_argument("--key-service-image")
@@ -186,7 +239,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     os.umask(0o077)
     if args.command == "issue":
-        issue(args.tenant_id, args.kind, args.renew)
+        issue(args.tenant_id, args.kind, args.renew, args.resume)
     else:
         if args.watch is not None and not 60 <= args.watch <= 1200:
             raise SystemExit("--watch must be 60..1200 seconds")

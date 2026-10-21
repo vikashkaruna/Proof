@@ -1,3 +1,9 @@
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
+import {
+  buildClarifiedReport,
+  renderClarifiedDraft,
+  verifyClarifiedSource,
+} from '@axiom/report-kit/clarified-report';
 import {
   buildBrandedReport,
   renderBrandedDraft,
@@ -64,6 +70,7 @@ export class BoardReportService {
   ) {}
 
   private async readRole(tenantId: string, actorId: string, signal?: AbortSignal) {
+    if (await isLivePlatformFounder(this.db, actorId, signal)) return 'founder';
     let membership = this.db
       .from('tenant_users')
       .select('role')
@@ -96,6 +103,7 @@ export class BoardReportService {
   }
 
   private async assertLiveFounder(tenantId: string, actorId: string, signal?: AbortSignal) {
+    if (await isLivePlatformFounder(this.db, actorId, signal)) return;
     let membership = this.db
       .from('tenant_users')
       .select('role')
@@ -138,7 +146,7 @@ export class BoardReportService {
   ) {
     const operationKey = input.operationKey ?? randomUUID();
     const result = await this.rpc(
-      'request_branded_board_report',
+      'request_clarified_board_report',
       {
         p_tenant_id: tenantId,
         p_actor_id: actorId,
@@ -158,6 +166,8 @@ export class BoardReportService {
         throw new EvidenceError('assessment_not_found', 404);
       if (result.error === 'assessment_not_finalized')
         throw new EvidenceError('assessment_not_finalized', 409);
+      if (result.error === 'owner_coverage_explanation_required')
+        throw new EvidenceError('owner_coverage_explanation_required', 409);
       throw new EvidenceError('invalid_request', 400);
     }
 
@@ -226,28 +236,36 @@ export class BoardReportService {
       throw new EvidenceError('assessment_source_incomplete', 409);
     }
     const frozenVersion = (frozenJson as { schema_version?: unknown })?.schema_version;
-    if (frozenVersion === 4 || frozenVersion === 5 || frozenVersion === 6) {
+    if (frozenVersion === 4 || frozenVersion === 5 || frozenVersion === 6 || frozenVersion === 8) {
       // Source4 (reviewed public evidence) → document5; source5 (questionnaire
       // only, 0155) → document6. Both withhold metrics and are recomputed by SQL.
       const questionnaireOnly = frozenVersion === 5;
       const verifySource =
-        frozenVersion === 6
-          ? verifyBrandedSource
-          : questionnaireOnly
-            ? verifyQuestionnaireEvidenceSource
-            : verifyCoverageFirstSource;
+        frozenVersion === 8
+          ? (text: string, sha: string, scope: Parameters<typeof verifyClarifiedSource>[2]) => ({
+              source: verifyClarifiedSource(text, sha, scope).branded.source,
+            })
+          : frozenVersion === 6
+            ? verifyBrandedSource
+            : questionnaireOnly
+              ? verifyQuestionnaireEvidenceSource
+              : verifyCoverageFirstSource;
       const buildDocument =
-        frozenVersion === 6
-          ? buildBrandedReport
-          : questionnaireOnly
-            ? buildQuestionnaireEvidenceReport
-            : buildCoverageFirstReport;
+        frozenVersion === 8
+          ? buildClarifiedReport
+          : frozenVersion === 6
+            ? buildBrandedReport
+            : questionnaireOnly
+              ? buildQuestionnaireEvidenceReport
+              : buildCoverageFirstReport;
       const renderDraft =
-        frozenVersion === 6
-          ? renderBrandedDraft
-          : questionnaireOnly
-            ? renderQuestionnaireEvidenceDraft
-            : renderCoverageFirstDraft;
+        frozenVersion === 8
+          ? renderClarifiedDraft
+          : frozenVersion === 6
+            ? renderBrandedDraft
+            : questionnaireOnly
+              ? renderQuestionnaireEvidenceDraft
+              : renderCoverageFirstDraft;
       let content;
       const input = {
         requestId,

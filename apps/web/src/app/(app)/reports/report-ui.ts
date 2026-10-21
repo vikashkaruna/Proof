@@ -8,6 +8,8 @@ export const dangerButton = `${buttonBase} border-ember-600 bg-white text-ember-
 export const field = 'w-full min-w-0 rounded border border-slate-300 px-3 py-2 text-sm';
 export const panel = 'min-w-0 space-y-4 rounded-xl border border-slate-200 bg-white p-5';
 const messages: Record<string, string> = {
+  owner_coverage_explanation_required:
+    'An owner must record explanations for incomplete public-page coverage in the assessment’s Public source review before a new report can be requested. These explanations remain unverified; existing reports are preserved.',
   forbidden: 'Your current role does not permit this action. Refresh to check your access.',
   report_not_found: 'This report is unavailable or you no longer have access to it.',
   pack_not_found: 'This evidence pack is unavailable or you no longer have access to it.',

@@ -85,6 +85,7 @@ interface AppShellProps {
   canViewClosureDossiers?: boolean;
   /** Server-verified live founder designation; the page independently rechecks. */
   canReviewFounderReports?: boolean;
+  isGlobalFounder?: boolean;
   logoutAction: () => Promise<void>;
 }
 
@@ -96,6 +97,7 @@ export function AppShell({
   capabilities,
   canViewClosureDossiers = false,
   canReviewFounderReports = false,
+  isGlobalFounder = false,
   logoutAction,
 }: AppShellProps) {
   const router = useRouter();
@@ -169,7 +171,7 @@ export function AppShell({
   // for a launcher whose every action they would be refused.
   const canSeeAgents = held.has('agent.invoke') || held.has('workbench.access');
 
-  // Resolved from memberships alone. A slug the user does not belong to is
+  // Resolved from the server-verified organization inventory. A slug the user does not belong to is
   // ignored rather than honoured — the same rule `requireTenantContext()`
   // applies on the server, and the reason the cookie is a preference.
   const preferred = activeTenantSlug
@@ -602,7 +604,9 @@ export function AppShell({
                 {/* The role, which is a fact. What stood here was an invented
                     sector ("Enterprise") shown as if it were tenant data. */}
                 <div className="text-[10px] text-[#8a909b]">
-                  {selectedTenant?.role ?? 'no membership'}
+                  {isGlobalFounder
+                    ? `Founder · all ${tenants.length} organizations`
+                    : (selectedTenant?.role ?? 'no membership')}
                 </div>
               </div>
               <span className="text-[10px] text-[#8a909b] ml-1">▾</span>
@@ -613,7 +617,7 @@ export function AppShell({
                 id="organization-choices"
                 className="absolute right-0 top-12 z-50 w-72 rounded-xl border border-[#e4e8ee] bg-white p-1.5 shadow-xl max-h-[420px] overflow-y-auto"
               >
-                {/* Only memberships. The "Demo environments" section that stood
+                {/* Verified organizations only. The "Demo environments" section that stood
                     here listed three invented companies to every user, and was
                     consulted BEFORE real memberships when resolving the active
                     tenant from the cookie. */}

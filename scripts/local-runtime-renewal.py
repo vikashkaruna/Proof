@@ -23,6 +23,7 @@ import subprocess  # nosec B404 - fixed argv, no shell
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 MAX = 2_000_000
@@ -91,7 +92,9 @@ def source_hashes(root: Path) -> dict[str, str]:
         check=True,
     )  # nosec B603
     hashes = {}
-    for name in result.stdout.decode().split("\0"):
+    selected_names = set(result.stdout.decode().split("\0"))
+    selected_names.add("scripts/lib/local_runtime_recovery.py")
+    for name in sorted(selected_names):
         if not name:
             continue
         path = root / name
@@ -433,20 +436,44 @@ def reconcile_namespaces(config: dict) -> list[dict]:
     ] != peer_specs(config):
         raise ValueError("Reviewed peer inventory changed")
     stale = []
+    unavailable = []
     for peer in peers:
-        value = metadata(config, peer["name"], peer["purpose"])
+        try:
+            value = metadata(config, peer["name"], peer["purpose"])
+        except (OSError, subprocess.SubprocessError):
+            # A missing/unreadable peer conveys no repair authority. Keep the
+            # reviewed name only; Docker diagnostics may contain private data.
+            unavailable.append({
+                "component": "network", "peer": peer["name"], "ok": False,
+                "peerUnavailable": True, "namespaceUnavailable": True,
+            })
+            continue
         if (
             value["image"] != peer["image"]
             or value["network"] != "container:" + before["id"]
         ):
             raise ValueError("Reviewed peer image/network changed")
-        if (
-            namespace(
+        try:
+            current = namespace(
                 config, value, "scheduler" if peer["kind"] == "scheduler" else "node"
             )
-            != net
-        ):
+        except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
+            # Identity/image/network were checked above. A restarting peer can
+            # reject exec; do not misclassify its unknown namespace as stale or
+            # stop any peer until the entire reviewed inventory is readable.
+            unavailable.append({
+                "component": "network", "peer": peer["name"], "ok": False,
+                "namespaceUnavailable": True,
+            })
+            continue
+        if current != net:
             stale.append((peer, value))
+    if unavailable:
+        return unavailable + [
+            {"component": "network", "peer": peer["name"], "ok": False,
+             "stale": True, "deferredForRuntime": True}
+            for peer, _value in stale
+        ]
     if not stale:
         return []
     idle = worker_idle_state(config)
@@ -534,6 +561,18 @@ def reconcile_namespaces(config: dict) -> list[dict]:
     return outcomes
 
 
+def recovery_module(config: dict):
+    relative = "scripts/lib/local_runtime_recovery.py"
+    if digest((Path(config["workspace"]) / relative).read_bytes()) != config["sources"].get(relative):
+        raise ValueError("Reviewed recovery source required")
+    spec = importlib.util.spec_from_file_location(
+        "local_runtime_recovery", Path(config["workspace"]) / "scripts/lib/local_runtime_recovery.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def once(record: Path, expected: str) -> int:
     config = load(record, expected)
     owned(record.parent / "renewal.lock")
@@ -548,6 +587,11 @@ def once(record: Path, expected: str) -> int:
         try:
             validate_sources(config)
             deployments = registry(config)
+            recovery = recovery_module(config) if config.get("localRecovery") else None
+            if recovery:
+                outcomes.extend(recovery.recover(config, deployments, record.parent, SimpleNamespace(**globals())))
+                if any(not item["ok"] for item in outcomes):
+                    raise ValueError("Approved recovery deferred; preserve peers")
             outcomes.extend(reconcile_namespaces(config))
             runtime_ready = all(item["ok"] for item in outcomes)
             for alias in config["tenants"]:
@@ -798,6 +842,16 @@ def install(args) -> None:
     validate_sources(config)
     registry(config)
     config["runtimeBindings"] = capture_runtime_bindings(config, args.bff_container_id)
+    if getattr(args, "enable_local_recovery", False):
+        if args.spire_cache is None or not args.spire_cache.is_absolute():
+            raise ValueError("Explicit existing SPIRE cache required for local recovery")
+        owned(args.spire_cache, True)
+        config["spireCache"] = str(args.spire_cache)
+        config["localRecovery"] = recovery_module(config).capture(
+            config, registry(config), args.recovery_approval_reference, args.recovery_days, SimpleNamespace(**globals())
+        )
+    elif getattr(args, "recovery_approval_reference", None):
+        raise ValueError("Explicit local recovery opt-in required")
     state.mkdir(mode=0o700)
     write_private(state / "runner.py", script.read_bytes())
     raw = json.dumps(config, sort_keys=True).encode()
@@ -890,13 +944,17 @@ def main() -> int:
         "controller-dir",
     ):
         p.add_argument("--" + option, required=True, type=Path)
+    p.add_argument("--spire-cache", type=Path, help="Existing protected retained SPIRE cache; required for recovery opt-in")
+    p.add_argument("--enable-local-recovery", action="store_true", help="Explicit finite human-approved LOCAL identity recovery; default off")
+    p.add_argument("--recovery-approval-reference")
+    p.add_argument("--recovery-days", type=int, default=7, help="Review period1..30days, default7")
     p.add_argument("--bff-container-id", required=True)
     p.add_argument("--tenant", action="append", required=True)
     p.add_argument(
         "--path",
         default="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
     )
-    for name in ("once", "status", "uninstall"):
+    for name in ("once", "status", "uninstall", "disable-recovery"):
         p = sub.add_parser(name)
         p.add_argument("--config", required=True, type=Path)
         p.add_argument("--config-sha256", required=True)
@@ -907,6 +965,12 @@ def main() -> int:
             install(args)
         elif args.command == "once":
             return once(args.config, args.config_sha256)
+        elif args.command == "disable-recovery":
+            load(args.config, args.config_sha256)
+            marker = args.config.parent / "recovery.disabled"
+            if marker.exists() or marker.is_symlink():owned(marker)
+            else:write_private(marker, b"Local recovery explicitly disabled; review/reinstall to re-enable.\n")
+            print("Local identity recovery disabled; existing bounded renewal remains installed.")
         else:
             inspect_job(args.config, args.config_sha256, args.command == "uninstall")
         return 0

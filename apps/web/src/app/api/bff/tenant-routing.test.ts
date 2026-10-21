@@ -9,6 +9,8 @@ const state = vi.hoisted(() => ({
   user: { id: 'verified-user' } as { id: string } | null,
   authError: false,
   lookupError: false,
+  founderLive: false,
+  organizations: [] as Array<{ id: string; slug: string; name: string }>,
   throwLookup: false,
   rows: [] as TenantMembership[],
   filter: vi.fn(),
@@ -22,7 +24,10 @@ vi.mock('@axiom/supabase', () => ({
       }),
       getUser: async () => ({ data: { user: state.user }, error: state.authError }),
     },
+    rpc: () => ({ abortSignal: async () => ({ data: state.founderLive, error: null }) }),
     from: (table: string) => {
+      if (table === 'tenants')
+        return { select: async () => ({ data: state.organizations, error: state.lookupError }) };
       expect(table).toBe('tenant_users');
       return {
         select: () => ({
@@ -61,6 +66,8 @@ beforeEach(() => {
   state.user = { id: 'verified-user' };
   state.authError = false;
   state.lookupError = false;
+  state.founderLive = false;
+  state.organizations = [];
   state.throwLookup = false;
   state.rows = [
     { tenant_id: B, tenants: { slug: 'new-customer' } },
@@ -130,4 +137,16 @@ describe('browser BFF tenant resolution', () => {
     ).toBe(403);
     expect(state.fetch).not.toHaveBeenCalled();
   });
+});
+
+it('routes automatic founder selection without membership but never after global revocation', async () => {
+  state.founderLive = true;
+  state.rows = [];
+  state.organizations = [{ id: B, slug: 'nonmember', name: 'Nonmember organization' }];
+  expect((await call('nonmember')).status).toBe(200);
+  expect(forwardedHeaders().get('x-tenant-id')).toBe(B);
+  state.fetch.mockClear();
+  state.founderLive = false;
+  expect((await call('nonmember')).status).toBe(403);
+  expect(state.fetch).not.toHaveBeenCalled();
 });

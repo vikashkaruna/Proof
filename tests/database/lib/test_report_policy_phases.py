@@ -31,7 +31,7 @@ class PolicyPhases(unittest.TestCase):
         self.assertEqual(len(plan["all"]), len(set(plan["all"])))
         self.assertEqual(sorted(plan["historical143"] + plan["current"]), plan["all"])
         self.assertIn(PHASES.CURRENT, plan["current"])
-        self.assertEqual(plan["currentVersion"], 177)
+        self.assertEqual(plan["currentVersion"], 181)
         self.assertIn(
             "local-public-control-assessment-dispatch.test.sql", plan["current"]
         )
@@ -68,7 +68,7 @@ class PolicyPhases(unittest.TestCase):
             (root / "infra/supabase/migrations" / source.name).write_text(
                 "-- offline inventory only"
             )
-        self.assertEqual(PHASES.plan(root)["currentVersion"], 177)
+        self.assertEqual(PHASES.plan(root)["currentVersion"], 181)
         custody = root / "tests/database/local-custody-operator-context.test.sql"
         custody.unlink()
         with self.assertRaisesRegex(ValueError, "custody148_context_suite_required"):
@@ -129,6 +129,11 @@ class PolicyPhases(unittest.TestCase):
             ("branded-board-lifecycle.test.sql", "branding177_suites_required"),
             ("branded-auditor-lifecycle.test.sql", "branding177_suites_required"),
             ("branded-report-parity.test.sql", "branding177_suites_required"),
+            ("catalogue-reaudit.test.sql", "catalogue178_suite_required"),
+            ("public-coverage-clarifications.test.sql", "coverage179_suite_required"),
+            ("clarified-report-parity.test.sql", "clarified180_suite_required"),
+            ("clarified-report-lifecycle.test.sql", "clarified180_suite_required"),
+            ("global-founder-visibility.test.sql", "founder181_suite_required"),
         ):
             with self.subTest(suite=suite), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)

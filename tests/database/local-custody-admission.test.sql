@@ -99,6 +99,9 @@ select pg_temp.ok(not has_function_privilege('service_role','public.record_local
 select pg_temp.ok(not has_function_privilege('axiom_local_custody_verifier','public.claim_assessment_dispatch(uuid,uuid,integer,text)','EXECUTE'),'key verifier cannot claim assessment');
 select pg_temp.ok(not has_table_privilege('axiom_local_custody_verifier','public.assessment_local_custody_authorizations','INSERT'),'no detached accepted grant');
 select pg_temp.ok(not has_table_privilege('human_action_writer','public.local_custody_policy_heads','UPDATE'),'no direct head rewrite');
+-- Prior scoped helpers restore their caller by name; raw fixture imports
+-- explicitly return to the original disposable database session.
+reset role;
 -- Synthetic privileged fixture for the private atomic sidecar contract only.
 -- No callable production insertion API exists and no old job is adopted.
 insert into public.control_libraries(version,published_at,published_by,change_log,control_count) values('custody-143-fixture',clock_timestamp(),'test','Synthetic custody fixture',1);

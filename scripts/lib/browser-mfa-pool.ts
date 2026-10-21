@@ -88,6 +88,20 @@ export const BROWSER_MFA_POOL_DEMAND = Object.freeze([
   { role: 'approver', internal: false, count: 9 },
 ] as const);
 
+/** Additional memberships are expected only after live global designation was verified. */
+export function mfaPoolMembershipReadPath(
+  account: Pick<MfaPoolAccount, 'id' | 'role' | 'internal'>,
+  binding: Pick<MfaPoolBinding, 'tenantId'>,
+  livePlatformFounder: unknown = false,
+): string {
+  const actor = z.guid().parse(account.id);
+  const tenant = z.guid().parse(binding.tenantId);
+  const globalFounder = account.role === 'founder' && account.internal;
+  if (globalFounder && livePlatformFounder !== true)
+    throw new Error('MFA pool live global founder authority refused');
+  return `tenant_users?user_id=eq.${actor}${globalFounder ? `&tenant_id=eq.${tenant}` : ''}&select=user_id,tenant_id,role`;
+}
+
 /** Independent actual PostgREST readback, not authority inferred from the file. */
 export function verifyMfaPoolAccountRows(
   account: MfaPoolAccount,

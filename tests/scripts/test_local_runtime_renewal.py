@@ -500,6 +500,23 @@ class WorkerRenewalGates(unittest.TestCase):
             all(item["requiresFreshIssue"] for item in state["outcomes"][1:])
         )
 
+    def test_namespace_unavailability_is_actionable_without_reviving_expired_authority(self):
+        for authority in (False, True):
+            with self.subTest(authority=authority), tempfile.TemporaryDirectory() as temp:
+                result, state, commands = self.cycle(
+                    Path(temp).resolve(), authority=authority,
+                    network=[{"component": "network", "peer": "axiom-assessment-controller-kosha",
+                              "ok": False, "namespaceUnavailable": True}],
+                )
+            self.assertEqual(result, 1)
+            self.assertFalse(state["refused"])
+            self.assertTrue(state["outcomes"][0]["namespaceUnavailable"])
+            self.assertFalse(commands)
+            self.assertTrue(all(
+                item["deferredForRuntime"] if authority else item["requiresFreshIssue"]
+                for item in state["outcomes"][1:]
+            ))
+
     def test_unconfirmed_runtime_defers_live_authority_without_invoking_helpers(self):
         with tempfile.TemporaryDirectory() as temp:
             result, state, commands = self.cycle(

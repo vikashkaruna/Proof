@@ -3,6 +3,7 @@ import { UserRole } from '@axiom/types';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSupabaseAdmin } from '@axiom/supabase';
 import { logger } from '../lib/logger.js';
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
 
 /** Status visibility failed; execution still uses the fail-safe halted answer. */
 export class KillSwitchStateUnavailable extends Error {
@@ -163,8 +164,10 @@ export function createKillSwitchService(
         (member.tenant_id !== actor.data.tenantId || member.user_id !== actor.data.userId)
       )
         throw new KillSwitchAuthorityRefused('unavailable');
-      if (!member || member.role !== UserRole.FOUNDER)
+      if (!member || member.role !== UserRole.FOUNDER) {
+        if (await isLivePlatformFounder(supabase, actor.data.userId, signal)) return supabase;
         throw new KillSwitchAuthorityRefused('forbidden');
+      }
       const profile = await supabase
         .from('users')
         .select('id, is_axiom_internal')

@@ -1,3 +1,4 @@
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
 import { createStatutoryProofWriter } from '@axiom/supabase';
 /** Exact-version, reviewed DPB notification pack publication. Unknown provider state stays pending. */
 import { createHash, randomUUID } from 'node:crypto';
@@ -104,18 +105,21 @@ export class DpbArtifactService {
 
   /** A metadata-only projection. No object key, bucket or provider receipt crosses this boundary. */
   async status(tenantId: string, actorId: string, reportId: string, signal?: AbortSignal) {
-    const member = await this.row(
-      'tenant_users',
-      tenantId,
-      'user_id',
-      actorId,
-      z.object({ role: z.string() }),
-      signal,
-    );
-    if (!member || !['founder', 'owner', 'admin'].includes(member.role))
+    const globalFounder = await isLivePlatformFounder(this.db, actorId, signal);
+    const member = globalFounder
+      ? null
+      : await this.row(
+          'tenant_users',
+          tenantId,
+          'user_id',
+          actorId,
+          z.object({ role: z.string() }),
+          signal,
+        );
+    if (!globalFounder && (!member || !['founder', 'owner', 'admin'].includes(member.role)))
       throw new EvidenceError('forbidden', 403);
-    const founder = member.role === 'founder';
-    if (founder) {
+    const founder = globalFounder || member?.role === 'founder';
+    if (founder && !globalFounder) {
       let userQuery = this.db.from('users').select('is_axiom_internal').eq('id', actorId);
       if (signal) userQuery = userQuery.abortSignal(signal);
       const user = await userQuery.maybeSingle();
@@ -276,6 +280,7 @@ export class DpbArtifactService {
     founder: boolean,
     signal?: AbortSignal,
   ) {
+    if (await isLivePlatformFounder(this.db, actorId, signal)) return;
     const member = await this.row(
       'tenant_users',
       tenantId,

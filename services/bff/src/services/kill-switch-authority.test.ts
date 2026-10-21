@@ -31,6 +31,7 @@ function matchesField(row: Row, key: string, value: unknown): boolean {
 
 function fixture() {
   const members: Row[] = [{ tenant_id: tenantId, user_id: userId, role: 'founder' }];
+  const founders: Row[] = [];
   const users: Row[] = [{ id: userId, is_axiom_internal: true }];
   const stops: Row[] = [
     {
@@ -76,6 +77,10 @@ function fixture() {
             filters.push([key, value]);
             return builder;
           },
+          async maybeSingle(): Promise<{ data: Row | null; error: unknown }> {
+            const value = (await builder) as { data: Row[] | null; error: unknown };
+            return { data: value.data?.[0] ?? null, error: value.error };
+          },
           upsert,
           update(value: Row) {
             update(value);
@@ -110,7 +115,14 @@ function fixture() {
                   error: fault.error ? { message: 'private connection sentinel' } : null,
                 };
               }
-              const rows = table === 'tenant_users' ? members : table === 'users' ? users : stops;
+              const rows =
+                table === 'tenant_users'
+                  ? members
+                  : table === 'users'
+                    ? users
+                    : table === 'platform_founders'
+                      ? founders
+                      : stops;
               return {
                 data: rows
                   .filter((row) => filters.every(([key, value]) => matchesField(row, key, value)))
@@ -126,6 +138,7 @@ function fixture() {
     }) as never;
   return {
     members,
+    founders,
     users,
     stops,
     upsert,
@@ -328,9 +341,14 @@ describe('global stop authority at the service boundary', () => {
       else f.members[0]!['role'] = 'owner';
       await expect(f.service.release(options)).rejects.toMatchObject({ reason: 'forbidden' });
       expect(f.update).not.toHaveBeenCalled();
-      expect(f.signals).toHaveLength(revocation === 'internal' ? 4 : 3);
+      expect(f.signals).toHaveLength(4);
       expect(f.signals[0]).toBe(f.signals[1]);
-      if (revocation === 'internal') expect(f.signals[2]).toBe(f.signals[3]);
+      expect(f.signals[2]).toBe(f.signals[3]);
+      expect(f.reads.slice(-2)).toEqual(
+        revocation === 'internal'
+          ? ['tenant_users', 'users']
+          : ['tenant_users', 'platform_founders'],
+      );
       expect(f.signals[2]).not.toBe(f.signals[0]);
     },
   );
@@ -433,4 +451,22 @@ it('preserves global halt refusal for tenant owner release', async () => {
   expect(response.status).toBe(409);
   expect(f.update).not.toHaveBeenCalled();
   expect(ledger).not.toHaveBeenCalled();
+});
+
+describe('global founder kill switch authority', () => {
+  it.each([null, 'viewer'])('accepts live global designation with local role %s', async (role) => {
+    const f = fixture();
+    f.members.splice(0);
+    if (role) f.members.push({ tenant_id: tenantId, user_id: userId, role });
+    f.founders.push({ user_id: userId, revoked_at: null });
+    await f.service.engage(options);
+    expect(f.upsert).toHaveBeenCalledTimes(1);
+  });
+  it('denies a revoked designation without a separate local founder grant', async () => {
+    const f = fixture();
+    f.members.splice(0);
+    f.founders.push({ user_id: userId, revoked_at: '2026-10-20T00:00:00Z' });
+    await expect(f.service.engage(options)).rejects.toMatchObject({ reason: 'forbidden' });
+    expect(f.upsert).not.toHaveBeenCalled();
+  });
 });

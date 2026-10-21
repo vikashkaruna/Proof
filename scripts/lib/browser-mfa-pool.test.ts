@@ -19,6 +19,7 @@ import {
   browserMfaPoolEnabled,
   mfaPoolFactorReadPath,
   verifyMfaPoolAccountRows,
+  mfaPoolMembershipReadPath,
   BROWSER_MFA_POOL_DEMAND,
   prepareBrowserMfaPool,
   leaseBrowserMfaAccount,
@@ -392,4 +393,61 @@ test('live TOTP projection survives retained recovery and revoked factors withou
   );
   assert.deepEqual(projected, [rows[0]]);
   assert.throws(() => mfaPoolFactorReadPath(actor + '&status=eq.revoked'));
+});
+
+test('global founder pool membership projection follows live authority and retains the exact pool tenant', async (context) => {
+  const f = await fixture(context);
+  const account = { ...f.accounts[0]!, role: 'founder' as const, internal: true };
+  const memberships = [
+    { user_id: account.id, tenant_id: f.binding.tenantId, role: 'founder' },
+    { user_id: account.id, tenant_id: randomUUID(), role: 'founder' },
+  ];
+  const rows = {
+    profile: [{ id: account.id, email: account.email, is_axiom_internal: true }],
+    factors: [{ user_id: account.id, factor_type: 'totp', status: 'active' }],
+  };
+  assert.equal(verifyMfaPoolAccountRows(account, f.binding, { ...rows, memberships }), false);
+  for (const authority of [undefined, false, 'true', 1, { live: true }])
+    assert.throws(
+      () => mfaPoolMembershipReadPath(account, f.binding, authority),
+      /live global founder authority refused/,
+    );
+  const query = new URL(
+    mfaPoolMembershipReadPath(account, f.binding, true),
+    'https://fixture.invalid',
+  ).searchParams;
+  const project = (values: typeof memberships) =>
+    values.filter(
+      (row) =>
+        query.get('user_id') === `eq.${row.user_id}` &&
+        query.get('tenant_id') === `eq.${row.tenant_id}`,
+    );
+  assert.equal(
+    verifyMfaPoolAccountRows(account, f.binding, { ...rows, memberships: project(memberships) }),
+    true,
+  );
+  assert.equal(
+    verifyMfaPoolAccountRows(account, f.binding, {
+      ...rows,
+      memberships: project(memberships.slice(1)),
+    }),
+    false,
+  );
+  assert.equal(
+    verifyMfaPoolAccountRows(account, f.binding, {
+      ...rows,
+      memberships: project([{ ...memberships[0]!, user_id: randomUUID() }]),
+    }),
+    false,
+  );
+  const ordinary = f.accounts[0]!;
+  const ordinaryQuery = new URL(
+    mfaPoolMembershipReadPath(ordinary, f.binding, true),
+    'https://fixture.invalid',
+  ).searchParams;
+  assert.equal(
+    ordinaryQuery.has('tenant_id'),
+    false,
+    'Ordinary membership verification must retain its existing exact-one-row check',
+  );
 });

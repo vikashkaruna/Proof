@@ -1,4 +1,5 @@
-/** Memberships must come from the authenticated user's RLS-scoped query. */
+/** Rows come from authenticated user-scoped organization enumeration: global
+ * platform-founder inventory or ordinary recorded memberships. */
 export interface TenantMembership {
   tenant_id: string;
   tenants: { slug: string } | { slug: string }[] | null;

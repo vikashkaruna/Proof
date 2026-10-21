@@ -1,3 +1,5 @@
+import { isLivePlatformFounder } from '../lib/platform-founder.js';
+import { renderReviewedClarifiedReport } from '@axiom/report-kit/clarified-report';
 import { renderReviewedBrandedReport } from '@axiom/report-kit/branded-report';
 import { renderReviewedCoverageFirstReport } from '@axiom/report-kit/coverage-first-report';
 import { renderReviewedQuestionnaireEvidenceReport } from '@axiom/report-kit/questionnaire-evidence-report';
@@ -106,18 +108,21 @@ export class StatutoryArtifactService {
 
   /** A metadata-only projection. No object key, bucket or provider receipt crosses this boundary. */
   async status(tenantId: string, actorId: string, reportId: string, signal?: AbortSignal) {
-    const member = await this.row(
-      'tenant_users',
-      tenantId,
-      'user_id',
-      actorId,
-      z.object({ role: z.string() }),
-      signal,
-    );
-    if (!member || !['founder', 'owner', 'admin'].includes(member.role))
+    const globalFounder = await isLivePlatformFounder(this.db, actorId, signal);
+    const member = globalFounder
+      ? null
+      : await this.row(
+          'tenant_users',
+          tenantId,
+          'user_id',
+          actorId,
+          z.object({ role: z.string() }),
+          signal,
+        );
+    if (!globalFounder && (!member || !['founder', 'owner', 'admin'].includes(member.role)))
       throw new EvidenceError('forbidden', 403);
-    const founder = member.role === 'founder';
-    if (founder) {
+    const founder = globalFounder || member?.role === 'founder';
+    if (founder && !globalFounder) {
       let userQuery = this.db.from('users').select('is_axiom_internal').eq('id', actorId);
       if (signal) userQuery = userQuery.abortSignal(signal);
       const user = await userQuery.maybeSingle();
@@ -265,6 +270,7 @@ export class StatutoryArtifactService {
     founder: boolean,
     signal?: AbortSignal,
   ) {
+    if (await isLivePlatformFounder(this.db, actorId, signal)) return;
     const member = await this.row(
       'tenant_users',
       tenantId,
@@ -385,18 +391,21 @@ export class StatutoryArtifactService {
       if (
         (header.schema_version === 4 ||
           header.schema_version === 5 ||
-          header.schema_version === 6) &&
+          header.schema_version === 6 ||
+          header.schema_version === 8) &&
         header.report_kind !== 'auditor'
       )
         throw Error();
       html = (
-        header.schema_version === 6
-          ? renderReviewedBrandedReport
-          : header.schema_version === 5
-            ? renderReviewedQuestionnaireEvidenceReport
-            : header.schema_version === 4
-              ? renderReviewedCoverageFirstReport
-              : renderReviewedAuditorHtml
+        header.schema_version === 8
+          ? renderReviewedClarifiedReport
+          : header.schema_version === 6
+            ? renderReviewedBrandedReport
+            : header.schema_version === 5
+              ? renderReviewedQuestionnaireEvidenceReport
+              : header.schema_version === 4
+                ? renderReviewedCoverageFirstReport
+                : renderReviewedAuditorHtml
       )({
         sourceText: source.source_text,
         sourceSha256: source.source_sha256,
@@ -422,7 +431,7 @@ export class StatutoryArtifactService {
         requireChromium: true,
         timeoutMs: 30_000,
         documentDate: review.reviewed_at,
-        ...(JSON.parse(source.source_text).schema_version === 6
+        ...([6, 8].includes(JSON.parse(source.source_text).schema_version)
           ? {
               brandedPresentation: {
                 revision: 'axiom-report-brand-1' as const,
@@ -638,13 +647,15 @@ export class StatutoryArtifactService {
           content_sha256: report.content_sha256,
           review_sha256: review.review_sha256,
           renderer_version:
-            JSON.parse(source.source_text).schema_version === 6
-              ? 'chromium-auditor-brand-v7'
-              : JSON.parse(source.source_text).schema_version === 5
-                ? 'chromium-auditor-questionnaire-evidence-v6'
-                : JSON.parse(source.source_text).schema_version === 4
-                  ? 'chromium-auditor-evidence-v5'
-                  : 'chromium-auditor-v1',
+            JSON.parse(source.source_text).schema_version === 8
+              ? 'chromium-auditor-clarified-v8'
+              : JSON.parse(source.source_text).schema_version === 6
+                ? 'chromium-auditor-brand-v7'
+                : JSON.parse(source.source_text).schema_version === 5
+                  ? 'chromium-auditor-questionnaire-evidence-v6'
+                  : JSON.parse(source.source_text).schema_version === 4
+                    ? 'chromium-auditor-evidence-v5'
+                    : 'chromium-auditor-v1',
           artifacts,
         },
         p_correlation_id: randomUUID(),

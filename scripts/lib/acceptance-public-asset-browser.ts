@@ -23,6 +23,16 @@ import { z } from 'zod';
 import { parseCatalogueJson } from '../../packages/control-library/src/index.js';
 import { AssessmentRequestSchema } from '../../packages/types/src/assessment-request.js';
 
+/** Preserve only the trusted interpreter toolchain paths, never ambient credentials. */
+export function registeredRuntimeToolchainEnvironment(environment: NodeJS.ProcessEnv) {
+  return {
+    ...(environment.PATH === undefined ? {} : { PATH: environment.PATH }),
+    ...(environment.LD_LIBRARY_PATH === undefined
+      ? {}
+      : { LD_LIBRARY_PATH: environment.LD_LIBRARY_PATH }),
+  };
+}
+
 const uuid = z.uuid();
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 export const registeredBrowserConfigSchema = z
