@@ -271,6 +271,7 @@ export function reportAcceptanceCodeSha256(repositoryRoot = '.') {
   return sha(
     [
       'scripts/verify-workload-assessment.ts',
+      'scripts/lib/acceptance-public-asset-browser.ts',
       'scripts/lib/acceptance-public-control-reports.ts',
       'scripts/lib/owned-founder-fixture.ts',
       'infra/supabase/migrations/0137_public_control_assessment_sources.sql',
@@ -725,21 +726,32 @@ export async function verifyPublicControlReports(deps: {
   );
   assert(packet?.finalized_receipt);
   const resultDigest = digest.parse(packet.result_digest);
-  const review = check(
-    await deps.db
-      .from('public_control_review_sets')
-      .select('check_id')
-      .eq('tenant_id', deps.tenantId)
-      .eq('id', source.reviewId)
-      .single(),
-  );
+  deps.onPhase('retained-review-read');
+  // The retained review is deliberately not exposed as an application table.
+  // Use its scoped reader; never widen service-role table privileges for fixtures.
+  const review = z
+    .object({
+      data: z.object({ id: uuid, check_id: uuid }),
+      isCurrent: z.literal(true),
+      contextCurrent: z.literal(true),
+    })
+    .parse(
+      check(
+        await deps.db.rpc('read_public_control_review_set', {
+          p_tenant_id: deps.tenantId,
+          p_actor_id: user.id,
+          p_review_id: source.reviewId,
+        }),
+      ),
+    );
+  assert.equal(review.data.id, source.reviewId);
   deps.onPhase('owner-coverage-clarification');
   await ensureOwnerCoverageClarification({
     request: deps.request,
     headers: deps.ownerHeaders,
     tenantId: deps.tenantId,
     engagementId: source.engagementId,
-    checkId: uuid.parse(review?.check_id),
+    checkId: review.data.check_id,
   });
   const vault = new EvidenceVault('ap-south-1', provider.endpoint, provider);
   try {

@@ -655,7 +655,13 @@ test.describe('real-provider board report lifecycle', () => {
       postInTenant(actor, path, body, tenantId);
     const select = async (actor: Page, id: string, role: 'admin' | 'founder' | 'viewer') => {
       if (!sourceHandoff) return selectTenant(actor, 'a');
-      await database('tenant_users', { tenant_id: tenantId, user_id: id, role });
+      if (role === 'founder') {
+        // Fresh global founders already have cross-company authority and derived
+        // rows; overwriting those rows would corrupt the authority being tested.
+        expect(await database('rpc/is_live_platform_founder', { p_user_id: id })).toBe(true);
+      } else {
+        await database('tenant_users', { tenant_id: tenantId, user_id: id, role });
+      }
       await actor.context().addCookies([tenantCookie(sourceHandoff.tenantSlug)]);
     };
     const manager = await createMfaAccount('board-manager', { role: 'admin', withFactor: true });
@@ -1417,7 +1423,13 @@ test.describe('real-provider board report lifecycle', () => {
       postInTenant(actor, path, body, tenantId);
     const select = async (actor: Page, id: string, role: 'admin' | 'founder' | 'viewer') => {
       if (!sourceHandoff) return selectTenant(actor, 'a');
-      await database('tenant_users', { tenant_id: tenantId, user_id: id, role });
+      if (role === 'founder') {
+        // Fresh global founders already have cross-company authority and derived
+        // rows; overwriting those rows would corrupt the authority being tested.
+        expect(await database('rpc/is_live_platform_founder', { p_user_id: id })).toBe(true);
+      } else {
+        await database('tenant_users', { tenant_id: tenantId, user_id: id, role });
+      }
       await actor.context().addCookies([tenantCookie(sourceHandoff.tenantSlug)]);
     };
     const manager = await createMfaAccount('auditor-manager', { role: 'admin', withFactor: true });

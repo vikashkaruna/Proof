@@ -7,6 +7,7 @@ import {
 } from './lib/registered-browser-diagnostics.js';
 import {
   registeredBrowserRequested,
+  registeredRuntimeToolchainEnvironment,
   createRegisteredBrowserConfig,
   registeredBrowserDirectory,
   writeRegisteredBrowserFile,
@@ -1134,7 +1135,7 @@ except Exception as error:
           {
             cwd: directory,
             env: {
-              PATH: process.env.PATH,
+              ...registeredRuntimeToolchainEnvironment(process.env),
               PYTHONPATH: [
                 join(process.cwd(), 'services/agent-runtime/src'),
                 join(process.cwd(), 'packages/offline-license-python'),
@@ -1185,6 +1186,7 @@ except Exception as error:
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
       assert(healthy, 'owned deterministic agent runtime unavailable');
+      phase = 'normal-auth-public-source-real-runtime-healthy';
     }
     await seedAcceptanceLibrary(
       url.origin,
@@ -1195,6 +1197,9 @@ except Exception as error:
     // 0.1.1 is already the immutable approved registry entry from0159: validate
     // its actual complete rows/manifest before selecting an absent default.
     // Never replace a different operator/current choice or approve a version.
+    phase = 'normal-auth-approved-catalogue-bootstrap';
+    // Private catalogue validators belong to the migration owner; the guarded
+    // fixture bootstrap must not grant their execution to application roles.
     guardedParitySql(
       `do $fixture$declare f jsonb;current_version text;begin
       lock table public.control_libraries in share row exclusive mode;
@@ -1211,8 +1216,9 @@ except Exception as error:
       if (select count(*)from public.control_libraries where is_current)<>1
         or not controller_security.catalogue178_released('0.1.1')then raise exception 'released current fixture catalogue required';end if;
     end $fixture$;`,
-      'postgres',
+      'supabase_admin',
     );
+    phase = 'normal-auth-assessment-http';
     const acceptanceLibrary = buildLibrarySeed();
     assert.equal(acceptanceLibrary.version, '0.1.1');
     assert.equal(acceptanceLibrary.controls.length, 46);

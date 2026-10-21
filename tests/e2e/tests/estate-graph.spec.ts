@@ -47,7 +47,13 @@ test('the estate graph derives agent access from grants and isolates Karya write
     },
   });
   expect(created.status()).toBe(201);
-  const connectorId = ((await created.json()) as { data: { id: string } }).data.id;
+  const registration = (
+    (await created.json()) as {
+      data: { id: string; version: number; status: string };
+    }
+  ).data;
+  const connectorId = registration.id;
+  expect(registration.status).toBe('draft');
   const expires = new Date(Date.now() + 30 * 86_400_000).toISOString();
   let writeGrant = '';
   for (const [agent, scope] of [
@@ -69,6 +75,16 @@ test('the estate graph derives agent access from grants and isolates Karya write
   await page.goto('/estate/graph');
   const graph = page.getByTestId('estate-graph');
   await graph.getByLabel('Estate filter', { exact: true }).selectOption({ label: estateName });
+  // A declared grant does not make a draft registration current authority.
+  await expect(graph.locator('[data-edge="read"]')).toHaveCount(0);
+  await expect(graph.locator('[data-edge="write"]')).toHaveCount(0);
+  const enabled = await page.request.patch(`/api/bff/v1/connectors/${connectorId}`, {
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
+    data: { operation: 'transition', expectedVersion: registration.version, status: 'active' },
+  });
+  expect(enabled.status()).toBe(200);
+  expect(((await enabled.json()) as { data: { status: string } }).data.status).toBe('active');
+  await graph.getByRole('button', { name: 'Refresh graph' }).click();
   await expect(graph.locator('[data-edge="read"]')).toHaveCount(1);
   await expect(graph.locator('[data-edge="write"]')).toHaveCount(1);
   await expect(graph.locator('[data-node="agent"]')).toHaveCount(12);

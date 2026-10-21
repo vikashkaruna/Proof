@@ -87,6 +87,10 @@ class RecoveryPolicy(unittest.TestCase):
                 issue.assert_not_called()
 
     def test_interrupted_published_credentials_and_restaging_resume_without_reissue(self):
+        for monitoring in (None, False, True):
+            with self.subTest(monitoring=monitoring):self.exercise_interrupted_recovery(monitoring)
+
+    def exercise_interrupted_recovery(self, monitoring):
         with tempfile.TemporaryDirectory() as directory:
             state, config = self.fixture(directory)
             cache = state / "spire"; cache.mkdir(mode=0o700)
@@ -99,6 +103,7 @@ class RecoveryPolicy(unittest.TestCase):
             a.write_private(credentials / "current.json", json.dumps({"credentialId": "old-controller"}).encode())
             for kind in ("producer", "controller"):a.write_private(custody / (kind + ".last"), ("old-" + kind).encode())
             runtime = {"controllerImage": "pin", "schedulerImage": "pin", "workerImage": "pin", "namespace": "same", "temporalAddress": "temporal:7233", "supabaseUrl": "http://localhost:57121", "dockerGid": 0}
+            if monitoring is not None:runtime["monitoringReadDispatch"] = monitoring
             a.write_private(tenant_dir / "runtime.json", json.dumps(runtime).encode())
             peers = [{"name": kind, "purpose": kind, "kind": kind, "tenant": "kosha", "image": "pin"} for kind in ("key", "controller", "scheduler", "producer")]
             config.update(workspace=str(ROOT), python="python", tenants=["kosha"], dockerExecutable="docker", environment={"AXIOM_LOCAL_CONTROLLER_DIR": str(controller), "AXIOM_LOCAL_CUSTODY_ISSUER_DIR": str(custody_root)}, runtimeBindings={"peers": peers})
@@ -107,6 +112,7 @@ class RecoveryPolicy(unittest.TestCase):
             issued = []; removed = set(); failures = ["issue", "key", "stage"]
             producer = {"id": "old-producer", "running": True, "image": "pin", "network": "container:bff", "labels": {}}
             producer_calls = []
+            stage_calls = []
             key = {"id": "old-key", "running": True, "image": "pin", "network": "container:bff", "labels": {}}
             def run(args, **_kwargs):
                 if args[:2] == ["docker", "stop"]:
@@ -135,6 +141,7 @@ class RecoveryPolicy(unittest.TestCase):
                     else:
                         issued.append("assessment-controller"); (credentials / "current.json").write_text(json.dumps({"credentialId": "new-controller"}))
                     if failures and failures[0] == "issue":failures.pop(0); return 1
+                if len(args) > 3 and args[3] == "stage":stage_calls.append(args)
                 if len(args) > 3 and args[3] == "stage" and failures:
                     failures.pop(0); removed.add("controller"); return 1
                 if len(args) > 3 and args[3] == "serve":removed.discard("controller")
@@ -153,6 +160,9 @@ class RecoveryPolicy(unittest.TestCase):
             self.assertIsNone(m.journal(state, a)["pending"])
             self.assertEqual([event["component"] for event in m.journal(state, a)["events"]], ["kosha", "producer"])
             self.assertEqual(producer_calls, ["stop", "remove", "stage", "serve"])
+            self.assertGreaterEqual(len(stage_calls), 2)
+            for command in stage_calls:self.assertEqual("--monitoring-read-dispatch" in command, monitoring is True)
+            self.assertEqual(json.loads((tenant_dir / "runtime.json").read_text()), runtime)
 
     def test_producer_stop_remove_stage_serve_resume_and_foreign_collision(self):
         for failure in ("remove", "stage", "serve"):

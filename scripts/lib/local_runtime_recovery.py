@@ -245,7 +245,7 @@ def recover(config: dict, deployments: dict, state: Path, api) -> list[dict]:
         stage = command(config, "local-assessment-controller.py", "stage", "--tenant", alias)
         for flag, field in (("controller-image", "controllerImage"), ("worker-image", "workerImage"), ("scheduler-image", "schedulerImage"), ("namespace", "namespace"), ("temporal-address", "temporalAddress"), ("supabase-url", "supabaseUrl"), ("docker-gid", "dockerGid")):
             stage.extend(["--" + flag, str(runtime[field])])
-        if runtime.get("monitoringReadDispatch", False):stage.append("--monitoring-read-dispatch")
+        if runtime.get("monitoringReadDispatch") is True:stage.append("--monitoring-read-dispatch")
         checked(config, stage, api, state=state, deployments=deployments)
         for action in ("check", "serve", "scheduler"):
             checked(config, command(config, "local-assessment-controller.py", action, "--tenant", alias), api, state=state, deployments=deployments)

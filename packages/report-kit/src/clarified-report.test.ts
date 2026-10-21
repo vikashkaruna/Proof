@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
+import { unzipSync } from 'fflate';
 import { canonicalJson } from '@axiom/ledger';
 import { PUBLIC_COVERAGE_PAGES, publicCoverageClarificationSnapshotSchema } from '@axiom/types';
 import { assetReportFixture } from './public-control-report-v4.test-helper';
@@ -6,6 +8,7 @@ import { publicReportFixture, ids } from './public-control-provenance.test-helpe
 import { encodeCoverageFirstSource, coverageFirstHash as hash } from './coverage-first-source';
 import { encodeBrandedSource, buildBrandedReport, renderBrandedDraft } from './branded-report';
 import { encodeQuestionnaireEvidenceSource } from './questionnaire-evidence-report';
+import { buildPramaanAuditorArchive, buildPramaanBoardArchive } from './pramaan-archive';
 import {
   buildClarifiedReport,
   ClarifiedDocumentV8Schema,
@@ -116,7 +119,92 @@ function reviewed(input: ReturnType<typeof fixture>['input']) {
   return { documentText, review, render };
 }
 
+function archiveInput(input: ReturnType<typeof fixture>['input']) {
+  const pdfBytes = Buffer.concat([Buffer.from('%PDF-'), Buffer.alloc(500, 42)]);
+  return {
+    tenantId: input.tenantId,
+    engagementId: input.engagementId,
+    requestId: input.requestId,
+    reportId: ids.report,
+    title: 'Exact report proof',
+    sourceBytes: Buffer.from(input.sourceText),
+    pdfBytes,
+    source: {
+      id: '90000000-0000-4000-8000-000000000001',
+      versionId: 'recorded-source-version',
+      sha256: input.sourceSha256,
+    },
+    pdf: {
+      id: '90000000-0000-4000-8000-000000000002',
+      versionId: 'recorded-pdf-version',
+      sha256: createHash('sha256').update(pdfBytes).digest('hex'),
+    },
+  };
+}
+
 describe('clarified report source8/document8', () => {
+  it.each(['board', 'auditor'] as const)(
+    'retains exact %s source8 provider bytes in Pramaan and rejects rehashed clarification tampering',
+    (kind) => {
+      const f = fixture(kind);
+      const build = kind === 'board' ? buildPramaanBoardArchive : buildPramaanAuditorArchive;
+      const input = archiveInput(f.input);
+      const { pdfBytes } = input;
+      const archive = build(input);
+      const files = unzipSync(archive.archive);
+      expect(Buffer.from(files['source/assessment.json']!)).toEqual(input.sourceBytes);
+      expect(archive.manifest.source.sha256).toBe(input.source.sha256);
+      expect(archive.manifest.source.sha256).not.toBe(f.base.sha256);
+      const pdfPath =
+        kind === 'board' ? 'source/board-report.pdf' : 'source/auditor-review-pack.pdf';
+      expect(Buffer.from(files[pdfPath]!)).toEqual(pdfBytes);
+      expect(build(input).archiveSha256).toBe(archive.archiveSha256);
+
+      // Captured before source8 support: historical source6 archives stay byte-identical.
+      const historical = build({
+        ...input,
+        sourceBytes: Buffer.from(f.base.text),
+        source: { ...input.source, sha256: f.base.sha256 },
+      });
+      expect(historical.archiveSha256).toBe(
+        kind === 'board'
+          ? 'e2b94dcd094df29775f5834daf200c140c416c863a82c0183f9b5a8eca85e2cc'
+          : 'ddf11e1bf9f1cabdb9b919e176168f89d108a8d0808bace47ec62d0190702fac',
+      );
+      const reject = (text: string) =>
+        expect(() =>
+          build({
+            ...input,
+            sourceBytes: Buffer.from(text),
+            source: { ...input.source, sha256: hash(text) },
+          }),
+        ).toThrow();
+      const altered = JSON.parse(f.input.sourceText);
+      altered.owner_clarification.snapshot_sha256 = '0'.repeat(64);
+      reject(canonicalJson(altered));
+      const foreign = f.source({ ...f.snapshot, tenantId: '90000000-0000-4000-8000-000000000003' });
+      reject(foreign.text);
+      const missing = JSON.parse(f.input.sourceText);
+      missing.owner_clarification = null;
+      reject(canonicalJson(missing));
+      const wrongKind = JSON.parse(f.input.sourceText);
+      wrongKind.report_kind = kind === 'board' ? 'auditor' : 'board';
+      reject(canonicalJson(wrongKind));
+      const wrongInner = JSON.parse(f.input.sourceText);
+      wrongInner.retained_source.sha256 = '0'.repeat(64);
+      reject(canonicalJson(wrongInner));
+      const downgraded = JSON.parse(f.input.sourceText);
+      downgraded.schema_version = 6;
+      reject(canonicalJson(downgraded));
+      const nested = JSON.parse(f.input.sourceText);
+      nested.retained_source = { text: f.input.sourceText, sha256: f.input.sourceSha256 };
+      reject(canonicalJson(nested));
+      expect(() => build({ ...input, tenantId: '90000000-0000-4000-8000-000000000003' })).toThrow();
+      expect(() =>
+        build({ ...input, requestId: '90000000-0000-4000-8000-000000000003' }),
+      ).toThrow();
+    },
+  );
   it.each(['board', 'auditor'] as const)(
     'keeps maximum-length %s owner explanations outside compact table columns without changing source/document bytes',
     (kind) => {
@@ -336,6 +424,12 @@ describe('clarified report source8/document8', () => {
       expect(document.owner_coverage_clarification).toBeNull();
       expect(ClarifiedDocumentV8Schema.parse(document)).toEqual(document);
       expect(renderClarifiedDraft(input)).toContain('has no retained public-website capture');
+      const archive = (kind === 'board' ? buildPramaanBoardArchive : buildPramaanAuditorArchive)(
+        archiveInput(input),
+      );
+      expect(Buffer.from(unzipSync(archive.archive)['source/assessment.json']!).toString()).toBe(
+        text,
+      );
     },
   );
 });
