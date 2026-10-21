@@ -433,20 +433,44 @@ def reconcile_namespaces(config: dict) -> list[dict]:
     ] != peer_specs(config):
         raise ValueError("Reviewed peer inventory changed")
     stale = []
+    unavailable = []
     for peer in peers:
-        value = metadata(config, peer["name"], peer["purpose"])
+        try:
+            value = metadata(config, peer["name"], peer["purpose"])
+        except (OSError, subprocess.SubprocessError):
+            # A missing/unreadable peer conveys no repair authority. Keep the
+            # reviewed name only; Docker diagnostics may contain private data.
+            unavailable.append({
+                "component": "network", "peer": peer["name"], "ok": False,
+                "peerUnavailable": True, "namespaceUnavailable": True,
+            })
+            continue
         if (
             value["image"] != peer["image"]
             or value["network"] != "container:" + before["id"]
         ):
             raise ValueError("Reviewed peer image/network changed")
-        if (
-            namespace(
+        try:
+            current = namespace(
                 config, value, "scheduler" if peer["kind"] == "scheduler" else "node"
             )
-            != net
-        ):
+        except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
+            # Identity/image/network were checked above. A restarting peer can
+            # reject exec; do not misclassify its unknown namespace as stale or
+            # stop any peer until the entire reviewed inventory is readable.
+            unavailable.append({
+                "component": "network", "peer": peer["name"], "ok": False,
+                "namespaceUnavailable": True,
+            })
+            continue
+        if current != net:
             stale.append((peer, value))
+    if unavailable:
+        return unavailable + [
+            {"component": "network", "peer": peer["name"], "ok": False,
+             "stale": True, "deferredForRuntime": True}
+            for peer, _value in stale
+        ]
     if not stale:
         return []
     idle = worker_idle_state(config)
