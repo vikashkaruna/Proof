@@ -77,7 +77,7 @@ class CoverageBarrierDiagnostics(unittest.TestCase):
         self.assertIsNone(
             module.barrier_failure_diagnostic("ERROR: 55P03", 9999)["exitCode"]
         )
-        for state in ["55P03", "57014", "40P01", "P0175"]:
+        for state in ["55P03", "57014", "40P01", "P0175", "P0001", "23514", "53300"]:
             self.assertEqual(
                 module.barrier_failure_diagnostic("ERROR: " + state, 3)["sqlstate"],
                 state,

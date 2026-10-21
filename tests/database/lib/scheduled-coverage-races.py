@@ -94,6 +94,21 @@ def barrier_failure_diagnostic(stderr: str, exit_code: int | None) -> dict[str, 
         "23503",
         "22023",
         "XX000",
+        # Further real PostgreSQL classes a raced plpgsql call can raise.
+        "P0001",
+        "P0002",
+        "P0003",
+        "21000",
+        "22P02",
+        "22012",
+        "23502",
+        "23514",
+        "25P02",
+        "42703",
+        "42883",
+        "42P01",
+        "53200",
+        "53300",
     }
     return {
         "category": "child-exit-before-barrier"
