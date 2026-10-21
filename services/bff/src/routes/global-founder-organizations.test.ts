@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import { actor, evidenceFixture, foreign, tenant } from '../test/evidence-fixture.js';
@@ -13,10 +14,10 @@ vi.hoisted(() =>
   }),
 );
 const state = vi.hoisted(() => ({ db: null as unknown }));
-vi.mock('@axiom/supabase', async (original) => ({
-  ...(await original<typeof import('@axiom/supabase')>()),
-  createSupabaseAdmin: () => state.db,
-}));
+vi.mock('@axiom/supabase', async (original) => {
+  const actual = (await original()) as typeof import('@axiom/supabase');
+  return { ...actual, createSupabaseAdmin: () => state.db };
+});
 
 async function setup(designation: 'live' | 'revoked' | 'absent' = 'live') {
   const fixture = evidenceFixture();
@@ -69,7 +70,9 @@ describe('global founder organization enumeration', () => {
     const f = await setup();
     const response = await f.read();
     expect(response.status).toBe(200);
-    const body = await response.json();
+    const body = z
+      .object({ tenants: z.array(z.object({ id: z.uuid(), role: z.string() }).passthrough()) })
+      .parse(await response.json());
     expect(body.tenants).toHaveLength(2);
     expect(body.tenants).toEqual(
       expect.arrayContaining([
@@ -85,7 +88,9 @@ describe('global founder organization enumeration', () => {
       const f = await setup(designation);
       const response = await f.read();
       expect(response.status).toBe(200);
-      const body = await response.json();
+      const body = z
+        .object({ tenants: z.array(z.object({ id: z.uuid(), role: z.string() }).passthrough()) })
+        .parse(await response.json());
       expect(body.tenants).toHaveLength(1);
       expect(body.tenants[0]).toMatchObject({ id: tenant, role: 'viewer' });
     },
