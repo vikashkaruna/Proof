@@ -104,14 +104,22 @@ class RecoveryPolicy(unittest.TestCase):
             config.update(workspace=str(ROOT), python="python", tenants=["kosha"], dockerExecutable="docker", environment={"AXIOM_LOCAL_CONTROLLER_DIR": str(controller), "AXIOM_LOCAL_CUSTODY_ISSUER_DIR": str(custody_root)}, runtimeBindings={"peers": peers})
             config["localRecovery"]["scope"] = {"tenants": {"kosha": {"tenantId": "tenant", "custodyKinds": ["producer", "controller"], "controllerApprovalReference": "existing-approved"}}}
             spire = types.SimpleNamespace(CACHE=cache, NAME="spire", COMPLETE="complete", container_meta=lambda _: {"Image": config["localRecovery"]["spireImage"]}, grants_sha256=lambda _: "b" * 64, entries=list)
-            issued = []; removed = set(); failures = ["issue", "stage"]
+            issued = []; removed = set(); failures = ["issue", "key", "stage"]
             producer = {"id": "old-producer", "running": True, "image": "pin", "network": "container:bff", "labels": {}}
             producer_calls = []
+            key = {"id": "old-key", "running": True, "image": "pin", "network": "container:bff", "labels": {}}
             def run(args, **_kwargs):
                 if args[:2] == ["docker", "stop"]:
-                    self.assertEqual(args[-1], producer["id"]); producer["running"] = False; producer_calls.append("stop")
+                    if args[-1] == key["id"]:key["running"] = False
+                    else:self.assertEqual(args[-1], producer["id"]); producer["running"] = False; producer_calls.append("stop")
                 if args[:2] == ["docker", "rm"]:
-                    self.assertFalse(producer["running"]); removed.add("producer"); producer_calls.append("remove")
+                    if args[-1] == key["id"]:
+                        self.assertFalse(key["running"]); removed.add("key")
+                        if failures and failures[0] == "key":failures.pop(0); return 1
+                    else:self.assertFalse(producer["running"]); removed.add("producer"); producer_calls.append("remove")
+                if args[:3] == ["repair", "key", "serve"]:
+                    self.assertIn("key", removed)
+                    key.update(id="new-key", running=True, labels={"axiom.recovery.owner": args[-1]}); removed.discard("key")
                 if args[:3] == ["repair", "producer", "stage"]:
                     self.assertIn("producer", removed, "Real producer stage refuses a running/existing producer")
                     producer_calls.append("stage")
@@ -132,12 +140,12 @@ class RecoveryPolicy(unittest.TestCase):
                 if len(args) > 3 and args[3] == "serve":removed.discard("controller")
                 return 0
             api = types.SimpleNamespace(run=run, worker_idle_state=lambda _: "idle", stable_bff=lambda _: ({"id": "bff"}, "network"),
-                metadata=lambda _config, name, *_: producer if name == "producer" else {"image": "pin", "network": "container:bff"}, namespace=lambda *_: "network",
+                metadata=lambda _config, name, *_: producer if name == "producer" else key if name == "key" else {"image": "pin", "network": "container:bff"}, namespace=lambda *_: "network",
                 docker_read=lambda *_: "\n".join(p["name"] for p in peers if p["name"] not in removed),
                 read_private=a.read_private, write_private=a.write_private, owned=a.owned, digest=a.digest, unexpired=lambda *_: False,
                 validate_sources=lambda _: None, repair_command=lambda _config, peer, action: ["repair", peer["name"], action])
             with patch.object(m, "check_policy", return_value=config["localRecovery"]), patch.object(m, "module", return_value=spire):
-                for _ in range(2):
+                for _ in range(3):
                     with self.assertRaises(ValueError):m.recover(config, {}, state, api)
                 result = m.recover(config, {}, state, api)
             self.assertTrue(result[-1]["ok"])
@@ -200,6 +208,60 @@ class RecoveryPolicy(unittest.TestCase):
             with patch.object(m, "check_policy", return_value=config["localRecovery"]), patch.object(m, "module", return_value=spire), self.assertRaisesRegex(ValueError, "Not expired"):
                 m.recover(config, {}, state, api)
             self.assertFalse((state / "recovery.json").exists())
+
+    def test_missing_spire_requires_exact_retired_journal_binding(self):
+        for phase, foreign in (("container_retiring", False), ("starting", False), ("prepared", False), ("starting", True)):
+            with self.subTest(phase=phase, foreign=foreign), tempfile.TemporaryDirectory() as directory:
+                state, config = self.fixture(directory)
+                cache = state / "spire"; cache.mkdir(mode=0o700)
+                folder = cache / "recovery-native"; folder.mkdir(mode=0o700)
+                intent = {"phase": phase, "stamp": "20261021T000000Z-" + "a" * 12, "oldContainerId": "a" * 64,
+                          "approvedRecoveryImage": config["localRecovery"]["spireImage"], "expectedGrantsSha256": "b" * 64}
+                a.write_private(folder / "intent.json", json.dumps(intent).encode())
+                retired = {"Id": ("b" if foreign else "a") * 64, "Image": config["localRecovery"]["spireImage"], "State": {"Running": False}}
+                spire = types.SimpleNamespace(CACHE=cache, NAME="spire", COMPLETE="complete", container_meta=lambda name, retired=retired: None if name == "spire" else retired)
+                config.update(workspace=str(ROOT), python="python", spireCache=str(cache), dockerExecutable="docker", environment={}, runtimeBindings={"peers": []})
+                api = types.SimpleNamespace(run=lambda args, **_: 1 if "healthcheck" in args else 0,
+                    worker_idle_state=lambda _: "idle", stable_bff=lambda _: ({"id": "bff"}, "net"),
+                    read_private=a.read_private, write_private=a.write_private, owned=a.owned, digest=a.digest)
+                with patch.object(m, "check_policy", return_value=config["localRecovery"]), patch.object(m, "module", return_value=spire), patch.object(m, "checked", side_effect=ValueError("qualified resume")) as resume, self.assertRaises(ValueError):
+                    m.recover(config, {}, state, api)
+                self.assertEqual(resume.call_count, 1 if phase in ("container_retiring", "starting") and not foreign else 0)
+                if resume.call_count:self.assertIn("--resume", resume.call_args.args[1])
+
+    def test_key_replacement_rejects_foreign_nonce_without_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state, config = self.fixture(directory)
+            pending = {"keyPhase": "creating", "keyOwner": "a" * 32, "keyOldId": "a" * 64}
+            current = {"id": "foreign", "image": "pin", "network": "container:bff", "running": True, "labels": {"axiom.recovery.owner": "b" * 32}}
+            api = types.SimpleNamespace(docker_read=lambda *_: "key", metadata=lambda *_: current, run=Mock())
+            with self.assertRaisesRegex(ValueError, "Owned key service"):
+                m.restore_key(config, {}, state, api, {}, pending, {"name": "key", "purpose": "key", "image": "pin"}, {"id": "bff"}, "net")
+            api.run.assert_not_called()
+
+    def test_renamed_original_cid_blocks_key_and_producer_recreation(self):
+        for component, phase in (("key", "removing"), ("key", "creating"), ("key", "ready"), ("producer", "removing"), ("producer", "staging"), ("producer", "serving")):
+            for original_exists in (True, False):
+                with self.subTest(component=component, phase=phase, original_exists=original_exists), tempfile.TemporaryDirectory() as directory:
+                    state, config = self.fixture(directory)
+                    identifier = "d" * 64
+                    peer = {"kind": component, "name": component, "purpose": component, "image": "pin"}
+                    config["runtimeBindings"] = {"peers": [peer]}
+                    # The original NAME is absent, but immutable CID still exists
+                    # under a different name (running or stopped both appear).
+                    def inventory(_config, args, original_exists=original_exists, identifier=identifier):
+                        return identifier if args[-1] == "{{.ID}}" and original_exists else ""
+                    api = types.SimpleNamespace(docker_read=inventory, run=Mock(), write_private=a.write_private, owned=a.owned, repair_command=lambda _c, _p, action: ["repair", action])
+                    pending = {"keyPhase": phase, "keyOldId": identifier, "keyOwner": "a" * 32}
+                    record = {"producerPhase": phase, "producerOldId": identifier, "producerOwner": "a" * 32}
+                    with patch.object(m, "checked", side_effect=ValueError("safe create reached")) as create, self.assertRaises(ValueError) as refusal:
+                        if component == "key":m.restore_key(config, {}, state, api, {}, pending, peer, {"id": "bff"}, "net")
+                        else:m.restore_producer(config, {}, state, api, record, {"id": "bff"}, "net")
+                    if original_exists:
+                        self.assertIn("CID still exists", str(refusal.exception)); create.assert_not_called()
+                    elif phase != "ready":
+                        self.assertEqual(str(refusal.exception), "safe create reached"); self.assertEqual(create.call_count, 1)
+                    api.run.assert_not_called()
 
     def test_optout_or_active_worker_rechecked_before_each_helper(self):
         api = types.SimpleNamespace(run=Mock(return_value=0), validate_sources=Mock(), worker_idle_state=lambda _: "busy", stable_bff=Mock())

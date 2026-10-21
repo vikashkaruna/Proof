@@ -6,6 +6,7 @@ import {
 import {
   browserMfaPoolEnabled,
   mfaPoolFactorReadPath,
+  mfaPoolMembershipReadPath,
   verifyMfaPoolAccountRows,
   leaseBrowserMfaAccount,
   prepareBrowserMfaPool,
@@ -64,8 +65,7 @@ async function verifyPoolAccount(who: MfaPoolAccount): Promise<boolean> {
     return response.json() as Promise<unknown>;
   }
   const profile = await read(`users?id=eq.${who.id}&select=id,email,is_axiom_internal`);
-  const memberships = await read(`tenant_users?user_id=eq.${who.id}&select=user_id,tenant_id,role`);
-  const factors = await read(mfaPoolFactorReadPath(who.id));
+  let livePlatformFounder = false;
   if (who.role === 'founder' && who.internal) {
     const result = await fetch(`${state.supabaseUrl}/rest/v1/rpc/is_live_platform_founder`, {
       method: 'POST',
@@ -75,7 +75,12 @@ async function verifyPoolAccount(who: MfaPoolAccount): Promise<boolean> {
       signal: AbortSignal.timeout(30_000),
     });
     if (!result.ok || (await result.json()) !== true) return false;
+    livePlatformFounder = true;
   }
+  const memberships = await read(
+    mfaPoolMembershipReadPath(who, poolBinding(), livePlatformFounder),
+  );
+  const factors = await read(mfaPoolFactorReadPath(who.id));
   return verifyMfaPoolAccountRows(who, poolBinding(), { profile, memberships, factors });
 }
 export async function prepareBrowserMfaAccounts(): Promise<void> {

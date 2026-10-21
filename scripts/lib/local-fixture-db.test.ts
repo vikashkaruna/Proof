@@ -1,3 +1,6 @@
+import childProcess from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, realpathSync, rmSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -5,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   insertLocalFixtureRows,
+  insertOwnedFixtureEngagements,
   localDatabaseUrl,
   remoteFixtureDatabaseUrl,
   updateLocalFixtureRow,
@@ -163,4 +167,70 @@ test('remote fixture write requires the freshly seeded engagement on that databa
     ['tenant-a', 'engagement-a'],
     ['tenant-b', 'engagement-b'],
   ]);
+});
+
+test('engagement import validates rows and actual owned project before database-owner SQL', (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'axiom-engagement-fixture-')));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const stateDir = join(root, '.axiom-runtime/parity');
+  mkdirSync(join(stateDir, 'supabase'), { recursive: true });
+  writeFileSync(join(stateDir, 'supabase/config.toml'), 'project_id = "axiom-w0-parity"\n');
+  writeFileSync(
+    join(stateDir, 'status.json'),
+    JSON.stringify({ API_URL: 'http://127.0.0.1:56321', SERVICE_ROLE_KEY: 'synthetic-owned-key' }),
+  );
+  const row = {
+    id: randomUUID(),
+    tenant_id: randomUUID(),
+    library_version: 'historical-fixture',
+    title: "Owner's fixture; never execute title",
+  };
+  let ownership = stateDir;
+  const writes: Array<{ args: string[]; input: string }> = [];
+  t.mock.method(
+    childProcess,
+    'execFileSync',
+    (_command: string, args: string[], options: { input?: string }) => {
+      if (args[0] === 'exec') {
+        writes.push({ args, input: options.input! });
+        return '';
+      }
+      const database = args.at(-1)?.startsWith('supabase_db');
+      return JSON.stringify({
+        id: 'a'.repeat(64),
+        labels: {
+          'com.supabase.cli.project': 'axiom-w0-parity',
+          'com.supabase.cli.workdir': ownership,
+        },
+        ports: {
+          [database ? '5432/tcp' : '8000/tcp']: [
+            { HostIp: '127.0.0.1', HostPort: database ? '56322' : '56321' },
+          ],
+        },
+      });
+    },
+  );
+  const input = {
+    repoRoot: root,
+    stateDir,
+    apiUrl: 'http://127.0.0.1:56321',
+    serviceKey: 'synthetic-owned-key',
+    rows: [row],
+  };
+  insertOwnedFixtureEngagements(input);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0]!.args[writes[0]!.args.indexOf('-U') + 1], 'postgres');
+  assert.match(writes[0]!.input, /Owner''s fixture/);
+  assert.match(writes[0]!.input, /^begin;[\s\S]*insert into public.engagements[\s\S]*commit;$/);
+  for (const patch of [
+    { apiUrl: 'https://retained.example.invalid' },
+    { serviceKey: 'foreign-key' },
+    { rows: [{ ...row, finalized_at: new Date().toISOString() }] },
+    { rows: [{ ...row, tenant_id: 'untrusted' }] },
+    { rows: [] },
+  ])
+    assert.throws(() => insertOwnedFixtureEngagements({ ...input, ...patch }));
+  ownership = '/foreign/worktree';
+  assert.throws(() => insertOwnedFixtureEngagements(input), /ownership refused/);
+  assert.equal(writes.length, 1, 'No API mismatch, invalid DTO or foreign project reaches SQL');
 });

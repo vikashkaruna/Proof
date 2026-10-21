@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import {
   insertLocalFixtureRows,
+  insertOwnedFixtureEngagements,
   remoteFixtureDatabaseUrl,
   type FixtureTable,
   type FixtureTarget,
@@ -29,4 +30,21 @@ export function insertLocalFixtureRow(
         }
       : { repoRoot, stateDir };
   return insertLocalFixtureRows(target, table, [row]);
+}
+
+/** Imports synthetic historical parents only into the proven disposable parity stack. */
+export function insertOwnedEngagementFixtures(
+  rows: unknown,
+  apiUrl: string,
+  serviceKey: string,
+): void {
+  if (acceptanceTarget?.topology === 'remote')
+    throw new Error('Owned engagement fixtures refuse remote targets');
+  insertOwnedFixtureEngagements({
+    repoRoot,
+    apiUrl,
+    serviceKey,
+    stateDir: process.env.AXIOM_PARITY_STATE_DIR ?? resolve(repoRoot, '.axiom-runtime/parity'),
+    rows,
+  });
 }

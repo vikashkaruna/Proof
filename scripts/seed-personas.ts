@@ -35,6 +35,7 @@ import {
 } from '../tests/e2e/personas.js';
 import {
   insertLocalFixtureRows,
+  insertOwnedFixtureEngagements,
   remoteFixtureDatabaseUrl,
   type FixtureTarget,
 } from './lib/local-fixture-db.js';
@@ -237,14 +238,16 @@ async function main() {
   // a zero-control placeholder is an invalid baseline and fails closed.
   const engagementA = randomUUID();
   const engagementB = randomUUID();
-  await expectStatus(
-    await api('/rest/v1/engagements', 'POST', [
+  insertOwnedFixtureEngagements({
+    repoRoot: process.cwd(),
+    stateDir,
+    apiUrl: origin,
+    serviceKey: status.SERVICE_ROLE_KEY!,
+    rows: [
       { id: engagementA, tenant_id: tenantA.id, library_version: library, title: 'Persona A' },
       { id: engagementB, tenant_id: tenantB.id, library_version: library, title: 'Persona B' },
-    ]),
-    201,
-    'Engagement fixture',
-  );
+    ],
+  });
 
   // A plan in each tenant. The one in B exists so "cannot see tenant B" is a
   // claim about something that is actually there — a page that renders empty
@@ -253,7 +256,7 @@ async function main() {
   const planB = { id: randomUUID(), title: `Persona plan B ${run}` };
   // Plans and actions are not writable through the service credential (0099), so
   // The remote path uses an operator-owned loopback tunnel. The owner database
-  // must contain BOTH engagements just created through the selected API.
+  // must contain BOTH synthetic engagements imported above through the owned fixture guard.
   const fixtureTarget: FixtureTarget = remoteDatabaseUrl
     ? {
         repoRoot: process.cwd(),

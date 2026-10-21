@@ -1,3 +1,4 @@
+import { insertOwnedEngagementFixtures } from '../local-db';
 import { normalizePdfText } from '../pdf-text';
 import { assertBrandedCoverageDocument } from '../branded-coverage-assertions';
 import { createHash } from 'node:crypto';
@@ -154,6 +155,15 @@ async function providerAction(action: '--pause-provider' | '--resume-provider') 
 }
 
 async function database(path: string, body?: unknown, bearer: string = state.serviceKey) {
+  if (path === 'engagements' && body !== undefined) {
+    insertOwnedEngagementFixtures(
+      Array.isArray(body) ? body : [body],
+      state.supabaseUrl,
+      state.serviceKey,
+    );
+    return;
+  }
+
   const response = await fetch(`${state.supabaseUrl}/rest/v1/${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     redirect: 'error',

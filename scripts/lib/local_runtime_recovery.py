@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import secrets
 import time
 from pathlib import Path
@@ -151,6 +152,7 @@ def recover(config: dict, deployments: dict, state: Path, api) -> list[dict]:
         if peer["name"] not in names:
             pending = record.get("pending") or {}
             if ((pending.get("component") == peer.get("tenant") and pending.get("phase") == "restaging" and peer["kind"] in ("controller", "scheduler"))
+                or (pending.get("component") == peer.get("tenant") and pending.get("phase") == "restaging" and pending.get("keyPhase") in ("removing", "creating") and re.fullmatch(r"[a-f0-9]{32}", pending.get("keyOwner", "")) and peer["kind"] == "key")
                 or (record.get("producerPhase") in ("removing", "staging", "serving") and peer["kind"] == "producer")):
                 continue  # Exact owned restaging can remove these known peers.
             raise ValueError("Approved runtime peer missing outside recorded restaging")
@@ -158,9 +160,6 @@ def recover(config: dict, deployments: dict, state: Path, api) -> list[dict]:
         if observed["image"] != peer["image"] or observed["network"] != "container:" + before["id"]:
             raise ValueError("Approved peer identity/image/network changed")
     spire = module(config, "local-spire.py")
-    meta = spire.container_meta(spire.NAME)
-    if meta is None or meta["Image"] != policy["spireImage"]:
-        raise ValueError("Approved SPIRE image changed")
     outcomes = []
     # Existing uncertain journals always take precedence over another token.
     unfinished = []
@@ -168,6 +167,22 @@ def recover(config: dict, deployments: dict, state: Path, api) -> list[dict]:
         item = json.loads(api.read_private(path))
         if item["phase"] != spire.COMPLETE:unfinished.append((path, item))
     if len(unfinished) > 1:raise ValueError("Multiple unresolved SPIRE recoveries require review")
+    meta = spire.container_meta(spire.NAME)
+    if meta is None:
+        if len(unfinished) != 1:raise ValueError("Approved SPIRE node missing without exact recovery intent")
+        _path, intent = unfinished[0]
+        stamp = intent.get("stamp", "")
+        if (intent.get("phase") not in ("container_retiring", "starting")
+            or not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[a-f0-9]{12}", stamp)
+            or intent.get("approvedRecoveryImage") != policy["spireImage"]
+            or intent.get("expectedGrantsSha256") != policy["spireGrantsSha256"]):
+            raise ValueError("Missing SPIRE node outside approved retirement gap")
+        retired = spire.container_meta("axiom-proof-local-spire-rollback-" + stamp.lower())
+        if (retired is None or retired["Id"] != intent.get("oldContainerId")
+            or retired["Image"] != policy["spireImage"] or retired["State"]["Running"]):
+            raise ValueError("Retired original SPIRE identity unconfirmed")
+    elif meta["Image"] != policy["spireImage"]:
+        raise ValueError("Approved SPIRE image changed")
     healthy = api.run([config["dockerExecutable"], "exec", spire.NAME, "spire-agent", "healthcheck", "-socketPath", "/run/workload/api.sock"], env=config["environment"]) == 0
     if healthy and spire.grants_sha256(spire.entries()) != policy["spireGrantsSha256"]:
         raise ValueError("Approved registration snapshot changed")
@@ -199,7 +214,6 @@ def recover(config: dict, deployments: dict, state: Path, api) -> list[dict]:
         restore_producer(config, deployments, state, api, record, before, network)
     # The SPIRE node may have changed. Existing staged services must be rebuilt
     # from approved runtime bytes, regardless of remaining credential lifetime.
-    bool(record.get("restageTenants"))
     for alias in config["tenants"]:
         tenant_scope = policy["scope"]["tenants"][alias]
         tenant = tenant_scope["tenantId"]
@@ -227,7 +241,7 @@ def recover(config: dict, deployments: dict, state: Path, api) -> list[dict]:
         runtime = json.loads(api.read_private(root / alias / "runtime.json"))
         peers = config["runtimeBindings"]["peers"]
         key = next(p for p in peers if p["kind"] == "key" and p["tenant"] == alias)
-        checked(config, api.repair_command(config, key, "serve"), api, state=state, deployments=deployments)
+        restore_key(config, deployments, state, api, record, pending, key, before, network)
         stage = command(config, "local-assessment-controller.py", "stage", "--tenant", alias)
         for flag, field in (("controller-image", "controllerImage"), ("worker-image", "workerImage"), ("scheduler-image", "schedulerImage"), ("namespace", "namespace"), ("temporal-address", "temporalAddress"), ("supabase-url", "supabaseUrl"), ("docker-gid", "dockerGid")):
             stage.extend(["--" + flag, str(runtime[field])])
@@ -244,6 +258,61 @@ def recover(config: dict, deployments: dict, state: Path, api) -> list[dict]:
     if record.get("producerPhase"):
         restore_producer(config, deployments, state, api, record, before, network)
     return outcomes
+
+
+def require_original_absent(config: dict, identifier: str, api) -> None:
+    """A missing name does not prove removal: the original may be renamed."""
+    identifiers = api.docker_read(config, ["ps", "-a", "--no-trunc", "--format", "{{.ID}}"]).splitlines()
+    if not isinstance(identifier, str) or not identifier or identifier in identifiers:
+        raise ValueError("Original runtime CID still exists; preserve it for operator review")
+
+
+def restore_key(config: dict, deployments: dict, state: Path, api, record: dict, pending: dict, key: dict, before: dict, network: str) -> None:
+    def observed():
+        names = api.docker_read(config, ["ps", "-a", "--format", "{{.Names}}"]).splitlines()
+        if key["name"] not in names:return None
+        value = api.metadata(config, key["name"], key["purpose"])
+        if value["image"] != key["image"] or value["network"] != "container:" + before["id"]:
+            raise ValueError("Key service image/network changed")
+        return value
+    def checkpoint(phase):
+        pending["keyPhase"] = phase; save(state / "recovery.json", record, api)
+    current = observed()
+    if "keyPhase" not in pending:
+        if current is None:raise ValueError("Existing approved key service required before stop")
+        pending.update(keyOldId=current["id"], keyOwner=secrets.token_hex(16))
+        checkpoint("stopping")
+    if pending["keyPhase"] == "stopping":
+        if current is None or current["id"] != pending["keyOldId"]:
+            raise ValueError("Original key service identity changed")
+        if current["running"]:
+            checked(config, [config["dockerExecutable"], "stop", "--time", "95", current["id"]], api, state=state, deployments=deployments)
+        current = observed()
+        if current is None or current["id"] != pending["keyOldId"] or current["running"]:
+            raise ValueError("Original key service stop unconfirmed")
+        checkpoint("removing")
+    if pending["keyPhase"] == "removing":
+        current = observed()
+        if current is not None:
+            if current["id"] != pending["keyOldId"] or current["running"]:
+                raise ValueError("Foreign or restarted key service will not be removed")
+            checked(config, [config["dockerExecutable"], "rm", current["id"]], api, state=state, deployments=deployments)
+        if observed() is not None:raise ValueError("Original key service removal unconfirmed")
+        require_original_absent(config, pending["keyOldId"], api)
+        checkpoint("creating")
+    if pending["keyPhase"] in ("creating", "ready"):
+        require_original_absent(config, pending["keyOldId"], api)
+        current = observed()
+        if current is None:
+            if pending["keyPhase"] == "ready":raise ValueError("Verified key service disappeared")
+            args = [*api.repair_command(config, key, "serve"), "--recovery-owner", pending["keyOwner"]]
+            checked(config, args, api, state=state, deployments=deployments)
+            current = observed()
+        if (current is None or current.get("labels", {}).get("axiom.recovery.owner") != pending["keyOwner"]
+            or not current["running"] or api.namespace(config, current, "node") != network):
+            raise ValueError("Owned key service readiness unconfirmed")
+        if api.stable_bff(config) != (before, network):raise ValueError("BFF changed during key service recovery")
+        checkpoint("ready")
 
 
 def restore_producer(config: dict, deployments: dict, state: Path, api, record: dict, before: dict, network: str) -> None:
@@ -280,12 +349,15 @@ def restore_producer(config: dict, deployments: dict, state: Path, api, record: 
                 raise ValueError("Foreign or restarted producer will not be removed")
             checked(config, [config["dockerExecutable"], "rm", current["id"]], api, state=state, deployments=deployments)
         if observed() is not None:raise ValueError("Original producer removal unconfirmed")
+        require_original_absent(config, record["producerOldId"], api)
         checkpoint("staging")
     if record["producerPhase"] == "staging":
+        require_original_absent(config, record["producerOldId"], api)
         if observed() is not None:raise ValueError("Producer name must remain absent while staging")
         checked(config, api.repair_command(config, producer, "stage"), api, state=state, deployments=deployments)
         checkpoint("serving")
     if record["producerPhase"] == "serving":
+        require_original_absent(config, record["producerOldId"], api)
         current = observed()
         if current is None:
             args = [*api.repair_command(config, producer, "serve"), "--recovery-owner", record["producerOwner"]]
