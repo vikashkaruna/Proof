@@ -6,8 +6,9 @@ import {
   rolesWith,
 } from '@axiom/types';
 import { buildRegistry, connectorRegistry, loadDescriptor } from './registry.js';
-const production = [...connectorRegistry.values()][0]!;
-const reference = [...connectorRegistry.values()][1]!;
+// PostgreSQL production and reference descriptors, by their reviewed ids.
+const production = connectorRegistry.get('41410000-0000-4000-8000-000000000001')!;
+const reference = connectorRegistry.get('41410000-0000-4000-8000-000000000002')!;
 describe('reviewed descriptor registry', () => {
   it('loads production and explicitly non-production descriptors', () => {
     expect(production.capabilities.write?.requiresApprovalToken).toBe(true);

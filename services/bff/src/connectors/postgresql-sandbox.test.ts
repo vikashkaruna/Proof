@@ -253,6 +253,28 @@ it.each(['database.example.com', 'localhost.evil.test', 'prod.ap-south-1.rds.ama
     );
   },
 );
+it.each([
+  ['postgresql sandbox', descriptor, 'axiom-pg-kosha-core', true],
+  ['mysql sandbox', '41420000-0000-4000-8000-000000000003', 'axiom-mysql-sanjeevani-his', true],
+  ['mariadb sandbox', '41430000-0000-4000-8000-000000000003', 'axiom-mariadb-nimbus-app', true],
+  ['mysql loopback', '41420000-0000-4000-8000-000000000003', 'host.docker.internal', true],
+  // A demo hostname must belong to the engine the reviewed descriptor names.
+  ['mariadb on a mysql host', '41430000-0000-4000-8000-000000000003', 'axiom-mysql-x', false],
+  ['mysql on a postgresql host', '41420000-0000-4000-8000-000000000003', 'axiom-pg-x', false],
+  // Production and reference descriptors never compose into the sandbox.
+  ['mysql production', '41420000-0000-4000-8000-000000000001', 'axiom-mysql-x', false],
+  ['mariadb production', '41430000-0000-4000-8000-000000000001', 'axiom-mariadb-x', false],
+  ['postgresql reference', '41410000-0000-4000-8000-000000000002', 'axiom-pg-x', false],
+])('composes SQL plug-in sandboxes only on their own demo hosts: %s', (_, id, host, ok) => {
+  const config = configuration();
+  config.connections[0]!.binding.descriptorId = id;
+  config.connections[0]!.endpoint.host = host;
+  if (ok) expect(() => composeSandboxPostgresql(config, 'local', ports())).not.toThrow();
+  else
+    expect(() => composeSandboxPostgresql(config, 'local', ports())).toThrow(
+      'configuration refused',
+    );
+});
 it('refuses malformed refreshed authority before allocating a socket', async () => {
   let calls = 0;
   db.onRpc('resolve_sandbox_postgresql_read_grant_for_operation', () => {

@@ -3,19 +3,19 @@ import { PostgresDeadline, PostgresDeadlineExceeded } from './postgres-deadline.
 import { createSupabaseAdmin } from '@axiom/supabase';
 import type { ConnectorInvocation, ConnectorResult } from '@axiom/types';
 import type { JwtSvidVerifier } from '../../workloads/jwt-svid.js';
-import { MySqlReadConnector } from './mysql-read.js';
+import { sqlPluginFor } from '../framework/plugins.js';
+import type { SqlReader } from '../framework/plugin.js';
 import {
-  PostgresReadConnector,
   SqlConnectorRefused,
   type RedactedScanResult,
   type SqlSessionFactory,
   type SqlSession,
 } from './postgres-read.js';
 
-/** The SQL engines the read binding covers. Selected from the reviewed
- * descriptor's target, never from the request. */
-export type SqlEngine = 'postgresql' | 'mysql';
-export type SqlReadConnector = PostgresReadConnector | MySqlReadConnector;
+/** A reviewed descriptor `target` with a registered SQL plug-in (see
+ * `framework/plugins.ts`). Selected from the descriptor, never from a request. */
+export type SqlEngine = string;
+export type SqlReadConnector = SqlReader;
 
 const resolved = z
   .object({
@@ -137,14 +137,15 @@ export class SqlDiscoveryGate {
     originalDeadline = this.deps.originalDeadline,
   ): Promise<{ result: T; grant: SqlGrant; deadline: number }> {
     const now = (this.deps.now ?? Date.now)();
-    const scope =
-      this.deps.engine === 'mysql'
-        ? undefined
-        : new PostgresDeadline(
-            Math.min(now + 30_000, originalDeadline ?? Infinity),
-            this.deps.now,
-            this.deps.signal,
-          );
+    const plugin = sqlPluginFor(this.deps.engine ?? 'postgresql');
+    if (!plugin) throw new SqlConnectorRefused('engine_unsupported');
+    const scope = !plugin.abortableTransport
+      ? undefined
+      : new PostgresDeadline(
+          Math.min(now + 30_000, originalDeadline ?? Infinity),
+          this.deps.now,
+          this.deps.signal,
+        );
     const active = new Set<SqlSession>();
     const wait = <R>(operation: () => PromiseLike<R>): Promise<R> =>
       scope ? scope.run(operation) : Promise.resolve(operation());
@@ -208,10 +209,7 @@ export class SqlDiscoveryGate {
         correlationId: request.correlationId,
         deadline: new Date(deadline).toISOString(),
       };
-      const connector: SqlReadConnector =
-        this.deps.engine === 'mysql'
-          ? new MySqlReadConnector(this.sessions, this.deps.now)
-          : new PostgresReadConnector(sessions, this.deps.now);
+      const connector: SqlReadConnector = plugin.reader(sessions, this.deps.now);
       const result = await wait(() => work(connector, context));
       if ((this.deps.now ?? Date.now)() >= deadline) throw new SqlConnectorRefused('expired');
       const after = await wait(() => this.resolve(request, workload.spiffeId, scope?.signal));
@@ -286,10 +284,10 @@ export class SqlDiscoveryGate {
     maxRows: number,
     pageSize: number,
   ): Promise<{ result: RedactedScanResult; grant: SqlGrant }> {
-    if (this.deps.engine === 'mysql') throw new SqlConnectorRefused('engine_unsupported');
+    const plugin = sqlPluginFor(this.deps.engine ?? 'postgresql');
+    if (!plugin?.abortableTransport) throw new SqlConnectorRefused('engine_unsupported');
     return this.run(request, (connector, context) => {
-      if (!(connector instanceof PostgresReadConnector))
-        throw new SqlConnectorRefused('engine_unsupported');
+      if (!connector.scanRedacted) throw new SqlConnectorRefused('engine_unsupported');
       return connector.scanRedacted(context, resource, maxRows, pageSize);
     });
   }

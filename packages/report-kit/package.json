@@ -31,7 +31,9 @@
     "./full-closure": "./src/full-closure.ts",
     "./test-fixtures/full-closure": "./src/full-closure.test-helper.ts",
     "./branded-report": "./src/branded-report.ts",
-    "./clarified-report": "./src/clarified-report.ts"
+    "./clarified-report": "./src/clarified-report.ts",
+    "./data-discovery-report": "./src/data-discovery-report.ts",
+    "./authenticated-website-report": "./src/authenticated-website-report.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

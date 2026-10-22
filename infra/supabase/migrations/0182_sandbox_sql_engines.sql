@@ -1,0 +1,73 @@
+-- W4 connector framework: the local synthetic SQL sandbox serves every reviewed
+-- SQL plug-in target (PostgreSQL, MySQL, MariaDB), not PostgreSQL alone.
+-- Authority is unchanged: demo tenant, immutable operator enrollment, active
+-- custody policy with an internal nominated operator, current Drishti read
+-- grant, active workload/system/estate/connector and no engaged stop. Only the
+-- descriptor target set widens. The function keeps its historical name and
+-- signature so 0165 request/claim/retain/finish and 0171 callers inherit the
+-- same checks; a target without a plug-in is still refused here and in the BFF.
+create or replace function public.resolve_sandbox_postgresql_read_grant(
+ p_tenant_id uuid,p_estate_id uuid,p_connector_id uuid,p_spiffe_id text,p_configuration_sha256 text
+) returns jsonb language sql stable security definer set search_path='' as $$
+ select jsonb_build_object('grantId',g.id,'workloadId',w.id,'agentName',g.agent_name,'spiffeId',w.spiffe_id,
+ 'systemId',s.id,'grantExpiresAt',least(g.expires_at,approved.expires_at),'connectorVersion',c.version,
+ 'descriptorSha256',d.content_sha256,'endpointRef',c.endpoint_ref,'targetBinding',c.target_binding)
+ from public.connector_grants g
+ join public.workload_identities w on(w.tenant_id,w.id,w.agent_name)=(g.tenant_id,g.workload_identity_id,g.agent_name)
+ join public.connectors c on(c.tenant_id,c.id)=(g.tenant_id,g.connector_id)
+ join public.estate_systems s on(s.tenant_id,s.id)=(c.tenant_id,c.system_id)
+ join public.estates e on(e.tenant_id,e.id)=(s.tenant_id,s.estate_id)
+ join public.tenants t on t.id=e.tenant_id and t.is_demo
+ join public.connector_descriptors d on d.id=c.descriptor_id and d.target_binding=c.target_binding
+ join public.postgresql_sandbox_deployments approved on approved.tenant_id=c.tenant_id and approved.connector_id=c.id
+  and approved.configuration_sha256=p_configuration_sha256 and approved.descriptor_sha256=d.content_sha256
+  and approved.endpoint_ref=c.endpoint_ref and approved.environment in('local','test') and approved.disposable_target
+  and approved.revoked_at is null and approved.expires_at>statement_timestamp()
+ join public.local_custody_policy_heads custody on custody.tenant_id=approved.tenant_id and custody.policy_id=approved.custody_policy_id
+  and custody.state='active' and custody.activation_epoch=approved.custody_activation_epoch
+ join public.local_custody_policy_versions policy on policy.tenant_id=custody.tenant_id and policy.id=custody.policy_id
+ join public.tenant_users operator_member on operator_member.tenant_id=policy.tenant_id and operator_member.user_id=policy.nominated_operator_id
+  and operator_member.role in('founder','axiom_analyst')
+ join public.users operator_user on operator_user.id=operator_member.user_id and operator_user.is_axiom_internal
+ where g.tenant_id=p_tenant_id and e.id=p_estate_id and c.id=p_connector_id
+ and g.internal_scope='connector.read' and g.agent_name='drishti'
+ and d.transport='sql' and d.manifest->>'target' in('postgresql','mysql','mariadb')
+ and d.manifest->>'auth'='legacy_static' and c.target_binding='sandbox'
+ and w.spiffe_id=p_spiffe_id and w.status='active' and g.revoked_at is null and g.expires_at>statement_timestamp()
+ and c.status='active' and s.status='active' and e.status='active'
+ and not exists(select 1 from public.kill_switch_state ks where ks.engaged and(ks.scope='global' or ks.tenant_id=p_tenant_id))
+ order by g.expires_at desc limit 1
+$$;
+revoke all on function public.resolve_sandbox_postgresql_read_grant(uuid,uuid,uuid,text,text) from public,anon,authenticated,human_action_writer,agent_ledger_writer;
+grant execute on function public.resolve_sandbox_postgresql_read_grant(uuid,uuid,uuid,text,text) to service_role;
+
+-- The enrollment receipt names the engine it enrolled. Authority and
+-- immutability checks are byte-for-byte those of 0163.
+create or replace function controller_security.sandbox163_enrollment_audit() returns trigger
+language plpgsql security definer set search_path='' as $$
+declare engine text;
+begin
+ if tg_op='INSERT' and not exists(
+  select 1 from public.local_custody_policy_heads h
+  join public.local_custody_policy_versions p on p.tenant_id=h.tenant_id and p.id=h.policy_id
+  join public.tenant_users m on m.tenant_id=p.tenant_id and m.user_id=p.nominated_operator_id and m.role in('founder','axiom_analyst')
+  join public.users u on u.id=m.user_id and u.is_axiom_internal
+  join public.tenants t on t.id=p.tenant_id and t.is_demo
+  where h.tenant_id=new.tenant_id and h.policy_id=new.custody_policy_id
+   and h.activation_epoch=new.custody_activation_epoch and h.state='active'
+ ) then raise exception 'sandbox enrollment authority refused' using errcode='42501';end if;
+ if tg_op='UPDATE' and (old.revoked_at is not null or new.revoked_at is null
+  or (to_jsonb(old)-'revoked_at') is distinct from (to_jsonb(new)-'revoked_at')) then
+  raise exception 'sandbox enrollment immutable' using errcode='42501';
+ end if;
+ select case when d.manifest->>'target' in('postgresql','mysql','mariadb') then d.manifest->>'target' else 'unknown' end
+  into engine
+  from public.connectors c join public.connector_descriptors d on d.id=c.descriptor_id
+  where c.tenant_id=new.tenant_id and c.id=new.connector_id;
+ perform public.append_ledger(new.tenant_id,new.approval_reference,'system','sandbox-connector-operator',null,null,null,
+  'connector.updated',new.connector_id::text,null,new.configuration_sha256,null,null,null,null,'success',
+  jsonb_build_object('deployment_kind','local_synthetic_'||coalesce(engine,'unknown'),'transition',case when tg_op='INSERT' then 'enrolled' else 'revoked' end,
+   'configuration_sha256',new.configuration_sha256,'custody_policy_id',new.custody_policy_id,'custody_activation_epoch',new.custody_activation_epoch));
+ return new;
+end $$;
+revoke all on function controller_security.sandbox163_enrollment_audit() from public,anon,authenticated,service_role;

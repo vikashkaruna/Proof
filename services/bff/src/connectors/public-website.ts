@@ -80,6 +80,17 @@ export interface WebsitePage {
   contentType: string;
   location?: string;
   body: Buffer;
+  /** Raw Set-Cookie headers, for the signed-in connector's in-memory session. */
+  setCookie?: string[];
+}
+
+/** Extra request shape for the signed-in website connector only. The public
+ * check never passes these: it stays an anonymous GET. */
+export interface PinnedRequestOptions {
+  method?: 'GET' | 'POST';
+  headers?: Readonly<Record<string, string>>;
+  body?: Buffer;
+  userAgent?: string;
 }
 
 /** The request uses the validated DNS answer as its socket destination while preserving Host/SNI. */
@@ -87,17 +98,20 @@ export function fetchPinnedPage(
   url: URL,
   address: string,
   signal: AbortSignal,
+  options: PinnedRequestOptions = {},
 ): Promise<WebsitePage> {
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? https : http;
     const req = client.request(
       url,
       {
-        method: 'GET',
+        method: options.method ?? 'GET',
         headers: {
+          ...options.headers,
           accept: 'text/html',
           'accept-encoding': 'identity',
-          'user-agent': 'AxiomProof-PublicWebsiteCheck/1.0',
+          'user-agent': options.userAgent ?? 'AxiomProof-PublicWebsiteCheck/1.0',
+          ...(options.body ? { 'content-length': String(options.body.length) } : {}),
         },
         family: 4,
         // A pooled socket can bypass this request's DNS lookup. Force a fresh
@@ -141,13 +155,14 @@ export function fetchPinnedPage(
             contentType: String(response.headers['content-type'] ?? ''),
             location: response.headers.location,
             body: Buffer.concat(chunks),
+            setCookie: response.headers['set-cookie'],
           }),
         );
       },
     );
     req.on('timeout', () => req.destroy(new PublicWebsiteRefused('timeout')));
     req.on('error', reject);
-    req.end();
+    req.end(options.body);
   });
 }
 

@@ -140,6 +140,7 @@ const EnvFields = z.object({
   AXIOM_STANDING_POLICY_COORDINATOR_ENABLED: z.enum(['true', 'false']).default('false'),
   AXIOM_SCHEDULED_COVERAGE_ENABLED: z.enum(['true', 'false']).default('false'),
   AXIOM_POSTGRESQL_SANDBOX_CONFIG_FILE: z.string().min(1).max(4096).optional(),
+  AXIOM_AUTHENTICATED_WEBSITE_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_ASSESSMENT_PRODUCER_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   AXIOM_ASSESSMENT_PRODUCER_SOCKET_CONFIG_FILE: z.string().min(1).max(4096).optional(),
   // Private dispatch inputs/proofs only; never evidence, audit or consent records.

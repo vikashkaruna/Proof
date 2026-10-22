@@ -325,3 +325,56 @@ it('refreshes saved readiness without treating a prior observation as a live che
     headers: { 'X-Tenant-Id': 'tenant-1' },
   });
 });
+
+it('lists ready-to-use plug-in connectors and opens discovery for any sandbox SQL engine', async () => {
+  const entry = (descriptorId: string, displayName: string, targetBinding: string) => ({
+    descriptorId,
+    target: displayName.toLowerCase(),
+    version: '1.0.0',
+    family: 'sql',
+    transport: 'sql',
+    targetBinding,
+    auth: targetBinding === 'sandbox' ? 'legacy_static' : 'cloud_iam',
+    assurance: targetBinding === 'sandbox' ? 'low' : 'high',
+    displayName,
+    summary: `Tables and columns from ${displayName}.`,
+    operations: ['enumerate', 'sample'],
+    dataCategoryHints: ['contact'],
+  });
+  const mariadbSandbox = '41430000-0000-4000-8000-000000000003';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) =>
+      String(input).includes('connector-catalogue')
+        ? Response.json({
+            data: [{ ...referenceDescriptor }],
+            entries: [
+              entry('41430000-0000-4000-8000-000000000001', 'MariaDB', 'production'),
+              entry(mariadbSandbox, 'MariaDB', 'sandbox'),
+              entry('41420000-0000-4000-8000-000000000003', 'MySQL', 'sandbox'),
+            ],
+          })
+        : Response.json({ data: [], available: false }),
+    ),
+  );
+  render(
+    <ConnectorsClient
+      tenantId="tenant-1"
+      canManage={false}
+      systems={[{ ...system, estate_id: 'estate-1' }]}
+      connectors={[
+        {
+          ...connector,
+          descriptor_id: mariadbSandbox,
+          target_binding: 'sandbox',
+          status: 'active',
+        },
+      ]}
+    />,
+  );
+  const list = await screen.findByRole('list', { name: 'Ready-to-use connectors' });
+  expect(list.textContent).toContain('MariaDB');
+  expect(list.textContent).toContain('Production · Local demo sandbox');
+  expect(list.textContent).toContain('MySQL');
+  expect(await screen.findByRole('region', { name: 'MariaDB sandbox discovery' })).toBeTruthy();
+});

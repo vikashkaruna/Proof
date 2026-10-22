@@ -1,15 +1,25 @@
 import mysql from 'mysql2/promise';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ConnectorInvocation } from '@axiom/types';
-import { MySqlReadConnector } from './mysql-read.js';
+import {
+  MARIADB_DIALECT,
+  MYSQL_DIALECT,
+  MySqlReadConnector,
+  type MySqlDialect,
+} from './mysql-read.js';
 import type { SqlSessionFactory } from './postgres-read.js';
 
-// Live W4.6 MySQL binding test against a disposable MySQL 8 server. CI sets
-// both variables; locally the suite is skipped unless a throwaway admin URL is
-// supplied.
-const adminUrl = process.env.AXIOM_MYSQL_LIVE_URL;
-if (process.env.AXIOM_MYSQL_LIVE_REQUIRED === '1' && !adminUrl)
+// Live W4.6 conformance for the MySQL-protocol plug-ins against disposable
+// servers: the same cases run on MySQL 8 and MariaDB. CI sets the variables;
+// locally each engine is skipped unless a throwaway admin URL is supplied.
+const engines: { name: string; adminUrl: string | undefined; dialect: MySqlDialect }[] = [
+  { name: 'MySQL', adminUrl: process.env.AXIOM_MYSQL_LIVE_URL, dialect: MYSQL_DIALECT },
+  { name: 'MariaDB', adminUrl: process.env.AXIOM_MARIADB_LIVE_URL, dialect: MARIADB_DIALECT },
+];
+if (process.env.AXIOM_MYSQL_LIVE_REQUIRED === '1' && !engines[0]!.adminUrl)
   throw new Error('AXIOM_MYSQL_LIVE_URL is required for the live MySQL binding job');
+if (process.env.AXIOM_MARIADB_LIVE_REQUIRED === '1' && !engines[1]!.adminUrl)
+  throw new Error('AXIOM_MARIADB_LIVE_URL is required for the live MariaDB binding job');
 
 const context = (deadlineMs = 30_000): ConnectorInvocation => ({
   tenantId: '00000000-0000-4000-8000-000000000001',
@@ -24,35 +34,40 @@ const context = (deadlineMs = 30_000): ConnectorInvocation => ({
 });
 
 const PASSWORD = 'w46-live-only';
-function openAs(user: string): Promise<mysql.Connection> {
-  const url = new URL(adminUrl!);
-  return mysql.createConnection({
-    host: url.hostname,
-    port: Number(url.port) || 3306,
-    user,
-    password: user === 'root' ? decodeURIComponent(url.password) : PASSWORD,
-    dateStrings: true,
-  });
-}
-function sessionsAs(user: string): SqlSessionFactory {
-  return async () => {
-    const connection = await openAs(user);
-    return {
-      query: async (text, values) => {
-        const [result] = await connection.query({
-          sql: text,
-          values: values ? [...values] : undefined,
-        });
-        return { rows: Array.isArray(result) ? (result as Record<string, unknown>[]) : [] };
-      },
-      end: async () => {
-        await connection.end();
-      },
-    };
-  };
-}
 
-describe.skipIf(!adminUrl)('MySqlReadConnector against a live database', () => {
+describe.each(engines)('$name read binding against a live database', ({ adminUrl, dialect }) => {
+  if (!adminUrl) {
+    it.skip('requires a disposable admin URL', () => undefined);
+    return;
+  }
+  function openAs(user: string): Promise<mysql.Connection> {
+    const url = new URL(adminUrl!);
+    return mysql.createConnection({
+      host: url.hostname,
+      port: Number(url.port) || 3306,
+      user,
+      password: user === 'root' ? decodeURIComponent(url.password) : PASSWORD,
+      dateStrings: true,
+    });
+  }
+  function sessionsAs(user: string): SqlSessionFactory {
+    return async () => {
+      const connection = await openAs(user);
+      return {
+        query: async (text, values) => {
+          const [result] = await connection.query({
+            sql: text,
+            values: values ? [...values] : undefined,
+          });
+          return { rows: Array.isArray(result) ? (result as Record<string, unknown>[]) : [] };
+        },
+        end: async () => {
+          await connection.end();
+        },
+      };
+    };
+  }
+
   let admin: mysql.Connection;
   beforeAll(async () => {
     admin = await openAs('root');
@@ -62,6 +77,11 @@ describe.skipIf(!adminUrl)('MySqlReadConnector against a live database', () => {
       "drop user if exists 'w46_reader'@'%'",
       "drop user if exists 'w46_writer'@'%'",
       "drop user if exists 'w46_super'@'%'",
+      "drop user if exists 'w46_executor'@'%'",
+      "drop user if exists 'w46_viewer'@'%'",
+      "drop user if exists 'w46_admin'@'%'",
+      "drop user if exists 'w46_roleuser'@'%'",
+      'drop role if exists w46_role',
       'create database w46_crm',
       'create database w46_hidden',
       `create table w46_crm.customers (
@@ -69,6 +89,8 @@ describe.skipIf(!adminUrl)('MySqlReadConnector against a live database', () => {
          pan_no text, full_name text, notes text)`,
       'create table w46_crm.orders (id int auto_increment primary key, customer_id int, amount decimal(10,2))',
       'create table w46_crm.restricted (id int, secret text)',
+      // Outside the conservative identifier set: never enumerated or paged.
+      'create table w46_crm.`odd name` (id int)',
       'create table w46_hidden.payroll (employee_id int, salary decimal(10,2))',
       `insert into w46_crm.customers (email, mobile, pan_no, full_name, notes) values
          ('asha@example.in', '+91 9876543210', 'ABCDE1234F', 'Asha Rao', 'call after 6'),
@@ -77,11 +99,33 @@ describe.skipIf(!adminUrl)('MySqlReadConnector against a live database', () => {
       "create user 'w46_reader'@'%' identified by 'w46-live-only'",
       "grant select on w46_crm.customers to 'w46_reader'@'%'",
       "grant select on w46_crm.orders to 'w46_reader'@'%'",
+      "grant select on w46_crm.`odd name` to 'w46_reader'@'%'",
       "create user 'w46_writer'@'%' identified by 'w46-live-only'",
       "grant select on w46_crm.orders to 'w46_writer'@'%'",
       "grant insert on w46_crm.orders to 'w46_writer'@'%'",
       "create user 'w46_super'@'%' identified by 'w46-live-only'",
       "grant select, super on *.* to 'w46_super'@'%'",
+      // A definer routine or a view can write on the account's behalf.
+      "create user 'w46_executor'@'%' identified by 'w46-live-only'",
+      "grant select on w46_crm.orders to 'w46_executor'@'%'",
+      "grant execute on w46_crm.* to 'w46_executor'@'%'",
+      "create user 'w46_viewer'@'%' identified by 'w46-live-only'",
+      "grant select on w46_crm.orders to 'w46_viewer'@'%'",
+      "grant create view on w46_crm.* to 'w46_viewer'@'%'",
+      // An engine-specific administrative privilege.
+      "create user 'w46_admin'@'%' identified by 'w46-live-only'",
+      dialect.engine === 'mariadb'
+        ? "grant select, read_only admin on *.* to 'w46_admin'@'%'"
+        : "grant select on *.* to 'w46_admin'@'%'",
+      ...(dialect.engine === 'mysql' ? ["grant role_admin on *.* to 'w46_admin'@'%'"] : []),
+      // A role whose privileges are not visible per grantee.
+      'create role w46_role',
+      'grant select on w46_crm.orders to w46_role',
+      "create user 'w46_roleuser'@'%' identified by 'w46-live-only'",
+      "grant w46_role to 'w46_roleuser'@'%'",
+      dialect.engine === 'mariadb'
+        ? "set default role w46_role for 'w46_roleuser'@'%'"
+        : "set default role w46_role to 'w46_roleuser'@'%'",
     ];
     for (const statement of statements) await admin.query(statement);
   });
@@ -93,12 +137,17 @@ describe.skipIf(!adminUrl)('MySqlReadConnector against a live database', () => {
       "drop user if exists 'w46_reader'@'%'",
       "drop user if exists 'w46_writer'@'%'",
       "drop user if exists 'w46_super'@'%'",
+      "drop user if exists 'w46_executor'@'%'",
+      "drop user if exists 'w46_viewer'@'%'",
+      "drop user if exists 'w46_admin'@'%'",
+      "drop user if exists 'w46_roleuser'@'%'",
+      'drop role if exists w46_role',
     ])
       await admin.query(statement);
     await admin.end();
   });
 
-  const reader = new MySqlReadConnector(sessionsAs('w46_reader'));
+  const reader = new MySqlReadConnector(sessionsAs('w46_reader'), Date.now, dialect);
 
   it('enumerates only relations the least-privilege role can see, with hints', async () => {
     const { records, cursor } = await reader.enumerate(context());
@@ -148,11 +197,22 @@ describe.skipIf(!adminUrl)('MySqlReadConnector against a live database', () => {
 
   it('refuses a role that could write or a privileged role before reading', async () => {
     await expect(
-      new MySqlReadConnector(sessionsAs('w46_writer')).enumerate(context()),
+      new MySqlReadConnector(sessionsAs('w46_writer'), Date.now, dialect).enumerate(context()),
     ).rejects.toMatchObject({ reason: 'write_privilege' });
     await expect(
-      new MySqlReadConnector(sessionsAs('w46_super')).enumerate(context()),
+      new MySqlReadConnector(sessionsAs('w46_super'), Date.now, dialect).enumerate(context()),
     ).rejects.toMatchObject({ reason: 'privileged_role' });
+  });
+
+  it.each([
+    ['w46_executor', 'write_privilege'],
+    ['w46_viewer', 'write_privilege'],
+    ['w46_admin', 'privileged_role'],
+    ['w46_roleuser', 'privileged_role'],
+  ])('refuses %s before reading (%s)', async (user, reason) => {
+    await expect(
+      new MySqlReadConnector(sessionsAs(user), Date.now, dialect).enumerate(context()),
+    ).rejects.toMatchObject({ reason });
   });
 
   it('runs read-only, rolls back, and leaves no session open', async () => {
@@ -166,7 +226,7 @@ describe.skipIf(!adminUrl)('MySqlReadConnector against a live database', () => {
           // are part of the binding; DML the role holds no grant for is refused
           // regardless.
           if (text.startsWith('select t.table_schema as tschema')) {
-            const [probe] = await connection.query('select @@session.transaction_read_only as ro');
+            const [probe] = await connection.query(`select (${dialect.readOnlyExpression}) as ro`);
             expect((probe as mysql.RowDataPacket[])[0]?.ro).toBe(1);
             await expect(
               connection.query("insert into w46_crm.customers (email) values ('probe')"),
@@ -183,7 +243,7 @@ describe.skipIf(!adminUrl)('MySqlReadConnector against a live database', () => {
         },
       };
     };
-    await new MySqlReadConnector(tracking).enumerate(context());
+    await new MySqlReadConnector(tracking, Date.now, dialect).enumerate(context());
     expect(opened).toHaveLength(1);
     let open = -1;
     for (let attempt = 0; attempt < 20 && open !== 0; attempt += 1) {

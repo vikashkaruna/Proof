@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { z } from 'zod';
 import { formatDateTime } from '@/lib/display-time';
 const entry = z
@@ -41,23 +42,30 @@ const statuses = {
   failed: 'Failed',
   unconfirmed: 'Completion not confirmed; inspect history before a new request',
 };
+/** A full scan samples at most this many relations, each up to the adapter's
+ * 200-row bound, so one click stays a bounded, reviewable set of requests. */
+const SCAN_MAX_RELATIONS = 50;
+const SCAN_SAMPLE_ROWS = 200;
 function PostgresqlDiscoveryPanelView({
   tenantId,
   connectorId,
   estateId,
   canManage,
+  engineName,
 }: {
   tenantId: string;
   connectorId: string;
   estateId?: string;
   canManage: boolean;
+  engineName: string;
 }) {
   const [saved, setSaved] = useState<z.infer<typeof history> | null>(null),
     [engagements, setEngagements] = useState<z.infer<typeof engagementShape>['engagements']>([]),
     [selected, setSelected] = useState(''),
     [resource, setResource] = useState(''),
     [busy, setBusy] = useState(false),
-    [message, setMessage] = useState('');
+    [message, setMessage] = useState(''),
+    [progress, setProgress] = useState('');
   const [now, setNow] = useState(0);
   useEffect(() => {
     const first = setTimeout(() => setNow(Date.now()), 0);
@@ -127,34 +135,43 @@ function PostgresqlDiscoveryPanelView({
         ) ?? [],
     ),
   ];
+  /** One supervised discovery request. Resolves true only when the BFF
+   * confirms completion with worker cleanup; never retries on its own. */
+  async function request(
+    operation: 'enumerate' | 'sample',
+    target?: string,
+    limit = 20,
+  ): Promise<boolean> {
+    const operationKey = crypto.randomUUID();
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'X-Tenant-Id': tenantId,
+        'Idempotency-Key': operationKey,
+      },
+      body: JSON.stringify({
+        operationKey,
+        estateId,
+        engagementId: selected,
+        operation,
+        ...(operation === 'sample' ? { resource: target, limit } : {}),
+      }),
+    });
+    const body: unknown = await response.json();
+    if (!response.ok) throw new Error();
+    const receipt = z
+      .object({ data: z.object({ requestId: z.uuid(), status: z.string() }).passthrough() })
+      .parse(body);
+    return receipt.data.status === 'completed';
+  }
   async function run(operation: 'enumerate' | 'sample') {
     if (busy || pending || !estateId || !selected) return;
     setBusy(true);
     setMessage('');
     try {
-      const operationKey = crypto.randomUUID();
-      const response = await fetch(path, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'X-Tenant-Id': tenantId,
-          'Idempotency-Key': operationKey,
-        },
-        body: JSON.stringify({
-          operationKey,
-          estateId,
-          engagementId: selected,
-          operation,
-          ...(operation === 'sample' ? { resource, limit: 20 } : {}),
-        }),
-      });
-      const body: unknown = await response.json();
-      if (!response.ok) throw new Error();
-      const receipt = z
-        .object({ data: z.object({ requestId: z.uuid(), status: z.string() }).passthrough() })
-        .parse(body);
       setMessage(
-        receipt.data.status === 'completed'
+        (await request(operation, resource))
           ? 'Discovery saved. Review the metadata below.'
           : 'The request is saved. Completion is not confirmed; inspect its status before starting another request.',
       );
@@ -173,17 +190,70 @@ function PostgresqlDiscoveryPanelView({
       setBusy(false);
     }
   }
+  /** Full scan: list the catalogue, then profile every listed relation (up to
+   * the bound) one supervised request at a time, stopping at the first
+   * request that does not confirm completion. */
+  async function scan() {
+    if (busy || pending || !estateId || !selected) return;
+    setBusy(true);
+    setMessage('');
+    try {
+      setProgress('Listing tables…');
+      if (!(await request('enumerate'))) throw new Error();
+      const listed = await fetch(path, { headers: { 'X-Tenant-Id': tenantId }, cache: 'no-store' });
+      if (!listed.ok) throw new Error();
+      const latest = history
+        .parse(await listed.json())
+        .data.find((row) => row.status === 'completed' && row.operation === 'enumerate');
+      const relations = (latest?.result?.result ?? [])
+        .map((record) => (typeof record.resource === 'string' ? record.resource : ''))
+        .filter((name) => /^[a-z_][a-z0-9_$]{0,62}\.[a-z_][a-z0-9_$]{0,62}$/.test(name))
+        .slice(0, SCAN_MAX_RELATIONS);
+      for (const [index, relation] of relations.entries()) {
+        setProgress(`Profiling ${relation} (${index + 1} of ${relations.length})…`);
+        if (!(await request('sample', relation, SCAN_SAMPLE_ROWS))) throw new Error();
+      }
+      setMessage(
+        `Scan saved: ${relations.length} relations profiled. Open the scan report to review it.`,
+      );
+    } catch {
+      setMessage(
+        'The scan stopped at a request that did not confirm completion. Completed steps are saved; refresh the history before scanning again.',
+      );
+    } finally {
+      setProgress('');
+      try {
+        await refresh();
+      } catch {
+        setMessage(
+          'Saved history could not be refreshed. Refresh before starting another request.',
+        );
+      }
+      setBusy(false);
+    }
+  }
   return (
     <section
-      aria-label="PostgreSQL sandbox discovery"
+      aria-label={`${engineName} sandbox discovery`}
       className="space-y-3 rounded-lg border border-teal-200 bg-teal-50/40 p-4"
     >
-      <h3 className="font-semibold text-indigo-900">PostgreSQL sandbox discovery</h3>
+      <h3 className="font-semibold text-indigo-900">{engineName} sandbox discovery</h3>
       <p className="text-sm text-slate-700">
-        List accessible tables or profile a bounded sample. Only names and aggregate value shapes
-        are retained. This local synthetic sandbox requires a current read grant and reviewed
-        custody setup; it does not certify compliance.
+        List accessible tables, profile a bounded sample, or run a full scan of every listed table.
+        Only names and aggregate value shapes are retained. This local synthetic sandbox requires a
+        current read grant and reviewed custody setup; it does not certify compliance.
       </p>
+      <Link
+        href={`/connectors/${connectorId}/scan-report`}
+        className="inline-block text-sm font-medium text-teal-800 underline"
+      >
+        Open scan report
+      </Link>
+      {progress && (
+        <p role="status" aria-live="polite" className="text-sm">
+          {progress}
+        </p>
+      )}
       {message && (
         <p role="status" className="text-sm">
           {message}
@@ -228,6 +298,14 @@ function PostgresqlDiscoveryPanelView({
             className="rounded bg-teal-700 px-3 py-2 text-sm text-white"
           >
             {busy ? 'Working…' : 'List sandbox tables'}
+          </button>
+          <button
+            type="button"
+            disabled={busy || !!pending || !estateId || !selected}
+            onClick={() => void scan()}
+            className="rounded bg-indigo-900 px-3 py-2 text-sm text-white"
+          >
+            Run full scan
           </button>
           {resources.length > 0 && (
             <>
@@ -325,11 +403,14 @@ export function PostgresqlDiscoveryPanel(props: {
   connectorId: string;
   estateId?: string;
   canManage: boolean;
+  /** Plug-in display name from the connector catalogue. */
+  engineName?: string;
 }) {
   return (
     <PostgresqlDiscoveryPanelView
       key={[props.tenantId, props.connectorId, props.estateId, props.canManage].join(':')}
       {...props}
+      engineName={props.engineName ?? 'PostgreSQL'}
     />
   );
 }

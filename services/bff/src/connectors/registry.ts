@@ -1,6 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { parseDocument, visit, isAlias, isScalar } from 'yaml';
 import { ConnectorManifestSchema, type ConnectorManifest } from '@axiom/types';
+import { pluginFor } from './framework/plugins.js';
 
 /** Reject aliases, duplicate keys, extra documents/tags and unbounded input. */
 export function loadDescriptor(source: string): ConnectorManifest {
@@ -38,16 +39,29 @@ export function buildRegistry(sources: readonly string[]): ReadonlyMap<string, C
   }
   return result;
 }
+/** Every reviewed descriptor file shipped beside this module, in name order.
+ * The directory is part of the reviewed build (copied by
+ * scripts/copy-connector-descriptors.mjs); never an operator-supplied path. */
+export function reviewedDescriptorSources(
+  directory: URL = new URL('./descriptors/', import.meta.url),
+): string[] {
+  return readdirSync(directory)
+    .filter((name) => /^[a-z0-9]+(-[a-z0-9]+)*\.yaml$/.test(name))
+    .sort()
+    .map((name) => readFileSync(new URL(name, directory), 'utf8'));
+}
+
+/** A descriptor is admitted only when a connector plug-in can run it, so a
+ * catalogue entry is always executable by the shared gate. */
+export function buildPluggableRegistry(
+  sources: readonly string[],
+): ReadonlyMap<string, ConnectorManifest> {
+  const registry = buildRegistry(sources);
+  for (const manifest of registry.values())
+    if (!pluginFor(manifest)) throw new Error('Descriptor has no connector plug-in');
+  return registry;
+}
+
 // Reviewed catalogue only. Never load an operator-supplied URL or filesystem path.
-export const connectorRegistry = buildRegistry([
-  readFileSync(new URL('./descriptors/postgresql-production.yaml', import.meta.url), 'utf8'),
-  readFileSync(new URL('./descriptors/postgresql-reference.yaml', import.meta.url), 'utf8'),
-  readFileSync(new URL('./descriptors/postgresql-sandbox.yaml', import.meta.url), 'utf8'),
-  // W4.6 MySQL: the second SQL engine of the read binding, same contract.
-  readFileSync(new URL('./descriptors/mysql-production.yaml', import.meta.url), 'utf8'),
-  // W4.7 REST pack: reference provenance, exercised against the reference
-  // service only. Vendor-verified descriptors replace these per client tenant.
-  ...['crm', 'hrms', 'data-warehouse', 'ticketing', 'code-repository'].map((target) =>
-    readFileSync(new URL(`./descriptors/${target}-reference.yaml`, import.meta.url), 'utf8'),
-  ),
-]);
+// Adding a platform: a plug-in in framework/plugins.ts plus a YAML file here.
+export const connectorRegistry = buildPluggableRegistry(reviewedDescriptorSources());

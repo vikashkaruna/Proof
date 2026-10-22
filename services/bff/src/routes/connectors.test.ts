@@ -134,8 +134,20 @@ describe('connector registration API', () => {
   it('catalogue is read-only and does not claim execution', async () => {
     const result = await app(UserRole.VIEWER).request('/v1/connector-catalogue');
     expect(result.status).toBe(200);
-    expect(await result.json()).toMatchObject({ executionAvailable: false });
+    const body = (await result.json()) as {
+      executionAvailable: boolean;
+      entries: { target: string; family: string; targetBinding: string }[];
+    };
+    expect(body.executionAvailable).toBe(false);
     expect(calls).toHaveLength(0);
+    // Every SQL plug-in is offered for production and the local sandbox.
+    for (const target of ['postgresql', 'mysql', 'mariadb'])
+      for (const binding of ['production', 'sandbox'])
+        expect(
+          body.entries.some(
+            (e) => e.target === target && e.family === 'sql' && e.targetBinding === binding,
+          ),
+        ).toBe(true);
   });
   it('reports only current tenant setup metadata without exposing credential material or claiming a live check', async () => {
     const expired = '2020-01-01T00:00:00.000Z';
