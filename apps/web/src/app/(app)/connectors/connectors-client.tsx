@@ -33,6 +33,29 @@ export interface HealthRow {
   checked_at: string;
 }
 const inputClass = 'block w-full rounded border p-2';
+/** Plug-in catalogue rows (BFF `entries`): non-secret display metadata. */
+const catalogueEntrySchema = z
+  .object({
+    descriptorId: z.uuid(),
+    target: z.string(),
+    version: z.string(),
+    family: z.enum(['sql', 'http']),
+    transport: z.string(),
+    targetBinding: z.enum(['production', 'sandbox', 'reference-mock']),
+    auth: z.string(),
+    assurance: z.string(),
+    displayName: z.string(),
+    summary: z.string(),
+    operations: z.array(z.string()),
+    dataCategoryHints: z.array(z.string()),
+  })
+  .strict();
+type CatalogueEntry = z.infer<typeof catalogueEntrySchema>;
+const BINDING_LABEL: Record<CatalogueEntry['targetBinding'], string> = {
+  production: 'Production',
+  sandbox: 'Local demo sandbox',
+  'reference-mock': 'Reference only',
+};
 const readinessSchema = z.object({
   data: z.object({
     connectorId: z.uuid(),
@@ -166,6 +189,7 @@ export function ConnectorsClient({
   systems: ConnectorSystem[];
 }) {
   const [catalogue, setCatalogue] = useState<ConnectorManifest[] | null>(null);
+  const [entries, setEntries] = useState<CatalogueEntry[]>([]);
   const [catalogueError, setCatalogueError] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -176,9 +200,12 @@ export function ConnectorsClient({
           signal: controller.signal,
         });
         if (!response.ok) throw new Error('Unavailable');
-        const payload: { data?: unknown } = await response.json();
+        const payload: { data?: unknown; entries?: unknown } = await response.json();
         const descriptors = ConnectorManifestSchema.array().parse(payload.data);
+        // Older BFFs send no entries; the reviewed descriptor list still works.
+        const plugins = catalogueEntrySchema.array().safeParse(payload.entries ?? []);
         if (!controller.signal.aborted) {
+          setEntries(plugins.success ? plugins.data : []);
           setCatalogue(descriptors);
           setCatalogueError(false);
         }
@@ -201,8 +228,9 @@ export function ConnectorsClient({
         <h2 className="text-lg font-semibold text-indigo-900">Continue your assessment setup</h2>
         <p className="text-sm text-slate-700">
           Public website audits are available below. Reviewed local PostgreSQL sandbox discovery
-          appears on eligible registrations when configured. Connector registrations save setup
-          records only; they do not connect a system or grant agent access.
+          appears on eligible registrations when configured, and the same discovery covers MySQL and
+          MariaDB demo sandboxes. Connector registrations save setup records only; they do not
+          connect a system or grant agent access.
         </p>
         <ol className="list-inside list-decimal space-y-2 text-sm text-slate-700">
           <li>
@@ -255,6 +283,36 @@ export function ConnectorsClient({
             Open public website audit
           </a>
         </div>
+        {entries.length > 0 && (
+          <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm">
+            <strong className="block text-indigo-900">Ready-to-use connectors</strong>
+            <p className="mt-1 text-slate-600">
+              Every organisation can register these reviewed connectors. Databases are read by
+              Drishti with a read-only account; only table and column names and counts of
+              personal-data value shapes are kept.
+            </p>
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2" aria-label="Ready-to-use connectors">
+              {[...new Map(entries.map((e) => [`${e.family}:${e.displayName}`, e])).values()].map(
+                (entry) => (
+                  <li key={entry.descriptorId} className="rounded border border-slate-200 p-3">
+                    <span className="block font-medium text-indigo-900">{entry.displayName}</span>
+                    <span className="block text-slate-600">{entry.summary}</span>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      {entries
+                        .filter(
+                          (other) =>
+                            other.family === entry.family &&
+                            other.displayName === entry.displayName,
+                        )
+                        .map((other) => BINDING_LABEL[other.targetBinding])
+                        .join(' · ')}
+                    </span>
+                  </li>
+                ),
+              )}
+            </ul>
+          </div>
+        )}
         {catalogue === null && !catalogueError && <p role="status">Loading reviewed options…</p>}
         {catalogue?.length === 0 && <p>No reviewed connector options are available.</p>}
         {catalogue && catalogue.length > 0 && (
@@ -326,11 +384,16 @@ export function ConnectorsClient({
             <label className="block">
               Descriptor
               <select name="descriptorId" className={inputClass} required>
-                {catalogue.map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.target} {d.version} · {d.targetBinding}
-                  </option>
-                ))}
+                {catalogue.map((d) => {
+                  const entry = entries.find((e) => e.descriptorId === d.id);
+                  return (
+                    <option key={d.id} value={d.id}>
+                      {entry
+                        ? `${entry.displayName} · ${BINDING_LABEL[entry.targetBinding]} · ${d.version}`
+                        : `${d.target} ${d.version} · ${d.targetBinding}`}
+                    </option>
+                  );
+                })}
               </select>
             </label>
             <RegistrationFields />
@@ -343,6 +406,7 @@ export function ConnectorsClient({
       {connectors.map((row) => {
         const system = systems.find((s) => s.id === row.system_id);
         const descriptor = catalogue?.find((d) => d.id === row.descriptor_id);
+        const plugin = entries.find((e) => e.descriptorId === row.descriptor_id);
         const latest = row.connector_health_checks[0];
         const parentActive = system?.status === 'active' && system.estates.status === 'active';
         return (
@@ -381,13 +445,15 @@ export function ConnectorsClient({
               {descriptor ? `${descriptor.target} ${descriptor.version}` : row.descriptor_id}
             </p>
             <SetupStatus tenantId={tenantId} connectorId={row.id} />
-            {row.descriptor_id === '41410000-0000-4000-8000-000000000003' &&
-              row.target_binding === 'sandbox' && (
+            {row.target_binding === 'sandbox' &&
+              (plugin?.family === 'sql' ||
+                row.descriptor_id === '41410000-0000-4000-8000-000000000003') && (
                 <PostgresqlDiscoveryPanel
                   tenantId={tenantId}
                   connectorId={row.id}
                   estateId={system?.estate_id}
                   canManage={canManage && row.status === 'active'}
+                  engineName={plugin?.displayName ?? 'PostgreSQL'}
                 />
               )}
             {canManage && row.status !== 'archived' && (

@@ -13,6 +13,7 @@ import {
   postgresqlDiscoveryRoutes,
   type DiscoveryRequestController,
 } from './postgresql-discovery.js';
+import { connectorScanReportRoutes } from './connector-scan-report.js';
 import { mfaRecoveryRoutes } from './mfa-recovery.js';
 import { localCustodyPolicyRoutes } from './local-custody-policy.js';
 import { engagementIntakeRoutes } from './engagement-intake.js';
@@ -316,6 +317,7 @@ export function v1Routes(deps: Deps) {
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', postgresqlDiscoveryRoutes(deps.discoveryController));
+  app.route('/', connectorScanReportRoutes());
   app.route(
     '/',
     monitoringReadScopeRoutes({ mfa: deps.mfa, controller: deps.discoveryController }),
