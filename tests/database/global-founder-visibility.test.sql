@@ -7,7 +7,7 @@ create function pg_temp.ok(v boolean,m text)returns void language plpgsql as $$b
 create function pg_temp.claim(a int,t int default 12)returns void language plpgsql as $$begin
  perform set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.u(a),'role','authenticated','tenant_id',pg_temp.u(t),'session_id',pg_temp.u(101))::text,true);
 end$$;
-select pg_temp.ok((select count(*)=167 from pg_policies where schemaname='public'and policyname='founder181_global_read'and cmd='SELECT'),'exact reviewed visibility inventory installed');
+select pg_temp.ok((select count(*)=168 from pg_policies where schemaname='public'and policyname='founder181_global_read'and cmd='SELECT'),'exact reviewed visibility inventory installed (167 in 0181, plus 0183 authenticated_website_checks)');
 select pg_temp.ok(not exists(select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public'and c.relkind='r'and c.relrowsecurity and(c.relname in('tenants','users')or exists(select 1 from pg_attribute a where a.attrelid=c.oid and a.attname='tenant_id'and not a.attisdropped))and not exists(select 1 from pg_policies p where p.schemaname='public'and p.tablename=c.relname and p.policyname='founder181_global_read')),'every reviewed current relation covered');
 -- Future relations receive no automatic founder policy or SELECT grant.
 create table public.founder181_future_fixture(id uuid primary key,tenant_id uuid);

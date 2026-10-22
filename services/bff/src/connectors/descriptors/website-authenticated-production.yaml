@@ -1,0 +1,13 @@
+schemaVersion: 1
+id: 41440000-0000-4000-8000-000000000001
+target: website-authenticated
+version: 1.0.0
+transport: web
+targetBinding: production
+auth: legacy_static
+assurance: low
+capabilities:
+  enumerate: { operation: web.crawl, mutating: false }
+  read: { operation: web.page, mutating: false }
+dataCategoryHints: [contact, identity]
+rateLimit: { requestsPerSecond: 2, burst: 4 }

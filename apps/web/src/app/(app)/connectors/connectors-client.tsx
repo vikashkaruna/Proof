@@ -1,5 +1,6 @@
 'use client';
 import { PostgresqlDiscoveryPanel } from './postgresql-discovery-panel';
+import { AuthenticatedWebsitePanel } from './authenticated-website-panel';
 import { formatDateTime } from '@/lib/display-time';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -39,7 +40,7 @@ const catalogueEntrySchema = z
     descriptorId: z.uuid(),
     target: z.string(),
     version: z.string(),
-    family: z.enum(['sql', 'http']),
+    family: z.enum(['sql', 'http', 'website']),
     transport: z.string(),
     targetBinding: z.enum(['production', 'sandbox', 'reference-mock']),
     auth: z.string(),
@@ -456,6 +457,13 @@ export function ConnectorsClient({
                   engineName={plugin?.displayName ?? 'PostgreSQL'}
                 />
               )}
+            {plugin?.family === 'website' && (
+              <AuthenticatedWebsitePanel
+                tenantId={tenantId}
+                connectorId={row.id}
+                canManage={canManage && row.status === 'active'}
+              />
+            )}
             {canManage && row.status !== 'archived' && (
               <>
                 {row.status !== 'active' && parentActive && (

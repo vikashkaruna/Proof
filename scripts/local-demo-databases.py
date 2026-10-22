@@ -21,6 +21,12 @@ hostname (the connector plug-ins' sandbox host policy). Two accounts exist:
 INSERT, for negative tests). Their passwords are generated here, sent to the
 server over stdin and kept in 0600 files under .axiom-runtime/demo-targets;
 they are never printed, passed as arguments or written to container config.
+A synthetic signed-in customer portal for the same three companies runs as
+``axiom-portal-demo`` (Node, 127.0.0.1:57560) with network aliases
+``axiom-portal-kosha``, ``axiom-portal-sanjeevani`` and ``axiom-portal-nimbus``
+for the signed-in website connector. Its per-site login credentials are
+generated here into a 0600 file mounted read-only.
+
 Not for production.
 """
 
@@ -42,6 +48,14 @@ NETWORK = "axiom-proof_axiom-network"
 PURPOSE = "local-demo-database"
 READER = "axiom_discovery_ro"
 OVERPRIVILEGED = "axiom_overprivileged"
+PORTAL = "axiom-portal-demo"
+PORTAL_IMAGE = "node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1"
+PORTAL_PORT = 57560
+PORTAL_SITES = {
+    "axiom-portal-kosha": "demo.owner@kosha.example.in",
+    "axiom-portal-sanjeevani": "demo.owner@sanjeevani.example.in",
+    "axiom-portal-nimbus": "demo.owner@nimbus.example.in",
+}
 
 
 @dataclass(frozen=True)
@@ -276,6 +290,37 @@ def set_accounts(target: Target) -> None:
     admin_sql(target, "\n".join(statements) + "\n")
 
 
+def portal_up() -> None:
+    state = private_dir(STATE / PORTAL)
+    users_file = state / "portal-users.json"
+    if not users_file.exists():
+        users = {host: {"username": username, "password": secrets.token_urlsafe(24)}
+                 for host, username in PORTAL_SITES.items()}
+        private_write(users_file, json.dumps(users, indent=2) + "\n")
+    if container_state(PORTAL) is None:
+        aliases = [arg for host in PORTAL_SITES for arg in ("--network-alias", host)]
+        run([
+            "docker", "run", "-d", "--name", PORTAL, "--hostname", PORTAL,
+            "--label", f"axiom.purpose={PURPOSE}", "--label", "ai.axiom.environment=local",
+            "--network", NETWORK, *aliases, "-p", f"127.0.0.1:{PORTAL_PORT}:8080",
+            "--restart", "unless-stopped", "--read-only", "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges:true", "--user", "node",
+            "--mount", f"type=bind,src={ROOT / 'infra/demo-targets/portal/server.mjs'},dst=/srv/server.mjs,readonly",
+            "--mount", f"type=bind,src={users_file},dst=/run/axiom/portal-users.json,readonly",
+            "-e", "PORTAL_USERS_FILE=/run/axiom/portal-users.json",
+            PORTAL_IMAGE, "node", "/srv/server.mjs",
+        ])
+        print(f"{PORTAL}: started")
+    for _ in range(60):
+        probe = run(["docker", "exec", PORTAL, "wget", "-qO-", "--header", "Host: axiom-portal-kosha",
+                     "http://127.0.0.1:8080/health"], check=False)
+        if probe.returncode == 0 and probe.stdout.strip() == "ok":
+            print(f"{PORTAL}: ready (127.0.0.1:{PORTAL_PORT}, sites {', '.join(PORTAL_SITES)})")
+            return
+        time.sleep(1)
+    raise SystemExit(f"{PORTAL}: not ready; inspect `docker logs {PORTAL}`")
+
+
 def up(_args) -> None:
     if run(["docker", "network", "inspect", NETWORK], check=False).returncode:
         raise SystemExit(f"Local app network {NETWORK} is missing; start the local stack first")
@@ -295,6 +340,7 @@ def up(_args) -> None:
             raise SystemExit(f"{target.name}: not ready; inspect `docker logs {target.name}`")
         set_accounts(target)
         print(f"{target.name}: ready ({target.engine}, 127.0.0.1:{target.port}, TLS required)")
+    portal_up()
 
 
 def status(_args) -> None:
@@ -302,6 +348,8 @@ def status(_args) -> None:
         info = container_state(target.name)
         state = info["State"]["Status"] if info else "absent"
         print(f"{target.name:30} {target.engine:10} {state:10} 127.0.0.1:{target.port}  {target.company}")
+    info = container_state(PORTAL)
+    print(f"{PORTAL:30} {'portal':10} {info['State']['Status'] if info else 'absent':10} 127.0.0.1:{PORTAL_PORT}  three signed-in sites")
 
 
 def down(args) -> None:
@@ -315,7 +363,14 @@ def down(args) -> None:
                 item.rmdir() if item.is_dir() else item.unlink()
             if (STATE / target.name).exists():
                 (STATE / target.name).rmdir()
+    if container_state(PORTAL) is not None:
+        run(["docker", "rm", "-f", PORTAL])
+        print(f"{PORTAL}: removed")
     if args.purge:
+        users_file = STATE / PORTAL / "portal-users.json"
+        if users_file.exists():
+            users_file.unlink()
+            (STATE / PORTAL).rmdir()
         print("Data volumes and protected files removed; the local CA is kept.")
 
 

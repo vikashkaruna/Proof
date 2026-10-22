@@ -6,6 +6,10 @@ import {
   buildDataDiscoveryReport,
   renderDataDiscoveryReportHtml,
 } from '@axiom/report-kit/data-discovery-report';
+import {
+  buildAuthenticatedWebsiteReport,
+  renderAuthenticatedWebsiteReportHtml,
+} from '@axiom/report-kit/authenticated-website-report';
 import { requireCapability } from '../middleware/authorize.js';
 import { connectorRegistry } from '../connectors/registry.js';
 import { pluginFor } from '../connectors/framework/plugins.js';
@@ -45,6 +49,54 @@ const sampled = z.array(
     })
     .strict(),
 );
+
+const path = z.string().max(300);
+const websiteScan = z
+  .object({
+    version: z.literal('authenticated-website-scan/1'),
+    baseUrl: z.string().max(2048),
+    authMode: z.enum(['form_login', 'bearer', 'basic']),
+    checkedAt: z.string(),
+    pages: z
+      .array(
+        z
+          .object({
+            path,
+            depth: z.number().int().nonnegative(),
+            contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+            forms: z.array(
+              z
+                .object({
+                  method: z.string().max(10),
+                  fields: z.array(
+                    z.object({ name: z.string().max(80), categories: hints }).strict(),
+                  ),
+                  consentControl: z.boolean(),
+                  purposeText: z.boolean(),
+                })
+                .strict(),
+            ),
+          })
+          .strict(),
+      )
+      .max(25),
+    skipped: z.array(z.object({ path, reason: z.string().max(80) }).strict()).max(200),
+    evidence: z
+      .object({
+        privacyNotice: z.array(path),
+        consentControls: z.array(path),
+        accessRequest: z.array(path),
+        erasure: z.array(path),
+        correction: z.array(path),
+        grievance: z.array(path),
+        cookiesBeforeLogin: z.array(z.string().max(128)),
+        cookiesAfterLogin: z.array(z.string().max(128)),
+        transportSecure: z.boolean(),
+        sessionLost: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
 
 /**
  * Data discovery scan report for one connector, assembled from supervised
@@ -86,8 +138,46 @@ export function connectorScanReportRoutes() {
     if (!connector.data || !tenant.data) return c.json({ error: { code: 'not_found' } }, 404);
     const manifest = connectorRegistry.get(String(connector.data.descriptor_id));
     const plugin = manifest && pluginFor(manifest);
-    if (!manifest || plugin?.family !== 'sql')
+    if (!manifest || (plugin?.family !== 'sql' && plugin?.family !== 'website'))
       return c.json({ error: { code: 'scan_report_unsupported' } }, 409);
+    const system = await db
+      .from('estate_systems')
+      .select('name')
+      .eq('tenant_id', tenantId)
+      .eq('id', String(connector.data.system_id))
+      .maybeSingle();
+    if (system.error || !system.data)
+      return c.json({ error: { code: 'scan_report_unavailable' } }, 503);
+    if (plugin.family === 'website') {
+      // The latest successful signed-in check; failures are listed on the connector.
+      const latest = await db
+        .from('authenticated_website_checks')
+        .select('result,checked_at')
+        .eq('tenant_id', tenantId)
+        .eq('connector_id', id.data)
+        .eq('status', 'checked')
+        .order('checked_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latest.error) return c.json({ error: { code: 'scan_report_unavailable' } }, 503);
+      if (!latest.data) return c.json({ error: { code: 'scan_not_run' } }, 404);
+      const scan = websiteScan.safeParse(latest.data.result);
+      if (!scan.success) return c.json({ error: { code: 'scan_report_unavailable' } }, 503);
+      const report = buildAuthenticatedWebsiteReport({
+        organisation: String(tenant.data.name),
+        system: String(system.data.name),
+        connectorName: String(connector.data.name),
+        targetBinding: manifest.targetBinding,
+        scan: scan.data,
+      });
+      if (format.data === 'html') {
+        c.header('Content-Type', 'text/html; charset=utf-8');
+        c.header('Content-Disposition', 'attachment; filename="signed-in-website-scan.html"');
+        c.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+        return c.body(renderAuthenticatedWebsiteReportHtml(report));
+      }
+      return c.json({ data: report });
+    }
     // Newest first: keep the latest catalogue read and the latest sample per relation.
     const rows = requests.data ?? [];
     const latestEnumerate = rows.find((row) => row.operation === 'enumerate');
@@ -119,14 +209,6 @@ export function connectorScanReportRoutes() {
       if (run && columns.success)
         samples[resource] = { sampledAt: String(run.created_at), columns: columns.data };
     }
-    const system = await db
-      .from('estate_systems')
-      .select('name')
-      .eq('tenant_id', tenantId)
-      .eq('id', String(connector.data.system_id))
-      .maybeSingle();
-    if (system.error || !system.data)
-      return c.json({ error: { code: 'scan_report_unavailable' } }, 503);
     const report = buildDataDiscoveryReport({
       organisation: String(tenant.data.name),
       system: String(system.data.name),

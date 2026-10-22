@@ -7,6 +7,7 @@ import type {
   ConnectorPlugin,
   HttpConnectorPlugin,
   SqlConnectorPlugin,
+  WebsiteConnectorPlugin,
 } from './plugin.js';
 
 /**
@@ -63,11 +64,29 @@ const HTTP_PLUGINS: readonly HttpConnectorPlugin[] = [
   },
 ];
 
+const WEBSITE_PLUGINS: readonly WebsiteConnectorPlugin[] = [
+  {
+    family: 'website',
+    target: 'website-authenticated',
+    displayName: 'Signed-in website',
+    summary:
+      'Pages behind a login: notices, consent and rights paths, and personal-data form fields (names only).',
+    sandboxHost: /^axiom-portal-[a-z0-9-]{1,50}$/,
+  },
+];
+
 const sqlByTarget = new Map(SQL_PLUGINS.map((plugin) => [plugin.target, Object.freeze(plugin)]));
 const httpByTransport = new Map(
   HTTP_PLUGINS.map((plugin) => [plugin.transport, Object.freeze(plugin)]),
 );
-if (sqlByTarget.size !== SQL_PLUGINS.length || httpByTransport.size !== HTTP_PLUGINS.length)
+const websiteByTarget = new Map(
+  WEBSITE_PLUGINS.map((plugin) => [plugin.target, Object.freeze(plugin)]),
+);
+if (
+  sqlByTarget.size !== SQL_PLUGINS.length ||
+  httpByTransport.size !== HTTP_PLUGINS.length ||
+  websiteByTarget.size !== WEBSITE_PLUGINS.length
+)
   throw new Error('Duplicate connector plug-in');
 
 /** The SQL plug-in for a reviewed descriptor target, or undefined. */
@@ -75,10 +94,16 @@ export function sqlPluginFor(target: string): SqlConnectorPlugin | undefined {
   return sqlByTarget.get(target);
 }
 
-/** The plug-in a reviewed descriptor runs on. SQL is chosen by `target`,
- * REST/GraphQL by transport; anything else has no plug-in and fails closed. */
+/** The website plug-in for a reviewed descriptor target, or undefined. */
+export function websitePluginFor(target: string): WebsiteConnectorPlugin | undefined {
+  return websiteByTarget.get(target);
+}
+
+/** The plug-in a reviewed descriptor runs on. SQL and websites are chosen by
+ * `target`, REST/GraphQL by transport; anything else fails closed. */
 export function pluginFor(manifest: ConnectorManifest): ConnectorPlugin | undefined {
   if (manifest.transport === 'sql') return sqlByTarget.get(manifest.target);
+  if (manifest.transport === 'web') return websiteByTarget.get(manifest.target);
   if (manifest.transport === 'rest' || manifest.transport === 'graphql')
     return httpByTransport.get(manifest.transport);
   return undefined;
@@ -94,7 +119,7 @@ export function connectorCatalogue(
   for (const manifest of registry.values()) {
     const plugin = pluginFor(manifest);
     if (!plugin) continue;
-    const isSql = plugin.family === 'sql';
+    const named = plugin.family !== 'http';
     entries.push({
       descriptorId: manifest.id,
       target: manifest.target,
@@ -104,7 +129,7 @@ export function connectorCatalogue(
       targetBinding: manifest.targetBinding,
       auth: manifest.auth,
       assurance: manifest.assurance,
-      displayName: isSql ? plugin.displayName : `${manifest.target} (${plugin.displayName})`,
+      displayName: named ? plugin.displayName : `${manifest.target} (${plugin.displayName})`,
       summary: plugin.summary,
       operations: Object.keys(manifest.capabilities).sort(),
       dataCategoryHints: [...manifest.dataCategoryHints].sort(),

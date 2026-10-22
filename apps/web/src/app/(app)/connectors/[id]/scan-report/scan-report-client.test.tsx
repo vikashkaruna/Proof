@@ -62,7 +62,9 @@ const report = {
 };
 
 it('renders the summary, prioritised prompts and inventory', async () => {
-  const fetch = vi.fn(async () => Response.json({ data: report }));
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    Response.json({ data: report }),
+  );
   vi.stubGlobal('fetch', fetch);
   render(<ScanReportClient tenantId={id(1)} connectorId={id(2)} />);
   expect(await screen.findByText("Possible children's or guardian data")).toBeDefined();
@@ -91,4 +93,67 @@ it('refuses an unexpected payload instead of rendering it', async () => {
   );
   render(<ScanReportClient tenantId={id(1)} connectorId={id(2)} />);
   expect(await screen.findByRole('alert')).toBeDefined();
+});
+
+it('renders a signed-in website report with rights paths', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      Response.json({
+        data: {
+          version: 'authenticated-website-report/1',
+          organisation: 'Nimbus Stack Technologies (Demo · SaaS)',
+          system: 'Customer portal (signed-in, demo)',
+          connectorName: 'nimbus customer portal',
+          targetBinding: 'sandbox',
+          baseUrl: 'http://axiom-portal-nimbus:8080',
+          checkedAt: '2026-10-22T11:00:00.000Z',
+          summary: {
+            pagesRead: 5,
+            pagesSkipped: 2,
+            personalDataForms: 2,
+            personalFields: 5,
+            categories: {},
+          },
+          rights: [
+            { key: 'privacyNotice', label: 'Privacy notice', paths: [] },
+            { key: 'accessRequest', label: 'Access request', paths: ['/export-data'] },
+          ],
+          findings: [
+            {
+              id: 'rights.no_privacy_notice',
+              severity: 'high',
+              title: 'No privacy notice reachable from the signed-in area',
+              detail: 'No privacy link.',
+              provision: 'DPDPA 2023 s.5 (notice)',
+              resources: ['(signed-in area)'],
+            },
+          ],
+          pages: [
+            {
+              path: '/billing',
+              forms: [
+                {
+                  fields: [{ name: 'upi_id', categories: ['financial'] }],
+                  consentControl: false,
+                  purposeText: true,
+                },
+              ],
+            },
+          ],
+          limitations: ['This scan ran against a synthetic demonstration portal.'],
+        },
+      }),
+    ),
+  );
+  render(<ScanReportClient tenantId={id(1)} connectorId={id(2)} />);
+  expect(
+    await screen.findByText('No privacy notice reachable from the signed-in area'),
+  ).toBeDefined();
+  const rights = screen.getByRole('region', { name: 'Data principal rights paths' });
+  expect(rights.textContent).toContain('Not found');
+  expect(rights.textContent).toContain('/export-data');
+  expect(
+    screen.getByRole('region', { name: 'Forms collecting personal data' }).textContent,
+  ).toContain('upi_id (financial)');
 });

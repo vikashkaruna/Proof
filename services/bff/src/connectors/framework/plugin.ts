@@ -13,7 +13,7 @@ import type { SqlCredentialProvider, SqlEndpoint } from '../sql/session.js';
  *
  * A plug-in never receives a request-supplied endpoint, credential or SQL.
  */
-export type ConnectorFamily = 'sql' | 'http';
+export type ConnectorFamily = 'sql' | 'http' | 'website';
 
 interface ConnectorPluginBase {
   readonly family: ConnectorFamily;
@@ -66,7 +66,17 @@ export interface HttpConnectorPlugin extends ConnectorPluginBase {
   readonly transport: 'rest' | 'graphql';
 }
 
-export type ConnectorPlugin = SqlConnectorPlugin | HttpConnectorPlugin;
+/** Websites read page structure (links, forms, notices), never field values.
+ * The crawl, login modes and safety rules are shared; a plug-in names the
+ * reviewed descriptor target and its local demo host policy. */
+export interface WebsiteConnectorPlugin extends ConnectorPluginBase {
+  readonly family: 'website';
+  readonly target: string;
+  /** Local/test hostnames a sandbox (synthetic demo) site may use. */
+  readonly sandboxHost: RegExp;
+}
+
+export type ConnectorPlugin = SqlConnectorPlugin | HttpConnectorPlugin | WebsiteConnectorPlugin;
 
 /** One ready-to-use catalogue row. Non-secret: no endpoint or credential. */
 export interface ConnectorCatalogueEntry {

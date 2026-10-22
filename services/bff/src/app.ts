@@ -17,6 +17,7 @@ import type { PrativedanPrivateClient } from './routes/prativedan-accounted-draf
 import { createConfiguredStandingCoordinator } from './services/standing-composition.js';
 import type { StandingCoordinator } from './services/standing-coordinator.js';
 import type { DiscoveryRequestController } from './routes/postgresql-discovery.js';
+import type { AuthenticatedWebsiteRouteDeps } from './routes/authenticated-website.js';
 import type { publicWebsiteCheckRoutes } from './routes/public-website-checks.js';
 import { createConfiguredOwnedSynthetic } from './services/owned-synthetic-composition.js';
 import type { OwnedSyntheticRouteDeps } from './routes/owned-synthetic-plans.js';
@@ -73,6 +74,7 @@ export function createApp(
     prativedan?: PrativedanPrivateClient;
     onStandingCoordinator?: (coordinator: StandingCoordinator | null) => void;
     discoveryController?: DiscoveryRequestController;
+    authenticatedWebsites?: AuthenticatedWebsiteRouteDeps['configuration'];
     ownedSynthetic?: OwnedSyntheticRouteDeps | null;
     ownedDeployment?: OwnedDeploymentRouteController | null;
     ownedDeploymentPrivate?: OwnedDeploymentPrivateDeps | null;
@@ -266,6 +268,7 @@ export function createApp(
       realtime,
       assessmentRequests: options.assessmentRequests,
       discoveryController: options.discoveryController,
+      authenticatedWebsites: options.authenticatedWebsites,
       publicWebsiteCapture: options.publicWebsiteCapture,
       ownedSynthetic,
       stagedEvidence: {

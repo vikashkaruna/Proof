@@ -6,6 +6,7 @@ import { loadEnv } from '@axiom/config';
 import { loadAssessmentProducer } from './workloads/assessment-producer.js';
 import { loadAssessmentProducerSocket } from './workloads/assessment-producer-socket.js';
 import { loadSandboxPostgresql } from './connectors/postgresql-sandbox.js';
+import { loadAuthenticatedWebsiteConfiguration } from './connectors/website-authenticated.js';
 import { createApp } from './app.js';
 import { createEvidenceIngestionWriter, createHumanActionWriter } from '@axiom/supabase';
 import { logger as rootLogger } from './lib/logger.js';
@@ -30,6 +31,10 @@ const discovery = await loadSandboxPostgresql(
   env.AXIOM_POSTGRESQL_SANDBOX_CONFIG_FILE,
   env.ENVIRONMENT ?? '',
 );
+const authenticatedWebsites = await loadAuthenticatedWebsiteConfiguration(
+  env.AXIOM_AUTHENTICATED_WEBSITE_CONFIG_FILE,
+  env.ENVIRONMENT ?? '',
+);
 const discoveryController = await loadDiscoverySocket(
   env.AXIOM_POSTGRESQL_DISCOVERY_SOCKET_CONFIG_FILE,
 );
@@ -39,6 +44,7 @@ const app = createApp({
   assessmentRequests,
   discovery,
   discoveryController,
+  authenticatedWebsites,
   prativedan,
   onStandingCoordinator: (value) => {
     standingCoordinator = value;

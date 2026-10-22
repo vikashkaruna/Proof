@@ -9,7 +9,13 @@ import {
   connectorRegistry,
   reviewedDescriptorSources,
 } from '../registry.js';
-import { connectorCatalogue, pluginFor, sqlPluginFor, sqlTargets } from './plugins.js';
+import {
+  connectorCatalogue,
+  pluginFor,
+  sqlPluginFor,
+  sqlTargets,
+  websitePluginFor,
+} from './plugins.js';
 import type { SqlSession } from '../sql/postgres-read.js';
 
 const postgresProduction = connectorRegistry.get('41410000-0000-4000-8000-000000000001')!;
@@ -59,7 +65,9 @@ describe('connector plug-in framework', () => {
   it('publishes a non-secret catalogue for every family', () => {
     const catalogue = connectorCatalogue(connectorRegistry);
     expect(catalogue).toHaveLength(connectorRegistry.size);
-    expect(new Set(catalogue.map((entry) => entry.family))).toEqual(new Set(['sql', 'http']));
+    expect(new Set(catalogue.map((entry) => entry.family))).toEqual(
+      new Set(['sql', 'http', 'website']),
+    );
     // An exact field set: no endpoint, credential or tenant data can ride along.
     for (const entry of catalogue)
       expect(Object.keys(entry).sort()).toEqual([
@@ -100,6 +108,21 @@ describe('connector plug-in framework', () => {
     expect(statements.join('\n')).toContain('max_execution_time');
     expect(statements.join('\n')).toContain("regexp_like(t.table_schema, '^");
     expect(statements.join('\n')).not.toContain('READ_ONLY ADMIN');
+  });
+
+  it('runs signed-in website descriptors on the website plug-in', () => {
+    const sandbox = connectorRegistry.get('41440000-0000-4000-8000-000000000003')!;
+    expect(pluginFor(sandbox)).toMatchObject({
+      family: 'website',
+      target: 'website-authenticated',
+    });
+    expect(websitePluginFor('website-authenticated')!.sandboxHost.test('axiom-portal-nimbus')).toBe(
+      true,
+    );
+    expect(websitePluginFor('website-authenticated')!.sandboxHost.test('portal.example.com')).toBe(
+      false,
+    );
+    expect(pluginFor({ ...sandbox, target: 'website-unknown' })).toBeUndefined();
   });
 
   it('keeps sandbox host policies engine-specific', () => {

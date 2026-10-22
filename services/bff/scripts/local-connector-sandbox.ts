@@ -26,6 +26,7 @@ import {
   SandboxPostgresqlConfiguration,
   sandboxConfigurationSha256,
 } from '../src/connectors/postgresql-sandbox.js';
+import { AuthenticatedWebsiteConfiguration } from '../src/connectors/website-authenticated.js';
 
 const ROOT = resolve(import.meta.dirname, '../../..');
 const RUNTIME = process.env.AXIOM_RUNTIME_DIR ?? join(ROOT, '.axiom-runtime');
@@ -115,6 +116,160 @@ function approvalReference(): string {
   };
   writePrivate(file, record);
   return record.approvalReference;
+}
+
+/** One synthetic signed-in customer portal per demo company (same tenants). */
+const WEBSITES = [
+  {
+    tenantSlug: 'demo-kosha-bfsi',
+    estateName: TARGETS[0].estateName,
+    host: 'axiom-portal-kosha',
+    company: 'kosha',
+  },
+  {
+    tenantSlug: 'demo-sanjeevani-health',
+    estateName: TARGETS[1].estateName,
+    host: 'axiom-portal-sanjeevani',
+    company: 'sanjeevani',
+  },
+  {
+    tenantSlug: 'demo-nimbus-saas',
+    estateName: TARGETS[2].estateName,
+    host: 'axiom-portal-nimbus',
+    company: 'nimbus',
+  },
+] as const;
+const WEBSITE_DESCRIPTOR = '41440000-0000-4000-8000-000000000003';
+
+/** Registers each demo portal as a signed-in website connector (through the
+ * same human RPCs) and writes the BFF website configuration and credentials.
+ * Website checks are human-triggered BFF reads, so no agent grant is issued. */
+async function enrollWebsites(db: pg.Client, actorId: string, expiresAt: number) {
+  const users = JSON.parse(
+    readFileSync(join(DEMO, 'axiom-portal-demo', 'portal-users.json'), 'utf8'),
+  ) as Record<string, { username: string; password: string }>;
+  const manifest = connectorRegistry.get(WEBSITE_DESCRIPTOR);
+  if (!manifest) throw new Error('Website descriptor is not reviewed');
+  const sites = [];
+  for (const target of WEBSITES) {
+    const tenant = await one<{ id: string }>(
+      db,
+      'select id from public.tenants where slug=$1 and is_demo',
+      [target.tenantSlug],
+    );
+    const estate = await one<{ id: string }>(
+      db,
+      "select id from public.estates where tenant_id=$1 and name=$2 and status='active'",
+      [tenant?.id, target.estateName],
+    );
+    if (!tenant || !estate)
+      throw new Error(`Demo tenant or estate missing for ${target.tenantSlug}`);
+    const systemName = 'Customer portal (signed-in, demo)';
+    let system = await one<{ id: string }>(
+      db,
+      'select id from public.estate_systems where tenant_id=$1 and estate_id=$2 and name=$3',
+      [tenant.id, estate.id, systemName],
+    );
+    if (!system) {
+      const created = await human(db, 'manage_estate', [
+        tenant.id,
+        actorId,
+        'system.create',
+        estate.id,
+        {
+          name: systemName,
+          systemKind: 'application',
+          description: 'Synthetic signed-in demo portal (local only).',
+        },
+        randomUUID(),
+      ]);
+      if (created.error) throw new Error(`portal system.create: ${String(created.error)}`);
+      system = await one(
+        db,
+        'select id from public.estate_systems where tenant_id=$1 and name=$2',
+        [tenant.id, systemName],
+      );
+    }
+    const endpointRef = `${target.company}_customer_portal`;
+    let connector = await one<{ id: string; status: string; version: number }>(
+      db,
+      'select id,status,version from public.connectors where tenant_id=$1 and system_id=$2 and endpoint_ref=$3',
+      [tenant.id, system!.id, endpointRef],
+    );
+    if (!connector) {
+      const created = await human(db, 'manage_connector', [
+        tenant.id,
+        actorId,
+        'create',
+        null,
+        {
+          systemId: system!.id,
+          descriptorId: WEBSITE_DESCRIPTOR,
+          name: `${target.company} customer portal`,
+          endpointRef,
+        },
+        manifest,
+        randomUUID(),
+      ]);
+      if (created.error) throw new Error(`portal connector.create: ${String(created.error)}`);
+      connector = await one(
+        db,
+        'select id,status,version from public.connectors where tenant_id=$1 and system_id=$2 and endpoint_ref=$3',
+        [tenant.id, system!.id, endpointRef],
+      );
+    }
+    if (connector!.status !== 'active') {
+      const activated = await human(db, 'manage_connector', [
+        tenant.id,
+        actorId,
+        'transition',
+        connector!.id,
+        { expectedVersion: connector!.version, status: 'active' },
+        null,
+        randomUUID(),
+      ]);
+      if (activated.error) throw new Error(`portal connector.activate: ${String(activated.error)}`);
+    }
+    const credential = {
+      id: randomUUID(),
+      revision: 1,
+      expiresAt,
+      file: `${MOUNT}/credentials/${connector!.id}.json`,
+    };
+    writePrivate(join(OUT, 'credentials', `${connector!.id}.json`), {
+      schemaVersion: 1,
+      tenantId: tenant.id,
+      connectorId: connector!.id,
+      credentialId: credential.id,
+      revision: credential.revision,
+      expiresAt,
+      username: users[target.host]!.username,
+      secret: users[target.host]!.password,
+    });
+    sites.push({
+      tenantId: tenant.id,
+      connectorId: connector!.id,
+      descriptorId: WEBSITE_DESCRIPTOR,
+      baseUrl: `http://${target.host}:8080`,
+      startPaths: ['/account'],
+      auth: {
+        mode: 'form_login',
+        loginPath: '/login',
+        usernameField: 'email',
+        passwordField: 'password',
+      },
+      credential,
+      maxPages: 25,
+    });
+  }
+  const configuration = AuthenticatedWebsiteConfiguration.parse({
+    schemaVersion: 1,
+    environment: 'local',
+    sites,
+  });
+  writePrivate(join(OUT, 'authenticated-websites.json'), configuration);
+  console.log(`Enrolled ${sites.length} signed-in website connectors.`);
+  console.log(`BFF: AXIOM_AUTHENTICATED_WEBSITE_CONFIG_FILE=${MOUNT}/authenticated-websites.json`);
 }
 
 async function enroll(issuerNodeId: string, days: number) {
@@ -384,6 +539,7 @@ async function enroll(issuerNodeId: string, days: number) {
       `Valid until ${new Date(expiresAt).toISOString()}; mount ${OUT} read-only at ${MOUNT}`,
     );
     console.log(`BFF: AXIOM_POSTGRESQL_SANDBOX_CONFIG_FILE=${MOUNT}/config.json`);
+    await enrollWebsites(db, actor.id, expiresAt);
   } finally {
     await db.end();
   }

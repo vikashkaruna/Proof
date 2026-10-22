@@ -184,6 +184,7 @@ def plan(root: Path = ROOT) -> dict:
         (180, {"clarified-report-parity.test.sql", "clarified-report-lifecycle.test.sql"}, "clarified180_suite_required"),
         (181, {"global-founder-visibility.test.sql"}, "founder181_suite_required"),
         (182, {"sandbox-sql-engines.test.sql"}, "sandbox_engines182_suite_required"),
+        (183, {"authenticated-website-checks.test.sql"}, "website183_suite_required"),
         (170, {"owned-effect-observations.test.sql"}, "owned_effect170_suite_required"),
         (
             171,
