@@ -130,6 +130,9 @@ beforeEach(() => {
   served = 0;
 });
 
+// One pinned expiry shared by the site configuration and its credential file:
+// separate Date.now() calls can differ by a millisecond and are then refused.
+const EXPIRES = Date.now() + 600_000;
 const site = (overrides: Partial<AuthenticatedWebsiteSite> = {}): AuthenticatedWebsiteSite => ({
   tenantId: TENANT,
   connectorId: CONNECTOR,
@@ -145,7 +148,7 @@ const site = (overrides: Partial<AuthenticatedWebsiteSite> = {}): AuthenticatedW
   credential: {
     id: '76760000-0000-4000-8000-000000000003',
     revision: 1,
-    expiresAt: Date.now() + 60_000,
+    expiresAt: EXPIRES,
     file: '/run/x.json',
   },
   maxPages: 25,
@@ -157,7 +160,7 @@ const credential = (overrides: Record<string, unknown> = {}) => ({
   connectorId: CONNECTOR,
   credentialId: '76760000-0000-4000-8000-000000000003',
   revision: 1,
-  expiresAt: Date.now() + 60_000,
+  expiresAt: EXPIRES,
   username: 'demo.owner@example.in',
   secret: PASSWORD,
   ...overrides,
