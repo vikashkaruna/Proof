@@ -229,7 +229,7 @@ export function ConnectorsClient({
         <h2 className="text-lg font-semibold text-indigo-900">Continue your assessment setup</h2>
         <p className="text-sm text-slate-700">
           Public website audits are available below. Reviewed local PostgreSQL sandbox discovery
-          appears on eligible registrations when configured, and the same discovery covers MySQL and
+          appears on eligible registrations when configured. The same discovery covers MySQL and
           MariaDB demo sandboxes. Connector registrations save setup records only; they do not
           connect a system or grant agent access.
         </p>
