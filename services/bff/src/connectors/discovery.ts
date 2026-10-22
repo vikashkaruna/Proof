@@ -14,13 +14,8 @@ import {
 } from './sql/grant-gate.js';
 import { PostgresDeadline, PostgresDeadlineExceeded } from './sql/postgres-deadline.js';
 import type { SqlSessionFactory } from './sql/postgres-read.js';
-import {
-  SqlEndpointSchema,
-  mysqlSessions,
-  postgresSessions,
-  rdsIamCredentials,
-  type SqlCredentialProvider,
-} from './sql/session.js';
+import { SqlEndpointSchema, rdsIamCredentials, type SqlCredentialProvider } from './sql/session.js';
+import { sqlPluginFor } from './framework/plugins.js';
 
 export class DiscoveryRefused extends Error {
   constructor(readonly reason: string) {
@@ -104,6 +99,9 @@ export class DiscoveryService {
       registry?: ReadonlyMap<string, ConnectorManifest>;
       /** Trusted PostgreSQL composition only; never supplied by a request. */
       postgresqlOnly?: true;
+      /** Trusted sandbox composition: the SQL targets it was reviewed for.
+       * Implies the deadline-scoped sandbox path, like `postgresqlOnly`. */
+      sandboxSqlTargets?: ReadonlySet<string>;
       sandboxConfigurations?: ReadonlyMap<string, string>;
     },
   ) {
@@ -175,9 +173,10 @@ export class DiscoveryService {
     retainedCorrelationId?: string,
   ) {
     const request = DiscoveryRequestSchema.parse(input);
-    const scope = this.deps.postgresqlOnly
-      ? new PostgresDeadline(Date.now() + 30_000, Date.now, signal)
-      : undefined;
+    const scope =
+      this.deps.postgresqlOnly || this.deps.sandboxSqlTargets
+        ? new PostgresDeadline(Date.now() + 30_000, Date.now, signal)
+        : undefined;
     try {
       if (scope) {
         const workload = await scope.run(() => this.deps.identity.verify(workloadProof));
@@ -204,20 +203,18 @@ export class DiscoveryService {
     const correlationId =
       retainedCorrelationId === undefined ? randomUUID() : z.uuid().parse(retainedCorrelationId);
     const manifest = await wait(() => this.manifest(request, scope?.signal));
-    if (scope && (manifest.transport !== 'sql' || manifest.target !== 'postgresql'))
+    const sandboxTargets =
+      this.deps.sandboxSqlTargets ?? (this.deps.postgresqlOnly ? new Set(['postgresql']) : null);
+    if (sandboxTargets && (manifest.transport !== 'sql' || !sandboxTargets.has(manifest.target)))
       throw new DiscoveryRefused('engine_unsupported');
     let checkRelease: (() => Promise<void>) | undefined;
     let outcome: { result: ConnectorResult; grantId: string; spiffeId: string };
     if (manifest.transport === 'sql') {
       // The engine comes from the reviewed descriptor's target, never from the
-      // request; an unknown SQL target fails closed.
-      const engine =
-        manifest.target === 'mysql'
-          ? ('mysql' as const)
-          : manifest.target === 'postgresql'
-            ? ('postgresql' as const)
-            : null;
-      if (!engine) throw new DiscoveryRefused('engine_unsupported');
+      // request; a target without a registered SQL plug-in fails closed.
+      const plugin = sqlPluginFor(manifest.target);
+      if (!plugin) throw new DiscoveryRefused('engine_unsupported');
+      const engine = plugin.target;
       const endpoint = this.#sqlEndpoints.get(key(request.tenantId, request.connectorId));
       if (!endpoint) throw new DiscoveryRefused('endpoint_unconfigured');
       const binding = this.#sqlBindings.get(key(request.tenantId, request.connectorId));
@@ -229,15 +226,10 @@ export class DiscoveryService {
         throw new DiscoveryRefused('descriptor_unreviewed');
       const sessions =
         this.deps.sqlSessions ??
-        (engine === 'mysql'
-          ? mysqlSessions({
-              endpoint: () => endpoint,
-              credentials: this.deps.sqlCredentials ?? rdsIamCredentials(),
-            })
-          : postgresSessions({
-              endpoint: () => endpoint,
-              credentials: this.deps.sqlCredentials ?? rdsIamCredentials(),
-            }));
+        plugin.sessions({
+          endpoint: () => endpoint,
+          credentials: this.deps.sqlCredentials ?? rdsIamCredentials(),
+        });
       const gate = new SqlDiscoveryGate(this.deps.identity, sessions, {
         client: this.deps.client,
         engine,

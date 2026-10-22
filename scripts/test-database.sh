@@ -84,6 +84,9 @@ while IFS= read -r suite; do
     { python3 tests/database/lib/postgresql-discovery-fixture.py; python3 tests/database/lib/owned-human-canonical-fixture.py; python3 tests/database/lib/owned-execution-fixture.py; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
   elif [[ "$suite" = postgresql-discovery-requests.test.sql || "$suite" = owned-postgres-target.test.sql || "$suite" = owned-human-plans.test.sql || "$suite" = scheduled-postgresql-reads.test.sql ]]; then
     { python3 tests/database/lib/postgresql-discovery-fixture.py; if [[ "$suite" = owned-human-plans.test.sql || "$suite" = scheduled-postgresql-reads.test.sql ]]; then python3 tests/database/lib/owned-human-canonical-fixture.py; fi; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
+  elif [[ "$suite" = sandbox-sql-engines.test.sql ]]; then
+    # 0182 reuses the 0163 sandbox custody fixture inside one transaction.
+    { sed '/^rollback;$/d' tests/database/postgresql-sandbox-discovery.test.sql; cat "tests/database/$suite"; } | docker exec -i "$container" psql -X -U supabase_admin -d axiom_policy_test -v ON_ERROR_STOP=1 -q > "$test_log" 2>&1 || { cat "$test_log"; exit 1; }
   elif [[ "$suite" = explicit-data-flow-declarations.test.sql || "$suite" = prativedan-accounted-terminal.test.sql || "$suite" = postgresql-sandbox-discovery.test.sql || "$suite" = controller-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance.test.sql || "$suite" = local-custody-credential-issuance-demo.test.sql || "$suite" = local-custody-credential-identity.test.sql ]]; then
     # The production migration deliberately grants no issuer membership to
     # postgres. Only this disposable test session assumes the private role.
