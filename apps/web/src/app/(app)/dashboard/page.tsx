@@ -6,6 +6,9 @@ import { moduleBarProps } from '@/lib/module-bar';
 import { requireTenantContext } from '@/lib/tenant-context';
 import { visibleRoutes } from '../nav';
 
+/** Recent engagements searched for the latest recorded posture. */
+const RECENT_ENGAGEMENTS = 20;
+
 export const dynamic = 'force-dynamic';
 
 function metric(value: number | null): string {
@@ -28,7 +31,7 @@ export default async function DashboardPage() {
   // Match ReportsPage's preparation gate, rather than treating read access or
   // REPORT_GENERATE (which other workflows use) as preparation authority.
   const canPrepareReports = can(Capability.EVIDENCE_RECORD, { role });
-  const [ledger, evidence, dsars, consents, findings, actions, engagement, runs] =
+  const [ledger, evidence, dsars, consents, findings, actions, engagements, runs] =
     await Promise.all([
       supabase
         .from('audit_ledger')
@@ -50,8 +53,7 @@ export default async function DashboardPage() {
         .select('id, title, status, posture_score, started_at')
         .eq('tenant_id', tenantId)
         .order('started_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+        .limit(RECENT_ENGAGEMENTS),
       supabase
         .from('agent_runs')
         .select('id, agent, status, started_at')
@@ -71,15 +73,22 @@ export default async function DashboardPage() {
     actions.error || !actions.data
       ? null
       : actions.data.filter((row) => row.approval_status === 'awaiting_approval').length;
+  const engagement = {
+    error: engagements.error,
+    data: engagements.error ? null : (engagements.data?.[0] ?? null),
+  };
   const bases = await readAssessmentBases(
     supabase,
     tenantId,
-    engagement.data?.id ? [engagement.data.id] : [],
+    (engagements.data ?? []).map((row) => row.id),
   );
-  const rawPosture = engagement.error
+  // The latest *recorded* posture stays visible while a newer audit or review
+  // round is still open: skip engagements without a recorded assessment score.
+  const rawPosture = engagements.error
     ? null
-    : assessmentMetrics(bases.get(engagement.data?.id ?? ''), engagement.data?.posture_score, null)
-        .score;
+    : ((engagements.data ?? [])
+        .map((row) => assessmentMetrics(bases.get(row.id), row.posture_score, null).score)
+        .find((score) => score !== null) ?? null);
   const normalizedPosture =
     rawPosture == null
       ? null
