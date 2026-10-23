@@ -255,8 +255,10 @@ def admin_sql(target: Target, sql: str) -> str:
 
 
 def ready(target: Target) -> bool:
+    # The PostgreSQL seed creates its login roles last, after the data, and
+    # psql runs it statement by statement: wait for its final grant, not rows.
     probe = {
-        "postgresql": "select count(*) from core.service_notes",
+        "postgresql": "select count(*) from information_schema.role_table_grants where grantee = 'axiom_overprivileged' and privilege_type = 'INSERT'",
         "mysql": "select count(*) from his.appointment_notes",
         "mariadb": "select count(*) from app.audit_logs",
     }[target.engine]
