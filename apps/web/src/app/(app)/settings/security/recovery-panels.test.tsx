@@ -107,13 +107,19 @@ it('founder opens a recovery only with a subject, a stated verification and a co
     target: { value: '123456' },
   });
   expect((open as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(open);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const note = screen.getByLabelText('How you verified their identity') as HTMLInputElement;
+  expect(note.required).toBe(true);
+  expect(note.minLength).toBe(10);
+  expect(note.maxLength).toBe(1000);
   // The disabled button explains itself: only the short note is still missing.
   expect(open.getAttribute('aria-describedby')).toBe('recoveryOpenMissing');
   expect(document.getElementById('recoveryOpenMissing')?.textContent).toBe(
     'Still needed: a verification note of at least 10 characters.',
   );
   expect(document.getElementById('recoveryReasonHint')?.textContent).toBe(
-    'At least 10 characters (9 so far).',
+    'Required: at least 10 characters (9 so far).',
   );
   fireEvent.change(screen.getByLabelText('How you verified their identity'), {
     target: { value: 'Video call on the known number at 14:05' },

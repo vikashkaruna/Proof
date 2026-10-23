@@ -94,27 +94,33 @@ it('binds the engagement list to the active tenant and reports source failure', 
 
 it('refuses missing or inaccessible engagement detail within the tenant boundary', async () => {
   await expect(
-    EngagementDetailPage({ params: Promise.resolve({ id: 'foreign-1' }) }),
+    EngagementDetailPage({
+      params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000001' }),
+    }),
   ).rejects.toThrow('NOT_FOUND');
   expect(state.calls).toContainEqual(['engagements', 'tenant_id', 'tenant-1']);
-  expect(state.calls).toContainEqual(['engagements', 'id', 'foreign-1']);
+  expect(state.calls).toContainEqual(['engagements', 'id', '00000000-0000-4000-8000-000000000001']);
   state.results.engagements = {
     data: null,
     error: Object.assign(new Error('not found'), { code: 'PGRST116' }),
   };
   await expect(
-    EngagementDetailPage({ params: Promise.resolve({ id: 'foreign-2' }) }),
+    EngagementDetailPage({
+      params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000002' }),
+    }),
   ).rejects.toThrow('NOT_FOUND');
   state.results.engagements = { data: null, error: new Error('read failed') };
   await expect(
-    EngagementDetailPage({ params: Promise.resolve({ id: 'error-1' }) }),
+    EngagementDetailPage({
+      params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000003' }),
+    }),
   ).rejects.toThrow('Engagement record is unavailable');
 });
 
 it('shows findings and plan query failures as unavailable for a recorded engagement', async () => {
   state.results.engagements = {
     data: {
-      id: 'eng-1',
+      id: '00000000-0000-4000-8000-000000000004',
       title: 'Actual assessment',
       tenants: { name: 'Actual tenant' },
       library_version: '1',
@@ -128,7 +134,9 @@ it('shows findings and plan query failures as unavailable for a recorded engagem
   state.results.findings = { data: null, error: new Error('read failed') };
   state.results.remediation_plans = { data: null, error: new Error('read failed') };
   const view = renderToStaticMarkup(
-    await EngagementDetailPage({ params: Promise.resolve({ id: 'eng-1' }) }),
+    await EngagementDetailPage({
+      params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000004' }),
+    }),
   );
   expect(view).toContain('Actual assessment');
   expect(view).toContain('Remediation plans are unavailable.');
@@ -142,7 +150,9 @@ it('guards the list and the detail with the capability that offers Engagements i
   await EngagementsListPage();
   state.results.engagements = { data: null, error: null };
   await expect(
-    EngagementDetailPage({ params: Promise.resolve({ id: 'missing' }) }),
+    EngagementDetailPage({
+      params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000005' }),
+    }),
   ).rejects.toThrow('NOT_FOUND');
   expect(state.guards).toEqual(['assessment.run', 'assessment.run']);
 });
@@ -151,7 +161,7 @@ for (const basis of ['scheduled_coverage', 'unavailable', 'recorded_assessment']
   it(`filters list and detail calculations using ${basis} server provenance`, async () => {
     state.basis = basis;
     const engagement = {
-      id: 'eng-1',
+      id: '00000000-0000-4000-8000-000000000004',
       title: 'Measured technical assessment',
       tenants: { name: 'Actual tenant' },
       library_version: '1',
@@ -177,7 +187,9 @@ for (const basis of ['scheduled_coverage', 'unavailable', 'recorded_assessment']
       error: null,
     };
     const detail = renderToStaticMarkup(
-      await EngagementDetailPage({ params: Promise.resolve({ id: 'eng-1' }) }),
+      await EngagementDetailPage({
+        params: Promise.resolve({ id: '00000000-0000-4000-8000-000000000004' }),
+      }),
     );
     if (basis === 'recorded_assessment') {
       expect(list).toContain('83');
@@ -191,5 +203,15 @@ for (const basis of ['scheduled_coverage', 'unavailable', 'recorded_assessment']
       expect(detail).not.toContain('987654');
       expect(detail).toContain('Unknown');
     }
+  });
+}
+
+for (const id of ['not-a-uuid', '', '00000000-0000-4000-8000-000000000001x']) {
+  it(`rejects malformed engagement ID ${JSON.stringify(id)} before querying`, async () => {
+    await expect(EngagementDetailPage({ params: Promise.resolve({ id }) })).rejects.toThrow(
+      'NOT_FOUND',
+    );
+    expect(state.guards).toEqual([]);
+    expect(state.calls).toEqual([]);
   });
 }

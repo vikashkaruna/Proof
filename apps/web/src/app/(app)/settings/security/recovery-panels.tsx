@@ -446,13 +446,16 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
                 <Label htmlFor="recoveryReason">How you verified their identity</Label>
                 <Input
                   id="recoveryReason"
+                  required
+                  minLength={10}
+                  maxLength={1000}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="e.g. video call on known number, 14:05 IST"
                   aria-describedby="recoveryReasonHint"
                 />
                 <FieldHint id="recoveryReasonHint">
-                  At least 10 characters ({reason.trim().length} so far).
+                  Required: at least 10 characters ({reason.trim().length} so far).
                 </FieldHint>
               </div>
               <div className="flex flex-wrap items-end gap-3">
