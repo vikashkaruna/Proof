@@ -225,3 +225,17 @@ it('opens the specific draft plan for inspection even when no actions are approv
   );
   expect(screen.queryByRole('link', { name: 'Review →' })).toBeNull();
 });
+
+it('places role-specific links in the page header actions', () => {
+  render(
+    <AgentWorkbenchClient
+      {...props}
+      headerActions={<a href="/workbench/catalogue-versions">Review catalogue versions</a>}
+    />,
+  );
+  expect(
+    screen
+      .getByTestId('page-header-actions')
+      .querySelector('a[href="/workbench/catalogue-versions"]'),
+  ).not.toBeNull();
+});
