@@ -38,8 +38,21 @@ export default async function ClientPortalPage() {
   const activeTenant: TenantSummary = { id: tenantId, name: ctx.tenantName, slug: ctx.tenantSlug };
   let loadError = false;
 
+  // The latest *recorded* posture stays visible while a newer audit or review
+  // round is still open, so ask for the newest engagement that has a score.
+  const recorded = await supabase
+    .from('engagements')
+    .select('id')
+    .eq('tenant_id', tenantId)
+    .not('posture_score', 'is', null)
+    .order('started_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const recordedId =
+    !recorded.error && typeof recorded.data?.id === 'string' ? recorded.data.id : undefined;
+
   const [snapshot, plansRes, evidenceRes, dsarsRes, breachesRes, ledgerRes] = await Promise.all([
-    loadAssessmentSnapshot(supabase, tenantId),
+    loadAssessmentSnapshot(supabase, tenantId, recordedId),
     supabase
       .from('remediation_plans')
       .select('id, title, status, version, generated_by_agent, created_at')

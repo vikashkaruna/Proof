@@ -42,6 +42,7 @@ const ACTOR_EMAIL =
 const TARGETS = [
   {
     tenantSlug: 'demo-kosha-bfsi',
+    dataCategories: ['contact', 'identity', 'financial'],
     estateName: 'Kosha lending and payments estate',
     system: 'Core Banking Ledger (PostgreSQL)',
     systemKind: 'database',
@@ -54,6 +55,7 @@ const TARGETS = [
   },
   {
     tenantSlug: 'demo-sanjeevani-health',
+    dataCategories: ['contact', 'identity', 'health', 'children'],
     estateName: 'Sanjeevani clinical and patient estate',
     system: 'Hospital Information System (MySQL)',
     systemKind: 'database',
@@ -66,6 +68,7 @@ const TARGETS = [
   },
   {
     tenantSlug: 'demo-nimbus-saas',
+    dataCategories: ['contact', 'identity', 'financial'],
     estateName: 'Nimbus HR and payroll platform',
     system: 'SaaS Application Database (MariaDB)',
     systemKind: 'database',
@@ -180,6 +183,7 @@ async function enrollWebsites(db: pg.Client, actorId: string, expiresAt: number)
           name: systemName,
           systemKind: 'application',
           description: 'Synthetic signed-in demo portal (local only).',
+          dataCategories: ['contact', 'identity'],
         },
         randomUUID(),
       ]);
@@ -225,7 +229,7 @@ async function enrollWebsites(db: pg.Client, actorId: string, expiresAt: number)
         'transition',
         connector!.id,
         { expectedVersion: connector!.version, status: 'active' },
-        null,
+        manifest, // activation re-checks the reviewed descriptor
         randomUUID(),
       ]);
       if (activated.error) throw new Error(`portal connector.activate: ${String(activated.error)}`);
@@ -319,6 +323,8 @@ async function enroll(issuerNodeId: string, days: number) {
             name: target.system,
             systemKind: target.systemKind,
             description: 'Synthetic demonstration database (local only).',
+            // manage_estate requires the operator's declared categories.
+            dataCategories: target.dataCategories,
           },
           correlation(),
         ]);
@@ -365,7 +371,7 @@ async function enroll(issuerNodeId: string, days: number) {
           'transition',
           connector!.id,
           { expectedVersion: connector!.version, status: 'active' },
-          null,
+          manifest, // activation re-checks the reviewed descriptor
           correlation(),
         ]);
         if (activated.error) throw new Error(`connector.activate: ${String(activated.error)}`);

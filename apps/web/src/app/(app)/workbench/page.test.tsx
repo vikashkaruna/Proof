@@ -5,12 +5,14 @@ import WorkbenchPage from './page';
 
 const state = vi.hoisted(() => ({
   calls: [] as Array<[string, string, unknown]>,
+  role: 'axiom_analyst',
   reads: {} as Record<string, { data?: unknown; count?: number | null; error?: Error | null }>,
 }));
 vi.mock('@/lib/tenant-context', () => ({
   requireInternalContext: async () => ({
     tenantId: 'tenant-1',
     email: 'operator@example.invalid',
+    role: state.role,
     supabase: {
       from: (table: string) => {
         let filter = '';
@@ -45,9 +47,15 @@ vi.mock('@axiom/config', () => ({
   loadWebEnv: () => ({ ENVIRONMENT: 'local' }),
 }));
 vi.mock('./workbench-client', () => ({
-  AgentWorkbenchClient: (props: unknown) => <pre>{JSON.stringify(props)}</pre>,
+  AgentWorkbenchClient: ({ headerActions, ...props }: { headerActions?: React.ReactNode }) => (
+    <>
+      <header data-testid="header-actions">{headerActions}</header>
+      <pre>{JSON.stringify(props)}</pre>
+    </>
+  ),
 }));
 beforeEach(() => {
+  state.role = 'axiom_analyst';
   state.calls = [];
   state.reads = {};
 });
@@ -99,4 +107,15 @@ it('does not translate failed or missing sources into zero recorded activity', a
   expect(view).toContain('&quot;ledgerTodayCount&quot;:null');
   expect(view).toContain('&quot;awaitingReviewCount&quot;:null');
   expect(view).toContain('&quot;loadError&quot;:true');
+});
+
+it('offers founders the catalogue review link in the page header, not above it', async () => {
+  state.role = 'founder';
+  const view = renderToStaticMarkup(await WorkbenchPage());
+  expect(view.indexOf('Review catalogue versions')).toBeGreaterThan(
+    view.indexOf('data-testid="header-actions"'),
+  );
+  expect(view).toMatch(/<header[^>]*>[^]*href="\/workbench\/catalogue-versions"[^]*<\/header>/);
+  state.role = 'axiom_analyst';
+  expect(renderToStaticMarkup(await WorkbenchPage())).not.toContain('Review catalogue versions');
 });

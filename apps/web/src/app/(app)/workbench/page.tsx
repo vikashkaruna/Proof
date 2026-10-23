@@ -40,38 +40,33 @@ export default async function WorkbenchPage() {
   const loadError = Boolean(ledgerRes.error || plansRes.error || todayRes.error);
 
   return (
-    <>
-      {role === 'founder' && (
-        <Link
-          href="/workbench/catalogue-versions"
-          className="mb-4 inline-block rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-[#1E2A4A]"
-        >
-          Review catalogue versions
-        </Link>
-      )}
-      <AgentWorkbenchClient
-        tenantId={tenantId}
-        userEmail={email ?? ''}
-        ledgerTodayCount={todayRes.error ? null : (todayRes.count ?? null)}
-        awaitingReviewCount={plansRes.error ? null : (plansRes.count ?? null)}
-        recentRuns={
-          ledgerRes.error || !ledgerRes.data
-            ? null
-            : ledgerRes.data.map((r) => ({
-                seq: Number(r.sequence_no),
-                actor: r.actor_id,
-                action: r.action_type,
-                target_ref: r.target_ref,
-                correlation_id: r.correlation_id,
-                timestamp: r.occurred_at,
-                result: r.result,
-              }))
-        }
-        pendingPlans={plansRes.error || !plansRes.data ? null : plansRes.data}
-        dataResidencyRegion={BRAND.dataResidencyRegion}
-        environment={loadWebEnv().ENVIRONMENT ?? 'local'}
-        loadError={loadError}
-      />
-    </>
+    <AgentWorkbenchClient
+      headerActions={
+        role === 'founder' ? (
+          <Link href="/workbench/catalogue-versions">Review catalogue versions</Link>
+        ) : undefined
+      }
+      tenantId={tenantId}
+      userEmail={email ?? ''}
+      ledgerTodayCount={todayRes.error ? null : (todayRes.count ?? null)}
+      awaitingReviewCount={plansRes.error ? null : (plansRes.count ?? null)}
+      recentRuns={
+        ledgerRes.error || !ledgerRes.data
+          ? null
+          : ledgerRes.data.map((r) => ({
+              seq: Number(r.sequence_no),
+              actor: r.actor_id,
+              action: r.action_type,
+              target_ref: r.target_ref,
+              correlation_id: r.correlation_id,
+              timestamp: r.occurred_at,
+              result: r.result,
+            }))
+      }
+      pendingPlans={plansRes.error || !plansRes.data ? null : plansRes.data}
+      dataResidencyRegion={BRAND.dataResidencyRegion}
+      environment={loadWebEnv().ENVIRONMENT ?? 'local'}
+      loadError={loadError}
+    />
   );
 }

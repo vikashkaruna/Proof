@@ -14,7 +14,7 @@ import {
   Input,
   Label,
 } from '@axiom/ui';
-import { Notice, selectClass } from '@/components/workflow-blocks';
+import { FieldHint, Notice, selectClass } from '@/components/workflow-blocks';
 
 /**
  * Founder-led MFA recovery (0152/0153).
@@ -293,6 +293,12 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const headers = { 'Content-Type': 'application/json', 'X-Tenant-Id': tenantId };
+  // Shown under the disabled button so a greyed-out action always says why.
+  const openMissing = [
+    !subject && 'the account to recover',
+    reason.trim().length < 10 && 'a verification note of at least 10 characters',
+    !openCode.trim() && 'your authenticator code',
+  ].filter((item): item is string => Boolean(item));
 
   async function load() {
     const res = await fetch('/api/bff/v1/mfa/recovery/overview', { headers });
@@ -443,7 +449,11 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="e.g. video call on known number, 14:05 IST"
+                  aria-describedby="recoveryReasonHint"
                 />
+                <FieldHint id="recoveryReasonHint">
+                  At least 10 characters ({reason.trim().length} so far).
+                </FieldHint>
               </div>
               <div className="flex flex-wrap items-end gap-3">
                 <div className="flex flex-col gap-1.5">
@@ -460,11 +470,17 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
                   variant="accent"
                   onClick={open}
                   loading={busy}
-                  disabled={!subject || reason.trim().length < 10 || !openCode.trim()}
+                  disabled={openMissing.length > 0}
+                  aria-describedby={openMissing.length > 0 ? 'recoveryOpenMissing' : undefined}
                 >
                   Open recovery
                 </Button>
               </div>
+              {openMissing.length > 0 && (
+                <FieldHint id="recoveryOpenMissing">
+                  Still needed: {openMissing.join(', ')}.
+                </FieldHint>
+              )}
             </div>
 
             {overview.cases
