@@ -10,6 +10,7 @@ import {
 import { requireCapability } from '../middleware/authorize.js';
 import type { Variables } from '../types.js';
 import { connectorRegistry } from '../connectors/registry.js';
+import { connectorCatalogue } from '../connectors/framework/plugins.js';
 
 const fields =
   'id,tenant_id,system_id,descriptor_id,target_binding,name,endpoint_ref,assurance,status,version,created_at,updated_at';
@@ -38,7 +39,13 @@ export function connectorRoutes() {
   app.get('/connector-catalogue', (c) => {
     const refused = requireCapability(c, Capability.POSTURE_READ);
     if (refused) return refused;
-    return c.json({ data: [...connectorRegistry.values()], executionAvailable: false });
+    // `entries` is the plug-in catalogue view of the same reviewed descriptors:
+    // a display name and family per row, never an endpoint or credential.
+    return c.json({
+      data: [...connectorRegistry.values()],
+      entries: connectorCatalogue(connectorRegistry),
+      executionAvailable: false,
+    });
   });
   app.get('/connectors', async (c) => {
     const refused = requireCapability(c, Capability.POSTURE_READ);

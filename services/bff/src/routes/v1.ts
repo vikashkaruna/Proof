@@ -13,6 +13,11 @@ import {
   postgresqlDiscoveryRoutes,
   type DiscoveryRequestController,
 } from './postgresql-discovery.js';
+import { connectorScanReportRoutes } from './connector-scan-report.js';
+import {
+  authenticatedWebsiteRoutes,
+  type AuthenticatedWebsiteRouteDeps,
+} from './authenticated-website.js';
 import { mfaRecoveryRoutes } from './mfa-recovery.js';
 import { localCustodyPolicyRoutes } from './local-custody-policy.js';
 import { engagementIntakeRoutes } from './engagement-intake.js';
@@ -246,6 +251,7 @@ export function buildDryRunDispatchPayload(input: DryRunDispatchInput) {
 interface Deps {
   prativedan?: PrativedanPrivateClient;
   discoveryController?: DiscoveryRequestController;
+  authenticatedWebsites?: AuthenticatedWebsiteRouteDeps['configuration'];
   licensePublicKeyPem?: string;
   ownedSynthetic?: OwnedSyntheticRouteDeps | null;
   stagedEvidence?: StagedEvidenceRoutesDeps;
@@ -316,6 +322,8 @@ export function v1Routes(deps: Deps) {
   app.route('/', assessmentJobStatusRoutes());
   app.route('/', connectorRoutes());
   app.route('/', postgresqlDiscoveryRoutes(deps.discoveryController));
+  app.route('/', connectorScanReportRoutes());
+  app.route('/', authenticatedWebsiteRoutes({ configuration: deps.authenticatedWebsites }));
   app.route(
     '/',
     monitoringReadScopeRoutes({ mfa: deps.mfa, controller: deps.discoveryController }),

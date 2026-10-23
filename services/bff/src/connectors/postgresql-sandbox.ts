@@ -1,5 +1,6 @@
-/** Local/test disposable PostgreSQL only. Passwords remain in this private broker;
- * neither the agent nor discovery responses receive a credential or connection string. */
+/** Local/test disposable SQL sandbox for every SQL connector plug-in (PostgreSQL,
+ * MySQL, MariaDB). Passwords remain in this private broker; neither the agent
+ * nor discovery responses receive a credential or connection string. */
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { canonicalJson } from '@axiom/ledger';
@@ -7,7 +8,8 @@ import { createSupabaseAdmin } from '@axiom/supabase';
 import { DiscoveryService, DiscoveryRequestSchema } from './discovery.js';
 import { connectorRegistry } from './registry.js';
 import { SqlDiscoveryBindingSchema } from './sql/grant-gate.js';
-import { SqlEndpointSchema, postgresSessions } from './sql/session.js';
+import { SqlEndpointSchema } from './sql/session.js';
+import { sqlPluginFor, sqlTargets } from './framework/plugins.js';
 import { PostgresDeadline } from './sql/postgres-deadline.js';
 import { validCaBundle } from './postgresql-composition.js';
 import { controllerFilePath, readControllerFile } from '../workloads/controller-files.js';
@@ -28,11 +30,14 @@ const credentialPin = z
     file: controllerFilePath,
   })
   .strict();
+const LOCAL_HOSTS = ['localhost', '127.0.0.1', 'host.docker.internal'];
+/** A sandbox host is a loopback name or a plug-in's reviewed demo hostname;
+ * the per-engine match against the descriptor's plug-in is enforced below. */
 const endpoint = SqlEndpointSchema.refine(
   (value) =>
     validCaBundle(value.caPem) &&
-    (['localhost', '127.0.0.1', 'host.docker.internal'].includes(value.host) ||
-      /^axiom-pg-[a-z0-9-]{1,50}$/.test(value.host)),
+    (LOCAL_HOSTS.includes(value.host) ||
+      sqlTargets.some((target) => sqlPluginFor(target)!.sandboxHost.test(value.host))),
 );
 export const SandboxPostgresqlConfiguration = z
   .object({
@@ -102,14 +107,27 @@ export function composeSandboxPostgresql(
     const registry = new Map(
       [...connectorRegistry].filter(
         ([, m]) =>
-          m.target === 'postgresql' && m.targetBinding === 'sandbox' && m.auth === 'legacy_static',
+          m.transport === 'sql' &&
+          sqlPluginFor(m.target) !== undefined &&
+          m.targetBinding === 'sandbox' &&
+          m.auth === 'legacy_static',
       ),
     );
     const entries = new Map<string, (typeof config.connections)[number]>();
+    const plugins = new Map<string, NonNullable<ReturnType<typeof sqlPluginFor>>>();
     for (const entry of config.connections) {
       const key = entry.binding.tenantId + '/' + entry.binding.connectorId;
-      if (entries.has(key) || !registry.has(entry.binding.descriptorId)) throw new Error();
+      const manifest = registry.get(entry.binding.descriptorId);
+      const plugin = manifest && sqlPluginFor(manifest.target);
+      // A demo hostname must belong to the engine its reviewed descriptor names.
+      if (
+        entries.has(key) ||
+        !plugin ||
+        !(LOCAL_HOSTS.includes(entry.endpoint.host) || plugin.sandboxHost.test(entry.endpoint.host))
+      )
+        throw new Error();
       entries.set(key, entry);
+      plugins.set(key, plugin);
     }
     const trust =
       ports.trust ??
@@ -143,14 +161,17 @@ export function composeSandboxPostgresql(
         identity,
         client,
         registry,
-        postgresqlOnly: true,
+        sandboxSqlTargets: new Set([...plugins.values()].map((plugin) => plugin.target)),
         sandboxConfigurations: new Map([...entries.keys()].map((key) => [key, digest])),
         sqlSessions: async (context, signal, operation) => {
           const entry = entries.get(
             context.tenantId.toLowerCase() + '/' + context.connectorId.toLowerCase(),
           );
-          if (!entry) throw new Error('Sandbox connector refused');
-          const open = postgresSessions({
+          const plugin = plugins.get(
+            context.tenantId.toLowerCase() + '/' + context.connectorId.toLowerCase(),
+          );
+          if (!entry || !plugin) throw new Error('Sandbox connector refused');
+          const open = plugin.sessions({
             endpoint: () => entry.endpoint,
             credentials: {
               async password() {

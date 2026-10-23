@@ -6,7 +6,7 @@ export type ConnectorDescriptorId = string & { readonly __brand: 'ConnectorDescr
 export type ConnectorGrantId = string & { readonly __brand: 'ConnectorGrantId' };
 export type WorkloadIdentityId = string & { readonly __brand: 'WorkloadIdentityId' };
 export const TargetBindingSchema = z.enum(['production', 'sandbox', 'reference-mock']);
-export const ConnectorTransportSchema = z.enum(['rest', 'sql', 'graphql', 'mcp']);
+export const ConnectorTransportSchema = z.enum(['rest', 'sql', 'graphql', 'mcp', 'web']);
 const name = z.string().trim().min(1).max(200);
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 

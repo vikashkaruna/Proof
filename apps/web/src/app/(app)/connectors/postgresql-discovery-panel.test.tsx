@@ -117,3 +117,95 @@ it('shows expired pending requests as unconfirmed rather than claiming a live re
   await screen.findByText(/Expired; completion not confirmed/);
   expect(screen.queryByText('Reading the sandbox')).toBeNull();
 });
+
+it('runs a bounded full scan: one listing, then one sample per listed table, and names the engine', async () => {
+  const listing = {
+    ...row,
+    result: {
+      ...row.result,
+      record_count: 3,
+      result: [
+        { resource: 'app.users', kind: 'r' },
+        { resource: 'app.support_tickets', kind: 'r' },
+        // Never requested: outside the reviewed identifier set.
+        { resource: 'app.Odd Name', kind: 'r' },
+      ],
+    },
+  };
+  const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/engagements'))
+      return Response.json({
+        engagements: [{ id: id(4), title: 'Sandbox assessment', estate_id: id(3) }],
+      });
+    if (init?.method === 'POST')
+      return Response.json({ data: { requestId: id(5), status: 'completed' } });
+    return Response.json({ data: [listing], available: true });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(
+    <PostgresqlDiscoveryPanel
+      tenantId={id(1)}
+      connectorId={id(2)}
+      estateId={id(3)}
+      canManage
+      engineName="MariaDB"
+    />,
+  );
+  expect(await screen.findByRole('region', { name: 'MariaDB sandbox discovery' })).toBeDefined();
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Sandbox assessment' }), {
+    target: { value: id(4) },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Run full scan' }));
+  await screen.findByText(/Scan saved: 2 relations profiled/);
+  const posts = fetch.mock.calls
+    .filter(([, init]) => init?.method === 'POST')
+    .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+  expect(posts.map((p) => [p.operation, p.resource ?? null, p.limit ?? null])).toEqual([
+    ['enumerate', null, null],
+    ['sample', 'app.users', 200],
+    ['sample', 'app.support_tickets', 200],
+  ]);
+  expect(screen.getByRole('link', { name: 'Open scan report' }).getAttribute('href')).toBe(
+    `/connectors/${id(2)}/scan-report`,
+  );
+});
+
+it('stops a full scan at the first request that does not confirm completion', async () => {
+  const listing = {
+    ...row,
+    result: {
+      ...row.result,
+      result: [
+        { resource: 'app.users', kind: 'r' },
+        { resource: 'app.billing', kind: 'r' },
+      ],
+    },
+  };
+  let posts = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/engagements'))
+        return Response.json({
+          engagements: [{ id: id(4), title: 'Sandbox assessment', estate_id: id(3) }],
+        });
+      if (init?.method === 'POST') {
+        posts += 1;
+        return Response.json(
+          { data: { requestId: id(5), status: posts === 2 ? 'unconfirmed' : 'completed' } },
+          { status: posts === 2 ? 202 : 200 },
+        );
+      }
+      return Response.json({ data: [listing], available: true });
+    }),
+  );
+  render(
+    <PostgresqlDiscoveryPanel tenantId={id(1)} connectorId={id(2)} estateId={id(3)} canManage />,
+  );
+  fireEvent.change(await screen.findByRole('combobox', { name: 'Sandbox assessment' }), {
+    target: { value: id(4) },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Run full scan' }));
+  await screen.findByText(/The scan stopped at a request that did not confirm completion/);
+  expect(posts).toBe(2);
+});

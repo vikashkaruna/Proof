@@ -31,7 +31,7 @@ class PolicyPhases(unittest.TestCase):
         self.assertEqual(len(plan["all"]), len(set(plan["all"])))
         self.assertEqual(sorted(plan["historical143"] + plan["current"]), plan["all"])
         self.assertIn(PHASES.CURRENT, plan["current"])
-        self.assertEqual(plan["currentVersion"], 181)
+        self.assertEqual(plan["currentVersion"], 183)
         self.assertIn(
             "local-public-control-assessment-dispatch.test.sql", plan["current"]
         )
@@ -68,7 +68,7 @@ class PolicyPhases(unittest.TestCase):
             (root / "infra/supabase/migrations" / source.name).write_text(
                 "-- offline inventory only"
             )
-        self.assertEqual(PHASES.plan(root)["currentVersion"], 181)
+        self.assertEqual(PHASES.plan(root)["currentVersion"], 183)
         custody = root / "tests/database/local-custody-operator-context.test.sql"
         custody.unlink()
         with self.assertRaisesRegex(ValueError, "custody148_context_suite_required"):
@@ -134,6 +134,8 @@ class PolicyPhases(unittest.TestCase):
             ("clarified-report-parity.test.sql", "clarified180_suite_required"),
             ("clarified-report-lifecycle.test.sql", "clarified180_suite_required"),
             ("global-founder-visibility.test.sql", "founder181_suite_required"),
+            ("sandbox-sql-engines.test.sql", "sandbox_engines182_suite_required"),
+            ("authenticated-website-checks.test.sql", "website183_suite_required"),
         ):
             with self.subTest(suite=suite), tempfile.TemporaryDirectory() as raw:
                 root = Path(raw)
