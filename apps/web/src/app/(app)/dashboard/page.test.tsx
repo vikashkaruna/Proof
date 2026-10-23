@@ -99,7 +99,18 @@ it('counts only recorded pending approvals and open findings', async () => {
     ],
     error: null,
   };
-  state.results.engagements = { data: { posture_score: 0.83 }, error: null };
+  state.results.engagements = {
+    data: [
+      {
+        id: 'eng-1',
+        title: 'Audit',
+        status: 'completed',
+        posture_score: 0.83,
+        started_at: '2026-10-01T00:00:00Z',
+      },
+    ],
+    error: null,
+  };
   state.results.agent_runs = {
     data: [{ id: 'r1', agent: 'drishti', status: 'running', started_at: '2026-10-01T00:00:00Z' }],
     error: null,
@@ -153,7 +164,18 @@ it('shows only the record tiles for screens the persona is offered', async () =>
 it.each([0.83, 0.74, 0.5, 0.2])(
   'shows a recorded score of %s without an unsupported strength band',
   async (score) => {
-    state.results.engagements = { data: { posture_score: score }, error: null };
+    state.results.engagements = {
+      data: [
+        {
+          id: 'eng-1',
+          title: 'Audit',
+          status: 'completed',
+          posture_score: score,
+          started_at: '2026-10-01T00:00:00Z',
+        },
+      ],
+      error: null,
+    };
     const view = await html();
     expect(view).toContain('data-testid="posture-value"');
     expect(view).toContain('data-testid="posture-provenance">Unverified<');
@@ -169,13 +191,15 @@ it('shows no band when the posture is unavailable', async () => {
 
 it('guides operators through the workflow and links the latest recorded assessment', async () => {
   state.results.engagements = {
-    data: {
-      id: 'engagement-1',
-      title: 'Current compliance review',
-      status: 'awaiting_approval',
-      posture_score: 0.74,
-      started_at: '2026-10-01T00:00:00Z',
-    },
+    data: [
+      {
+        id: 'engagement-1',
+        title: 'Current compliance review',
+        status: 'awaiting_approval',
+        posture_score: 0.74,
+        started_at: '2026-10-01T00:00:00Z',
+      },
+    ],
     error: null,
   };
   const view = await html();
@@ -266,7 +290,7 @@ for (const basis of ['scheduled_coverage', 'unavailable'] as const) {
   it(`withholds dashboard posture for ${basis} provenance`, async () => {
     state.basis = basis;
     state.results.engagements = {
-      data: { id: 'eng-1', status: 'active', posture_score: 93 },
+      data: [{ id: 'eng-1', status: 'active', posture_score: 93 }],
       error: null,
     };
     const view = await html();
@@ -274,3 +298,30 @@ for (const basis of ['scheduled_coverage', 'unavailable'] as const) {
     expect(view).toContain('No verified posture score is available.');
   });
 }
+
+it('keeps the latest recorded posture while a newer audit round is still open', async () => {
+  state.results.engagements = {
+    data: [
+      {
+        id: 'engagement-2',
+        title: 'Next audit round',
+        status: 'intake',
+        posture_score: null,
+        started_at: '2026-10-20T00:00:00Z',
+      },
+      {
+        id: 'engagement-1',
+        title: 'Completed audit',
+        status: 'completed',
+        posture_score: 74,
+        started_at: '2026-09-01T00:00:00Z',
+      },
+    ],
+    error: null,
+  };
+  const view = await html();
+  expect(view).toContain('data-testid="posture-value">74<');
+  // The latest engagement panel still shows the new round.
+  expect(view).toContain('Next audit round');
+  expect(view).toContain('href="/engagements/engagement-2"');
+});

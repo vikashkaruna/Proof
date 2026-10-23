@@ -46,6 +46,9 @@ it('founder loads delegations with a visible button and issues one only when eve
     'persona-owner@example.invalid',
   );
   const delegate = screen.getByRole('button', { name: 'Delegate' }) as HTMLButtonElement;
+  expect(document.getElementById('delegateMissing')?.textContent).toBe(
+    'Still needed: an owner, a reason of at least 10 characters, your authenticator code.',
+  );
   fireEvent.change(screen.getByLabelText('Owner'), { target: { value: 'o1' } });
   fireEvent.change(screen.getByLabelText('Why this owner'), {
     target: { value: 'Owner covers weekend recoveries' },
@@ -56,6 +59,9 @@ it('founder loads delegations with a visible button and issues one only when eve
   expect(delegate.disabled).toBe(false);
   fireEvent.change(screen.getByLabelText('Days (1–30)'), { target: { value: '31' } });
   expect(delegate.disabled).toBe(true);
+  expect(document.getElementById('delegateMissing')?.textContent).toBe(
+    'Still needed: days between 1 and 30.',
+  );
   fireEvent.change(screen.getByLabelText('Days (1–30)'), { target: { value: '7' } });
   fireEvent.click(delegate);
   expect((await screen.findByRole('status')).textContent).toBe('Delegation issued.');

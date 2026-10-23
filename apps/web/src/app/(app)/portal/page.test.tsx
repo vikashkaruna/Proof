@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   data: {} as Record<string, unknown>,
   errors: {} as Record<string, Error | null>,
   snapshot: null as unknown,
+  snapshotFor: [] as Array<string | undefined>,
 }));
 vi.mock('@/lib/assessment-basis', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/assessment-basis')>()),
@@ -36,6 +37,10 @@ vi.mock('@/lib/tenant-context', () => ({
               return query;
             },
             in: () => query,
+            not: (key: string, op: string, value: unknown) => {
+              state.calls.push([table, `not ${key} ${op}`, value]);
+              return query;
+            },
             order: () => query,
             limit: () => query,
             maybeSingle: async () => result(),
@@ -48,7 +53,10 @@ vi.mock('@/lib/tenant-context', () => ({
   },
 }));
 vi.mock('@/lib/assessment-snapshot', () => ({
-  loadAssessmentSnapshot: async () => state.snapshot,
+  loadAssessmentSnapshot: async (_db: unknown, _tenant: string, engagementId?: string) => {
+    state.snapshotFor.push(engagementId);
+    return state.snapshot;
+  },
 }));
 vi.mock('./portal-client', () => ({
   PortalClient: (props: unknown) => <pre>{JSON.stringify(props)}</pre>,
@@ -57,6 +65,7 @@ beforeEach(() => {
   state.basis = 'recorded_assessment';
   state.requestedTenant = '';
   state.calls = [];
+  state.snapshotFor = [];
   state.data = {};
   state.errors = {};
   state.snapshot = null;
@@ -152,4 +161,17 @@ it('keeps trusted scheduled snapshot redacted even if auxiliary provenance says 
   const view = renderToStaticMarkup(await ClientPortalPage());
   expect(view).toContain('&quot;postureScore&quot;:null');
   expect(view).toContain('&quot;estimatedExposureInr&quot;:null');
+});
+
+it('shows the latest recorded engagement while a newer round is still open', async () => {
+  state.data.engagements = { id: '11111111-1111-4111-8111-111111111111', started_at: '2026-09-01' };
+  renderToStaticMarkup(await ClientPortalPage());
+  expect(state.calls).toContainEqual(['engagements', 'not posture_score is', null]);
+  expect(state.snapshotFor).toEqual(['11111111-1111-4111-8111-111111111111']);
+});
+
+it('falls back to the newest engagement when none has a recorded score', async () => {
+  state.data.engagements = null;
+  renderToStaticMarkup(await ClientPortalPage());
+  expect(state.snapshotFor).toEqual([undefined]);
 });

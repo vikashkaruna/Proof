@@ -15,7 +15,7 @@ import {
   Label,
 } from '@axiom/ui';
 import { sessionFingerprint } from './recovery-panels';
-import { Notice, checkboxClass, selectClass } from '@/components/workflow-blocks';
+import { FieldHint, Notice, checkboxClass, selectClass } from '@/components/workflow-blocks';
 
 /**
  * Scoped owner delegation of MFA recovery (0154). Founders issue and revoke;
@@ -108,6 +108,14 @@ export function DelegationManager({
   const [days, setDays] = useState('7');
   const [reason, setReason] = useState('');
   const [code, setCode] = useState('');
+  // Shown under the disabled button so a greyed-out action always says why.
+  const issueMissing = [
+    !owner && 'an owner',
+    roles.length === 0 && 'at least one role',
+    (!/^\d+$/.test(days) || Number(days) < 1 || Number(days) > 30) && 'days between 1 and 30',
+    reason.trim().length < 10 && 'a reason of at least 10 characters',
+    !code.trim() && 'your authenticator code',
+  ].filter((item): item is string => Boolean(item));
 
   const owners = (s.data?.owners ?? []).filter((o) => o.tenant_id === tenantId);
   const live = (s.data?.delegations ?? []).filter((d) => d.tenant_id === tenantId && !d.revoked_at);
@@ -259,7 +267,11 @@ export function DelegationManager({
                     id="delegateReason"
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
+                    aria-describedby="delegateReasonHint"
                   />
+                  <FieldHint id="delegateReasonHint">
+                    At least 10 characters ({reason.trim().length} so far).
+                  </FieldHint>
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="delegateCode">Your authenticator code</Label>
@@ -275,19 +287,15 @@ export function DelegationManager({
                   variant="accent"
                   onClick={issue}
                   loading={s.busy}
-                  disabled={
-                    !owner ||
-                    roles.length === 0 ||
-                    !/^\d+$/.test(days) ||
-                    Number(days) < 1 ||
-                    Number(days) > 30 ||
-                    reason.trim().length < 10 ||
-                    !code.trim()
-                  }
+                  disabled={issueMissing.length > 0}
+                  aria-describedby={issueMissing.length > 0 ? 'delegateMissing' : undefined}
                 >
                   Delegate
                 </Button>
               </div>
+              {issueMissing.length > 0 && (
+                <FieldHint id="delegateMissing">Still needed: {issueMissing.join(', ')}.</FieldHint>
+              )}
             </div>
           </>
         )}
@@ -304,6 +312,12 @@ export function OwnerRecoveryPanel({ tenantId }: { tenantId: string }) {
   const [reason, setReason] = useState('');
   const [code, setCode] = useState('');
   const [authCodes, setAuthCodes] = useState<Record<string, string>>({});
+
+  const openMissing = [
+    !subject && 'the member to recover',
+    reason.trim().length < 10 && 'a verification note of at least 10 characters',
+    !code.trim() && 'your authenticator code',
+  ].filter((item): item is string => Boolean(item));
 
   const held = (s.data?.delegations ?? []).filter((d) => d.tenant_id === tenantId && !d.revoked_at);
   const delegation = held[0];
@@ -418,7 +432,11 @@ export function OwnerRecoveryPanel({ tenantId }: { tenantId: string }) {
                   id="ownerRecoveryReason"
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
+                  aria-describedby="ownerRecoveryReasonHint"
                 />
+                <FieldHint id="ownerRecoveryReasonHint">
+                  At least 10 characters ({reason.trim().length} so far).
+                </FieldHint>
               </div>
               <div className="flex flex-wrap items-end gap-3">
                 <div className="flex flex-col gap-1.5">
@@ -435,11 +453,17 @@ export function OwnerRecoveryPanel({ tenantId }: { tenantId: string }) {
                   variant="accent"
                   onClick={open}
                   loading={s.busy}
-                  disabled={!subject || reason.trim().length < 10 || !code.trim()}
+                  disabled={openMissing.length > 0}
+                  aria-describedby={openMissing.length > 0 ? 'ownerRecoveryMissing' : undefined}
                 >
                   Open recovery
                 </Button>
               </div>
+              {openMissing.length > 0 && (
+                <FieldHint id="ownerRecoveryMissing">
+                  Still needed: {openMissing.join(', ')}.
+                </FieldHint>
+              )}
             </div>
             {(s.data.cases ?? [])
               .filter((c) => OPEN.has(c.state))
