@@ -621,7 +621,11 @@ describe('unmounted real TLS, owned loopback ephemeral generation only', () => {
   it.each(['idle', 'unfinished-handshake'])(
     'closes %s at the original deadline with no key work',
     async (kind) => {
-      const f = fixture(80);
+      // Establish real loopback TCP before advancing the fixture's clock. A
+      // short wall-clock window can expire during CI scheduling, before the
+      // unfinished-handshake client ever connects, and prove only a reset.
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      const f = fixture();
       let socket: ReturnType<typeof netConnect> | undefined;
       try {
         const address = await f.listening;
@@ -634,6 +638,7 @@ describe('unmounted real TLS, owned loopback ephemeral generation only', () => {
             socket!.once('error', reject);
           });
         }
+        await vi.advanceTimersByTimeAsync(f.deadline - Date.now());
         await expect(f.done).rejects.toThrow();
         expect(f.service.wrap).not.toHaveBeenCalled();
         socket?.destroy();
@@ -655,6 +660,7 @@ describe('unmounted real TLS, owned loopback ephemeral generation only', () => {
         socket?.destroy();
         f.server.fail();
         await f.done.catch(() => {});
+        vi.useRealTimers();
       }
     },
   );

@@ -127,6 +127,7 @@ export function SetupWizard({
   const version = open?.version ?? 0;
   const estateSystems = systems.filter((s) => s.active && s.estateId === open?.estate_id);
   const reload = () => {
+    setLoaded({ state: 'loading' });
     setSelected(null);
     setRevision((n) => n + 1);
   };

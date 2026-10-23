@@ -312,12 +312,21 @@ insert into controller_security.coverage175_heads values(schedule,original.tenan
                 "visited-blocked-candidates",
             )
         )
+        lock_proof = {
+            "emptyFires": json.loads(first) == {"fires": []},
+            "elapsedSeconds": round(elapsed, 6),
+            "visitedCandidates": attempts,
+        }
+        (evidence / "bounded-lock-proof.json").write_text(json.dumps(lock_proof))
         if (
-            json.loads(first) != {"fires": []}
+            not lock_proof["emptyFires"]
             or elapsed >= 3
             or not 8 <= attempts <= 32
         ):
-            raise Refused("Actual bounded repeated-candidate lock proof refused")
+            raise Refused(
+                "Actual bounded repeated-candidate lock proof refused: "
+                + json.dumps(lock_proof, sort_keys=True)
+            )
         assert holder.stdin is not None
         holder.stdin.write("rollback;\n\\q\n")
         holder.stdin.flush()

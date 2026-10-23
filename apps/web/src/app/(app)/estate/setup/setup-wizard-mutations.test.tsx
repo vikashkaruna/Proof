@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SetupWizard } from './setup-wizard';
 
@@ -53,6 +53,50 @@ const base = {
     },
   ],
 };
+
+it('withholds stale step controls until a confirmed save reloads the current version', async () => {
+  let saved = false;
+  let releaseRead: (response: Response) => void = () => {
+    throw new Error('Refresh was not requested');
+  };
+  const refreshed = new Promise<Response>((resolve) => {
+    releaseRead = resolve;
+  });
+  const current = {
+    ...wizard,
+    version: 5,
+    completed_steps: [...wizard.completed_steps, 'connectors'],
+    manual_system_ids: [base.systems[0]!.id],
+  };
+  const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+    if (init?.method === 'POST') {
+      saved = true;
+      return Response.json({ data: current, readiness });
+    }
+    return saved ? refreshed : Response.json({ data: wizard, readiness });
+  });
+  vi.stubGlobal('fetch', fetcher);
+  render(<SetupWizard {...base} />);
+  fireEvent.click(await screen.findByLabelText(/Payroll: no connector/));
+  fireEvent.click(screen.getByRole('button', { name: 'Record connection path' }));
+  await screen.findByText('Loading onboarding progress…');
+  expect(
+    screen.queryByRole('button', { name: /Company profile|Estate|Record grant review/ }),
+  ).toBeNull();
+  expect(fetcher.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
+  await act(async () => releaseRead(Response.json({ data: current, readiness })));
+  fireEvent.click(await screen.findByLabelText('I have reviewed agent access for this estate'));
+  fireEvent.click(screen.getByRole('button', { name: 'Record grant review' }));
+  await waitFor(() => {
+    const writes = fetcher.mock.calls.filter(([, init]) => init?.method === 'POST');
+    expect(writes).toHaveLength(2);
+    expect(JSON.parse(String(writes[1]![1]?.body))).toMatchObject({
+      step: 'grants',
+      expectedVersion: 5,
+      acknowledged: true,
+    });
+  });
+});
 
 it('starts the real wizard using getRandomValues on HTTP without randomUUID', async () => {
   const getRandomValues = vi.fn((bytes: Uint8Array) => {

@@ -26,6 +26,7 @@ export default async function EngagementDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) notFound();
   const { supabase, tenantId } = await requireCapabilityContext(routeCapability('/engagements'));
 
   const { data: engagement, error: engagementError } = await supabase
