@@ -39,6 +39,8 @@ interface WorkbenchClientProps {
   /** Deployment label from configuration, not a claim about health. */
   environment: string;
   loadError: boolean;
+  /** Role-specific header links, shown in the page header's actions area. */
+  headerActions?: React.ReactNode;
 }
 
 const AGENTS: Array<{
@@ -156,6 +158,7 @@ export function AgentWorkbenchClient({
   environment,
   loadError,
   dataResidencyRegion,
+  headerActions,
 }: WorkbenchClientProps) {
   const [selectedAgent, setSelectedAgent] = useState<AgentName>('drishti');
   const currentTenant = useRef<string | null>(tenantId);
@@ -216,6 +219,7 @@ export function AgentWorkbenchClient({
       <PageHeader
         title="Agent Workbench"
         module={moduleBarProps('workbench')}
+        actions={headerActions}
         description="Inspect recorded activity and launch supported read-only agents. Approval-gated actions, evidence storage, reports and unavailable feeds use their dedicated workflows."
         meta={
           <>
