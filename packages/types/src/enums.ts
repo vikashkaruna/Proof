@@ -306,6 +306,9 @@ export const LedgerActionType = {
   // signal that someone holds their password and is working on the factor.
   MFA_CHALLENGE_FAILED: 'mfa.challenge.failed',
   MFA_RECOVERY_CODE_CONSUMED: 'mfa.recovery_code.consumed',
+  // Help requests carry no recovery authority and never rotate a factor.
+  MFA_RECOVERY_REQUESTED: 'mfa.recovery.requested',
+  MFA_RECOVERY_REQUEST_CANCELLED: 'mfa.recovery.request.cancelled',
   TENANT_CREATED: 'tenant.created',
   TENANT_UPDATED: 'tenant.updated',
   TENANT_INVITATION_CREATED: 'tenant.invitation.created',

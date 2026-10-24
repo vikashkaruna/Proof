@@ -170,7 +170,9 @@ export default defineConfig({
   testIgnore: [
     // Designates platform founders; runs only against the harness-owned stack.
     // Deployed acceptance forbids skipped journeys, so it is not discovered there.
-    ...(acceptanceTarget ? ['**/founder-mfa-recovery.spec.ts'] : []),
+    ...(acceptanceTarget
+      ? ['**/founder-mfa-recovery.spec.ts', '**/mfa-recovery-requests.spec.ts']
+      : []),
     ...(process.env.AXIOM_LOCAL_CUSTODY_BROWSER_ACCEPTANCE === 'true'
       ? []
       : ['**/local-custody-policy-provider.spec.ts']),

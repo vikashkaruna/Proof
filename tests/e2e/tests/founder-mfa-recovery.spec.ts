@@ -132,6 +132,7 @@ test('a founder recovers another founder who lost their authenticator', async ({
   // The subject enrols a new authenticator on the bound session.
   await panel.getByRole('button', { name: 'Check for confirmation' }).click();
   await panel.getByRole('button', { name: 'Set up new authenticator' }).click();
+  await expect(panel.getByRole('img', { name: 'Authenticator setup QR code' })).toBeVisible();
   const grouped = await panel.getByTestId('recovery-setup-key').innerText();
   const newSecret = grouped.replace(/\s+/g, '');
   expect(newSecret.length).toBeGreaterThan(15);
