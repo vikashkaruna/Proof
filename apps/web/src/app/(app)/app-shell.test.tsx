@@ -13,6 +13,7 @@ import { TechnicalReviewsClient } from './execution/technical-reviews/reviews-cl
 
 const state = vi.hoisted(() => ({
   push: vi.fn(),
+  replace: vi.fn(),
   refresh: vi.fn(),
   switchTenant: vi.fn(),
   pathname: '/dashboard',
@@ -31,7 +32,7 @@ vi.mock('next/link', async () => {
   };
 });
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: state.push, refresh: state.refresh }),
+  useRouter: () => ({ push: state.push, replace: state.replace, refresh: state.refresh }),
   usePathname: () => state.pathname,
   useSearchParams: () => new URLSearchParams(state.search),
 }));
@@ -93,6 +94,7 @@ const props = {
 
 beforeEach(() => {
   state.push.mockReset();
+  state.replace.mockReset();
   state.refresh.mockReset();
   state.switchTenant.mockReset();
   state.pathname = '/dashboard';
@@ -160,6 +162,27 @@ it('switches tenant only after the server action verifies membership', async () 
   await waitFor(() => expect(state.switchTenant).toHaveBeenCalledWith('beta'));
   expect(state.refresh).not.toHaveBeenCalled();
   expect(state.push).not.toHaveBeenCalled();
+  expect(state.replace).not.toHaveBeenCalled();
+});
+
+it('leaves the previous organization plan ID after a verified organization switch', async () => {
+  state.pathname = '/plans/0b25ca51-438e-4cde-8f54-96e42e702111';
+  state.switchTenant.mockResolvedValue({ ok: true });
+  render(<AppShell {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
+  fireEvent.click(screen.getByRole('button', { name: /Beta Org/ }));
+  await waitFor(() => expect(state.replace).toHaveBeenCalledWith('/plans'));
+  expect(state.refresh).not.toHaveBeenCalled();
+});
+
+it('refreshes the plan list after a verified organization switch', async () => {
+  state.pathname = '/plans';
+  state.switchTenant.mockResolvedValue({ ok: true });
+  render(<AppShell {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Switch organization' }));
+  fireEvent.click(screen.getByRole('button', { name: /Beta Org/ }));
+  await waitFor(() => expect(state.refresh).toHaveBeenCalledOnce());
+  expect(state.replace).not.toHaveBeenCalled();
 });
 
 it('requires a confirmed capability-bearing request to engage the kill switch', async () => {

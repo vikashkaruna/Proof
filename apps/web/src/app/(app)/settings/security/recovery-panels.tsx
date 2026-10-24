@@ -1,5 +1,7 @@
 'use client';
 
+import { AuthenticatorQrCode } from './authenticator-qr-code';
+
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { z } from 'zod';
@@ -85,6 +87,10 @@ export function RecoveryBeneficiary({
     setError(null);
     try {
       await fn();
+    } catch {
+      setError(
+        'The recovery response could not be confirmed. Refresh the saved recovery status before retrying.',
+      );
     } finally {
       setBusy(false);
     }
@@ -143,7 +149,11 @@ export function RecoveryBeneficiary({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <RecoveryProgress
-          steps={['Bind this sign-in', 'Read your code to them', 'Set up new authenticator']}
+          steps={[
+            'Confirm your sign-in',
+            'Owner or founder approves setup',
+            'Set up new authenticator',
+          ]}
           at={recoveryCodes ? 3 : !recovery.boundHere ? 0 : !authorized ? 1 : 2}
         />
         {error && (
@@ -187,8 +197,9 @@ export function RecoveryBeneficiary({
         ) : !authorized ? (
           <div className="flex flex-col gap-2">
             <p className="text-sm text-slate-700">
-              Step 2 of 3. Read this code to the person recovering your account, over a channel you
-              both trust. They must see the same code before confirming.
+              Step 2 of 3. Ask the owner or founder to approve setup for this sign-in. Read them the
+              matching code below over a trusted channel. This is not an authenticator setup key or
+              a recovery code; do not enter it into your authenticator app.
             </p>
             {recovery.sessionId && (
               <p
@@ -198,6 +209,10 @@ export function RecoveryBeneficiary({
                 {sessionFingerprint(recovery.sessionId)}
               </p>
             )}
+            <p className="text-sm text-slate-700">
+              After they confirm the matching code and approve, choose Check for confirmation. You
+              can then register your new authenticator using a QR code or manual setup key.
+            </p>
             <div>
               <Button variant="outline" onClick={() => act(refresh)} loading={busy}>
                 Check for confirmation
@@ -207,14 +222,20 @@ export function RecoveryBeneficiary({
         ) : pending ? (
           <div className="flex flex-col gap-3">
             <p className="text-sm text-slate-700">
-              Step 3 of 3. Add this key to your new authenticator, then enter the code it shows.
+              Step 3 of 3. Register a new account in your authenticator app by scanning the QR code
+              or entering the setup key. Then enter the six-digit code from that new account.
             </p>
             <div>
               <Button asChild variant="outline" size="sm">
                 <a href={pending.provisioningUri}>Open in authenticator app</a>
               </Button>
             </div>
+            <AuthenticatorQrCode provisioningUri={pending.provisioningUri} />
+            <Label htmlFor="recoverySetupKey">
+              Setup key (for manual entry; choose time-based)
+            </Label>
             <p
+              id="recoverySetupKey"
               data-testid="recovery-setup-key"
               className="w-fit max-w-full break-all rounded-md border border-slate-200 bg-mist-50 px-3 py-2 font-mono text-sm tracking-wider text-slate-900"
             >
@@ -320,6 +341,10 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
     setNotice(null);
     try {
       await fn();
+    } catch {
+      setError(
+        'The recovery response could not be confirmed. Refresh the saved recovery status before retrying.',
+      );
     } finally {
       setBusy(false);
     }
@@ -446,13 +471,16 @@ export function RecoveryConsole({ tenantId }: { tenantId: string }) {
                 <Label htmlFor="recoveryReason">How you verified their identity</Label>
                 <Input
                   id="recoveryReason"
+                  required
+                  minLength={10}
+                  maxLength={1000}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   placeholder="e.g. video call on known number, 14:05 IST"
                   aria-describedby="recoveryReasonHint"
                 />
                 <FieldHint id="recoveryReasonHint">
-                  At least 10 characters ({reason.trim().length} so far).
+                  Required: at least 10 characters ({reason.trim().length} so far).
                 </FieldHint>
               </div>
               <div className="flex flex-wrap items-end gap-3">

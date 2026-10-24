@@ -4,13 +4,14 @@ import { createSupabaseAdmin } from '@axiom/supabase';
 import type { Variables } from '../types.js';
 import { bindingSha256, type MfaService } from '../services/mfa.js';
 import { logger } from '../lib/logger.js';
+import { mfaRecoveryRequestRoutes } from './mfa-recovery-requests.js';
 
 /**
- * Founder-led MFA recovery (0152, e447–e450).
+ * Founder-led MFA recovery (0152/0156) and password-only help requests (0184).
  *
- * A live platform founder recovers a DIFFERENT live founder who has lost
- * their authenticator. SQL owns every authority decision — live founder on
- * both sides, live attested actor session, fresh step-up bound to the exact
+ * A live platform founder recovers a DIFFERENT eligible founder, owner or admin who has lost
+ * their authenticator. SQL owns every authority decision — live founder actor and current subject eligibility,
+ * live attested actor session, fresh step-up bound to the exact
  * act, the fence, the one-shot grant — and repeats it on every call. These
  * routes only shape requests and turn the actor's TOTP code into that bound
  * step-up. No route takes the caller's own identity or session from the body.
@@ -73,7 +74,11 @@ function refusal(error: { code?: string } | null) {
   return { status: 500 as const, code: 'recovery_unavailable' };
 }
 
-export function mfaRecoveryRoutes(deps: { mfa: MfaService; rpc?: RecoveryRpc }) {
+export function mfaRecoveryRoutes(deps: {
+  mfa: MfaService;
+  rpc?: RecoveryRpc;
+  requestRpc?: RecoveryRpc;
+}) {
   const rpc: RecoveryRpc =
     deps.rpc ?? (async (name, args) => createSupabaseAdmin().rpc(name, args));
   const app = new Hono<{ Variables: Variables }>();
@@ -121,6 +126,14 @@ export function mfaRecoveryRoutes(deps: { mfa: MfaService; rpc?: RecoveryRpc }) 
     }
     return { ok: true, challengeId: issued.challengeId };
   }
+
+  app.route(
+    '/mfa/recovery/requests',
+    mfaRecoveryRequestRoutes({
+      readRpc: deps.rpc,
+      writeRpc: deps.requestRpc ?? deps.rpc,
+    }),
+  );
 
   // ─── Actor ─────────────────────────────────────────────────────────
   app.get('/mfa/recovery/overview', async (c) => {

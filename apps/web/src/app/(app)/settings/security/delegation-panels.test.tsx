@@ -100,3 +100,32 @@ it('owner without a delegation is told so; with one, sees the scope and member l
     (screen.getByRole('button', { name: 'Open recovery' }) as HTMLButtonElement).disabled,
   ).toBe(true);
 });
+
+it('explains the owner recovery note requirement before allowing a request', async () => {
+  fetchMock.mockResolvedValueOnce(json({ owners: [], delegations: [delegation], cases: [] }));
+  render(<OwnerRecoveryPanel tenantId="t1" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Check my recovery delegation' }));
+  await screen.findByText(/^Delegated for approver, viewer until/);
+  const note = screen.getByLabelText('How you verified their identity') as HTMLInputElement;
+  expect(note.required).toBe(true);
+  expect(note.minLength).toBe(10);
+  expect(note.maxLength).toBe(1000);
+  expect(document.getElementById('ownerRecoveryReasonHint')?.textContent).toBe(
+    'Required: at least 10 characters (0 so far).',
+  );
+  fireEvent.change(screen.getByLabelText('Member to recover'), { target: { value: 'm1' } });
+  fireEvent.change(screen.getByLabelText('Your authenticator code'), {
+    target: { value: '123456' },
+  });
+  fireEvent.change(note, { target: { value: 'too short' } });
+  const open = screen.getByRole('button', { name: 'Open recovery' }) as HTMLButtonElement;
+  expect(open.disabled).toBe(true);
+  expect(document.getElementById('ownerRecoveryMissing')?.textContent).toBe(
+    'Still needed: a verification note of at least 10 characters.',
+  );
+  fireEvent.click(open);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  fireEvent.change(note, { target: { value: 'Known call' } });
+  expect(open.disabled).toBe(false);
+  expect(document.getElementById('ownerRecoveryMissing')).toBeNull();
+});

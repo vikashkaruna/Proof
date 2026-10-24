@@ -430,12 +430,15 @@ export function OwnerRecoveryPanel({ tenantId }: { tenantId: string }) {
                 <Label htmlFor="ownerRecoveryReason">How you verified their identity</Label>
                 <Input
                   id="ownerRecoveryReason"
+                  required
+                  minLength={10}
+                  maxLength={1000}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   aria-describedby="ownerRecoveryReasonHint"
                 />
                 <FieldHint id="ownerRecoveryReasonHint">
-                  At least 10 characters ({reason.trim().length} so far).
+                  Required: at least 10 characters ({reason.trim().length} so far).
                 </FieldHint>
               </div>
               <div className="flex flex-wrap items-end gap-3">

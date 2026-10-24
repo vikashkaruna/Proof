@@ -107,13 +107,19 @@ it('founder opens a recovery only with a subject, a stated verification and a co
     target: { value: '123456' },
   });
   expect((open as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(open);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const note = screen.getByLabelText('How you verified their identity') as HTMLInputElement;
+  expect(note.required).toBe(true);
+  expect(note.minLength).toBe(10);
+  expect(note.maxLength).toBe(1000);
   // The disabled button explains itself: only the short note is still missing.
   expect(open.getAttribute('aria-describedby')).toBe('recoveryOpenMissing');
   expect(document.getElementById('recoveryOpenMissing')?.textContent).toBe(
     'Still needed: a verification note of at least 10 characters.',
   );
   expect(document.getElementById('recoveryReasonHint')?.textContent).toBe(
-    'At least 10 characters (9 so far).',
+    'Required: at least 10 characters (9 so far).',
   );
   fireEvent.change(screen.getByLabelText('How you verified their identity'), {
     target: { value: 'Video call on the known number at 14:05' },
@@ -193,4 +199,26 @@ it('still renders for an overview without owners (pre-0156 server)', async () =>
   await screen.findByRole('button', { name: 'Open recovery' });
   const select = screen.getByLabelText('Account to recover') as HTMLSelectElement;
   expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'f2']);
+});
+
+it('shows an unconfirmed result after a lost helper response instead of an unhandled rejection', async () => {
+  fetchMock.mockRejectedValueOnce(new Error('network disconnected'));
+  render(<RecoveryConsole tenantId="tenant-1" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open recovery console' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('could not be confirmed');
+  expect(screen.queryByRole('status')).toBeNull();
+});
+
+it('does not claim beneficiary recovery when the binding response is lost', async () => {
+  fetchMock.mockRejectedValueOnce(new Error('network disconnected'));
+  render(
+    <RecoveryBeneficiary
+      tenantId="tenant-1"
+      initial={{ caseId: 'case-1', state: 'opened', boundHere: false, sessionId: SESSION }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Bind this sign-in' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('could not be confirmed');
+  expect(screen.queryByTestId('session-fingerprint')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Set up new authenticator' })).toBeNull();
 });
