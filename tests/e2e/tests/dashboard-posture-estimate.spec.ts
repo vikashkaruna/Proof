@@ -159,7 +159,9 @@ test('WEB-06-B: owner-to-viewer organization switch scopes posture/navigation an
       { name: 'axiom_active_tenant', value: groups[2]!.slug, url: origin + '/', sameSite: 'Lax' },
     ]);
   await page.goto('/dashboard');
-  await expect(page.getByTestId('posture-value')).not.toHaveText('94');
+  // An invalid preference can fall back to an own tenant with no usable score.
+  // Refusing the foreign score must also pass when that honest state is Unavailable.
+  await expect(page.getByTestId('posture-score')).not.toContainText('94/100');
   await expect(page.getByText('Dashboard unrelated', { exact: true })).toHaveCount(0);
   await Promise.all([
     page.waitForURL((url: URL) => url.pathname === '/'),
