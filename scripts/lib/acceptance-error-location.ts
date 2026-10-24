@@ -11,6 +11,7 @@ const knownSpecs = new Set([
   'classification-reviews.spec.ts',
   'connector-lifecycle.spec.ts',
   'consent-workflow.spec.ts',
+  'dashboard-posture-estimate.spec.ts',
   'dsar-workflow.spec.ts',
   'estate-graph.spec.ts',
   'estate-management.spec.ts',

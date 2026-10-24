@@ -5,7 +5,8 @@ import DashboardPage from './page';
 
 type Result = { data?: unknown; count?: number | null; error?: Error | null };
 const state = vi.hoisted(() => ({
-  basis: 'recorded_assessment' as 'recorded_assessment' | 'scheduled_coverage' | 'unavailable',
+  basis: 'recorded_assessment' as
+    'recorded_assessment' | 'unverified_recorded_score' | 'scheduled_coverage' | 'unavailable',
   results: {} as Record<string, Result>,
   role: 'owner' as string,
   from: vi.fn(),
@@ -56,7 +57,9 @@ async function html() {
 it('shows zero recorded data without invented posture, evidence, agents, or legal countdown', async () => {
   const view = await html();
   expect(view).toContain('Actual organization');
-  expect(view).toContain('No verified posture score is available.');
+  expect(view).toContain(
+    'No usable recorded posture score is available. Run an assessment to establish one.',
+  );
   expect(view).toContain('No agent runs recorded for this tenant.');
   expect(view).toContain('>0<');
   for (const fiction of [
@@ -105,7 +108,7 @@ it('counts only recorded pending approvals and open findings', async () => {
         id: 'eng-1',
         title: 'Audit',
         status: 'completed',
-        posture_score: 0.83,
+        posture_score: 83,
         started_at: '2026-10-01T00:00:00Z',
       },
     ],
@@ -180,7 +183,9 @@ it.each([0.83, 0.74, 0.5, 0.2])(
     expect(view).toContain('data-testid="posture-value"');
     expect(view).toContain('data-testid="posture-provenance">Unverified<');
     expect(view).not.toContain('data-testid="posture-band"');
-    expect(view).toContain('finalized source provenance is unverified here');
+    expect(view).toContain(
+      'Supporting evidence and assessment finalization have not been verified here',
+    );
   },
 );
 
@@ -295,7 +300,9 @@ for (const basis of ['scheduled_coverage', 'unavailable'] as const) {
     };
     const view = await html();
     expect(view).not.toContain('data-testid="posture-value"');
-    expect(view).toContain('No verified posture score is available.');
+    expect(view).toContain(
+      'No usable recorded posture score is available. Run an assessment to establish one.',
+    );
   });
 }
 
@@ -325,3 +332,32 @@ it('keeps the latest recorded posture while a newer audit round is still open', 
   expect(view).toContain('Next audit round');
   expect(view).toContain('href="/engagements/engagement-2"');
 });
+
+it.each([0, 0.83, 1, 30.87, 100])(
+  'shows an unverified recorded estimate of %s on its original 0–100 scale',
+  async (score) => {
+    state.basis = 'unverified_recorded_score';
+    state.results.engagements = {
+      data: [{ id: 'legacy', title: 'Recorded estimate', status: 'review', posture_score: score }],
+      error: null,
+    };
+    const view = await html();
+    expect(view).toContain(`data-testid="posture-value">${score}<`);
+    expect(view).toContain('data-testid="posture-provenance">Unverified<');
+    expect(view).toContain(
+      'Supporting evidence and assessment finalization have not been verified',
+    );
+    expect(view).not.toContain('data-testid="posture-band"');
+  },
+);
+it.each([null, '74', -1, 101, NaN, Infinity])(
+  'withholds unusable recorded estimates (%s)',
+  async (score) => {
+    state.basis = 'unverified_recorded_score';
+    state.results.engagements = {
+      data: [{ id: 'legacy', title: 'Recorded estimate', status: 'review', posture_score: score }],
+      error: null,
+    };
+    expect(await html()).not.toContain('data-testid="posture-value"');
+  },
+);

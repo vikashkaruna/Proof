@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export type AssessmentBasis = 'recorded_assessment' | 'scheduled_coverage' | 'unavailable';
+export type AssessmentBasis =
+  'recorded_assessment' | 'unverified_recorded_score' | 'scheduled_coverage' | 'unavailable';
 const uuid = z.uuid();
 const run = z
   .object({
@@ -18,7 +19,8 @@ const run = z
   })
   .strict();
 /** Server-only classification from tenant-scoped, trusted persisted run metadata.
- * Missing/error/truncated/unknown provenance never authorizes displaying numbers.
+ * Missing/error/truncated/unknown provenance never authorizes assessment metrics.
+ * A complete read with no runs permits a dashboard-only unverified recorded estimate.
  * This is presentation filtering; raw persisted calculations and RLS stay intact. */
 export async function readAssessmentBases(
   db: Pick<SupabaseClient, 'from'>,
@@ -52,6 +54,9 @@ export async function readAssessmentBases(
     if (!Number.isSafeInteger(response.count) || response.count !== rows.length) return result;
     if (rows.some((row) => row.tenant_id !== tenantId || !result.has(row.engagement_id)))
       return result;
+    for (const id of ids)
+      if (!rows.some((row) => row.engagement_id === id))
+        result.set(id, 'unverified_recorded_score');
     const unknown = new Set<string>();
     for (const row of rows) {
       const kind = row.metadata.request_kind;
@@ -59,7 +64,9 @@ export async function readAssessmentBases(
         result.set(row.engagement_id, 'scheduled_coverage');
       else if (
         kind !== undefined &&
-        !['questionnaire_v1', 'public_control_review_set_v1'].includes(String(kind))
+        !['questionnaire_v1', 'public_control_review_set_v1', 'durable_assessment_v1'].includes(
+          String(kind),
+        )
       )
         unknown.add(row.engagement_id);
       else if (
@@ -99,4 +106,16 @@ export function assessmentMetrics(
         ? exposure
         : null,
   };
+}
+
+/** Dashboard estimates are always unverified; this does not authorize report/exposure metrics.
+ * Engagement scores use the persisted 0–100 scale, including values below one. */
+export function dashboardPostureEstimate(basis: AssessmentBasis | undefined, posture: unknown) {
+  return (basis === 'recorded_assessment' || basis === 'unverified_recorded_score') &&
+    typeof posture === 'number' &&
+    Number.isFinite(posture) &&
+    posture >= 0 &&
+    posture <= 100
+    ? posture
+    : null;
 }

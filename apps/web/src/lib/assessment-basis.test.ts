@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { assessmentMetrics, readAssessmentBases } from './assessment-basis';
+import {
+  assessmentMetrics,
+  dashboardPostureEstimate,
+  readAssessmentBases,
+} from './assessment-basis';
 const tenant = '11111111-1111-4111-8111-111111111111';
 const engagement = '22222222-2222-4222-8222-222222222222';
 const ordinary = () => ({
@@ -61,6 +65,9 @@ describe('trusted assessment provenance', () => {
     expect(calls.some((call) => call[0] === 'signal' && call[1] instanceof AbortSignal)).toBe(true);
     expect(await basis([{ ...ordinary(), metadata: {} }])).toBe('recorded_assessment');
     expect(
+      await basis([{ ...ordinary(), metadata: { request_kind: 'durable_assessment_v1' } }]),
+    ).toBe('recorded_assessment');
+    expect(
       await basis([{ ...ordinary(), metadata: { request_kind: 'public_control_review_set_v1' } }]),
     ).toBe('recorded_assessment');
   });
@@ -77,7 +84,6 @@ describe('trusted assessment provenance', () => {
   });
   it('fails closed for missing, incomplete, unknown, foreign, malformed, errored and truncated provenance', async () => {
     for (const rows of [
-      [],
       null,
       [{ ...ordinary(), status: 'running' }],
       [{ ...ordinary(), completed_at: null }],
@@ -132,7 +138,12 @@ describe('trusted assessment provenance', () => {
   });
 });
 it('exposes numeric calculations only for a known ordinary assessment and bounded finite values', () => {
-  for (const source of ['scheduled_coverage', 'unavailable', undefined] as const)
+  for (const source of [
+    'unverified_recorded_score',
+    'scheduled_coverage',
+    'unavailable',
+    undefined,
+  ] as const)
     expect(assessmentMetrics(source, 83, 1234567)).toEqual({ score: null, exposureInr: null });
   expect(assessmentMetrics('recorded_assessment', 83, 1234567)).toEqual({
     score: 83,
@@ -142,4 +153,13 @@ it('exposes numeric calculations only for a known ordinary assessment and bounde
     expect(assessmentMetrics('recorded_assessment', value, 0).score).toBeNull();
   for (const value of [NaN, Infinity, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1', null])
     expect(assessmentMetrics('recorded_assessment', 0, value).exposureInr).toBeNull();
+});
+
+it('permits only a dashboard estimate when a complete scoped query finds no runs', async () => {
+  expect(await basis([])).toBe('unverified_recorded_score');
+  expect(dashboardPostureEstimate(await basis([]), 30.87)).toBe(30.87);
+  for (const source of ['unavailable', 'scheduled_coverage', undefined] as const)
+    expect(dashboardPostureEstimate(source, 30.87)).toBeNull();
+  const { db } = database([], null, 1);
+  expect((await readAssessmentBases(db, tenant, [engagement])).get(engagement)).toBe('unavailable');
 });

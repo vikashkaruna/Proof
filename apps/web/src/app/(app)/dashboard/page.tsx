@@ -1,4 +1,4 @@
-import { readAssessmentBases, assessmentMetrics } from '@/lib/assessment-basis';
+import { readAssessmentBases, dashboardPostureEstimate } from '@/lib/assessment-basis';
 import Link from 'next/link';
 import { ACTIVE_RUN_STALE_MS, Capability, can, capabilitiesFor, type UserRole } from '@axiom/types';
 import { DataPlaceholder, PageHeader, formatDateTime } from '@axiom/ui';
@@ -84,24 +84,14 @@ export default async function DashboardPage() {
   );
   // The latest *recorded* posture stays visible while a newer audit or review
   // round is still open: skip engagements without a recorded assessment score.
-  const rawPosture = engagements.error
-    ? null
-    : ((engagements.data ?? [])
-        .map((row) => assessmentMetrics(bases.get(row.id), row.posture_score, null).score)
-        .find((score) => score !== null) ?? null);
-  const normalizedPosture =
-    rawPosture == null
-      ? null
-      : Number(rawPosture) <= 1
-        ? Number(rawPosture) * 100
-        : Number(rawPosture);
-  const posture =
-    normalizedPosture !== null &&
-    Number.isFinite(normalizedPosture) &&
-    normalizedPosture >= 0 &&
-    normalizedPosture <= 100
-      ? Math.round(normalizedPosture)
-      : null;
+  const recordedPosture = engagements.error
+    ? undefined
+    : (engagements.data ?? []).find(
+        (row) => dashboardPostureEstimate(bases.get(row.id), row.posture_score) !== null,
+      );
+  const posture = recordedPosture
+    ? dashboardPostureEstimate(bases.get(recordedPosture.id), recordedPosture.posture_score)
+    : null;
 
   // Open findings and pending approvals lead in the header band; the tiles
   // below are the records behind them.
@@ -141,8 +131,8 @@ export default async function DashboardPage() {
       postureScore: true,
       note:
         posture === null
-          ? 'No verified posture score is available.'
-          : 'Recorded engagement score; finalized source provenance is unverified here. Not a compliance certification.',
+          ? 'No usable recorded posture score is available. Run an assessment to establish one.'
+          : 'Unverified posture estimate from a recorded engagement. Supporting evidence and assessment finalization have not been verified here. Not a compliance certification.',
     },
     {
       label: 'Open findings',
@@ -216,7 +206,7 @@ export default async function DashboardPage() {
           <>
             Recorded compliance state for{' '}
             <strong className="font-semibold text-white">{tenantName}</strong>. An unavailable value
-            means the source could not be read; a zero means no matching records.
+            means no usable value could be established; a zero count means no matching records.
           </>
         }
       >
