@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 /**
  * W1 — switching the active tenant.
@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
  */
 
 const state = vi.hoisted(() => ({
+  origin: null as string | null,
   user: { id: 'user-a' } as { id: string } | null,
   memberships: [] as Array<{ tenant_id: string; tenants: { slug: string } }>,
   founderLive: false,
@@ -24,6 +25,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('next/headers', () => ({
+  headers: async () => new Headers(state.origin ? { origin: state.origin } : {}),
   cookies: async () => ({
     set: (name: string, value: string, options: Record<string, unknown>) => {
       state.cookiesSet.push({ name, value, options });
@@ -51,7 +53,11 @@ vi.mock('@axiom/supabase', () => ({
 
 const { switchTenantAction } = await import('./tenant-actions');
 
+afterEach(() => vi.unstubAllEnvs());
+
 beforeEach(() => {
+  vi.stubEnv('ENVIRONMENT', 'production');
+  state.origin = null;
   state.user = { id: 'user-a' };
   state.memberships = [
     { tenant_id: 'tenant-a', tenants: { slug: 'alpha' } },
@@ -118,3 +124,25 @@ it('switches a live global founder to an existing nonmember organization and ref
   expect(await switchTenantAction('foreign')).toEqual({ ok: false, reason: 'not_a_member' });
   expect(state.cookiesSet).toHaveLength(0);
 });
+
+it.each([
+  ['local', 'http://192.168.1.20:3301', false],
+  ['development', 'http://10.1.2.3:3001', false],
+  ['test', 'http://localhost:3301', false],
+  ['local', 'https://192.168.1.20:3301', true],
+  ['production', 'http://192.168.1.20:3301', true],
+  ['preprod', 'http://localhost:3301', true],
+  ['local', 'http://public.example', true],
+  ['local', 'not-an-origin', true],
+  ['local', null, true],
+] as const)(
+  'keeps tenant preference transport scoped for %s / %s',
+  async (environment, origin, secure) => {
+    vi.stubEnv('ENVIRONMENT', environment);
+    // The canonical deployment URL cannot override this request's local transport.
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://app.example.invalid');
+    state.origin = origin;
+    expect(await switchTenantAction('alpha')).toEqual({ ok: true, slug: 'alpha' });
+    expect(state.cookiesSet[0]?.options).toMatchObject({ secure, httpOnly: true, sameSite: 'lax' });
+  },
+);
