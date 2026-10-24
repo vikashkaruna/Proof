@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createMfaAccount, signInAs, state } from '../fixtures';
 import { insertOwnedEngagementFixtures } from '../local-db';
-import { tenantCookie } from '../target';
 
 test('dashboard shows a saved unverified estimate through a newer intake and reload', async ({
   page,
@@ -26,7 +25,14 @@ test('dashboard shows a saved unverified estimate through a newer intake and rel
     expect(response.status, table).toBe(201);
   }
   await signInAs(page, actor.email, actor.password, actor.totpSecret!);
-  await page.context().addCookies([tenantCookie(slug)]);
+  await page.context().addCookies([
+    {
+      name: 'axiom_active_tenant',
+      value: slug,
+      url: `${new URL(page.url()).origin}/`,
+      sameSite: 'Lax',
+    },
+  ]);
   await page.goto('/dashboard');
   await expect(page.getByTestId('posture-score')).toHaveText('Unavailable');
   await expect(page.getByTestId('posture-provenance')).toHaveCount(0);
