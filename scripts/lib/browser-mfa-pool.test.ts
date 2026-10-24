@@ -209,7 +209,14 @@ test('stale existing pool is not overwritten', async (context) => {
 test('catalogue demand includes dynamic roles and formats without sharing identities', () => {
   assert.equal(
     BROWSER_MFA_POOL_DEMAND.reduce((sum, entry) => sum + entry.count, 0),
-    73,
+    75,
+  );
+  assert.equal(
+    BROWSER_MFA_POOL_DEMAND.filter((entry) => entry.role === 'viewer').reduce(
+      (sum, entry) => sum + entry.count,
+      0,
+    ),
+    1,
   );
   const analysts = BROWSER_MFA_POOL_DEMAND.filter((entry) => entry.role === 'axiom_analyst');
   assert.equal(

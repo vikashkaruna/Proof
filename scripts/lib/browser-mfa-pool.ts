@@ -80,12 +80,13 @@ const manifestSchema = z
  * 16 admin sites plus matrix; approval helper has three invocations; analyst
  * staff onboarding fixture is internal. Exhaustion never provisions fallback. */
 export const BROWSER_MFA_POOL_DEMAND = Object.freeze([
-  { role: 'owner', internal: false, count: 26 },
+  { role: 'owner', internal: false, count: 27 },
   { role: 'admin', internal: false, count: 16 },
   { role: 'admin', internal: false, profileCase: 'long-account', count: 1 },
   { role: 'founder', internal: true, count: 17 },
   { role: 'axiom_analyst', internal: true, count: 4 },
   { role: 'approver', internal: false, count: 9 },
+  { role: 'viewer', internal: false, count: 1 },
 ] as const);
 
 /** Additional memberships are expected only after live global designation was verified. */

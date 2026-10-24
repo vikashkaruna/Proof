@@ -142,3 +142,14 @@ test('registered fixture assertion retains only its exact reviewed source coordi
   ])
     assert.equal(acceptanceErrorLocation({ file, line: 147, column: 29 }), undefined);
 });
+
+test('reports the reviewed dashboard specification location without private failure details', () => {
+  assert.equal(
+    acceptanceErrorLocation({
+      file: '/private/host/tests/e2e/tests/dashboard-posture-estimate.spec.ts',
+      line: 71,
+      column: 5,
+    }),
+    'tests/e2e/tests/dashboard-posture-estimate.spec.ts:71:5',
+  );
+});
