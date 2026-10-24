@@ -59,6 +59,7 @@ it('enrols a first authenticator, then shows recovery codes once after activatio
   render(<MfaEnrolment {...base} initialStatus={empty} />);
   fireEvent.click(screen.getByRole('button', { name: 'Enrol an authenticator' }));
   await waitFor(() => expect(screen.getByText('SETUPKEY')).toBeTruthy());
+  expect(screen.getByRole('img', { name: 'Authenticator setup QR code' })).toBeTruthy();
   expect(fetcher.mock.calls[0]![0]).toBe('/api/bff/v1/mfa/enrol');
   expect(JSON.parse(fetcher.mock.calls[0]![1].body)).not.toHaveProperty('mfaChallengeId');
   fireEvent.change(screen.getByLabelText('6-digit code'), { target: { value: '123456' } });
@@ -367,4 +368,17 @@ it('keeps an enrolment intent key after a lost response, then uses a fresh key f
   fireEvent.click(screen.getByRole('button', { name: 'Enrol an authenticator' }));
   await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(3));
   expect(fetcher.mock.calls[2]![1].headers['Idempotency-Key']).toBe('mfa-enrol-intent-2');
+});
+
+it('offers saved recovery codes through the existing verified replacement challenge', async () => {
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ challengeId: 'saved-code-challenge' }));
+  vi.stubGlobal('fetch', fetcher);
+  render(<MfaEnrolment {...base} initialStatus={active} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Use a saved recovery code' }));
+  await waitFor(() => expect(screen.getByLabelText('Current code or recovery code')).toBeTruthy());
+  expect(fetcher.mock.calls[0]![0]).toBe('/api/bff/v1/mfa/challenge');
+  expect(JSON.parse(fetcher.mock.calls[0]![1].body).purpose).toBe('enrolment');
+  expect(screen.queryByRole('img', { name: 'Authenticator setup QR code' })).toBeNull();
 });

@@ -1,6 +1,14 @@
 import { expect, test, type Page, type Locator } from '@playwright/test';
 import { z } from 'zod';
-import { selectTenant, signIn, signInFreshFounder, signInFreshOwner, state } from '../fixtures';
+import {
+  createMfaAccount,
+  selectTenant,
+  signIn,
+  signInAs,
+  signInFreshFounder,
+  signInFreshOwner,
+  state,
+} from '../fixtures';
 import { marketingUrl } from '../target';
 
 async function expectNoHorizontalOverflow(page: Page) {
@@ -260,4 +268,44 @@ test('recovery form explains the identity note requirement and does not submit a
   await expect(panel.locator('#recoveryOpenMissing')).toHaveCount(0);
   // Never submit: identity verification and the actor's current code are human inputs.
   expect(recoveryPosts).toBe(0);
+});
+
+// Each journey owns this approver; other foreign-tenant denial fixtures stay intact.
+test('approver switches organizations from a plan detail to the new plan list', async ({
+  page,
+}) => {
+  const who = await createMfaAccount('plan-organization-switch', {
+    role: 'approver',
+    withFactor: true,
+  });
+  const membership = await fetch(`${state.supabaseUrl}/rest/v1/tenant_users`, {
+    method: 'POST',
+    headers: {
+      apikey: state.publishableKey,
+      Authorization: `Bearer ${state.serviceKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      tenant_id: state.tenantB.id,
+      user_id: who.id,
+      role: 'approver',
+      approval_scopes: [],
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  expect(membership.status).toBe(201);
+  await selectTenant(page, 'a');
+  await signInAs(page, who.email, who.password, who.totpSecret);
+  await page.goto(`/plans/${state.planA.id}`);
+  await expect(page.getByRole('heading', { name: state.planA.title, exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Switch organization' }).click();
+  await page.getByRole('button', { name: new RegExp(state.tenantB.name) }).click();
+  await expect(page).toHaveURL(/\/plans$/);
+  await expect(page.locator(`a[href="/plans/${state.planB.id}"]`)).toBeVisible();
+  await page.reload();
+  await page.locator(`a[href="/plans/${state.planB.id}"]`).click();
+  await expect(page.getByRole('heading', { name: state.planB.title, exact: true })).toBeVisible();
+  const foreign = await page.goto(`/plans/${state.planA.id}`);
+  expect(foreign?.status()).toBe(404);
+  await expect(page.getByText(state.planA.title, { exact: true })).toHaveCount(0);
 });

@@ -245,7 +245,11 @@ it('recovers a lost challenge reply without issuing another challenge until auth
     throw Error('Unexpected request');
   });
   render(<StandingApprovalClient tenantId={id(3)} actorId={id(1)} />);
-  fireEvent.click(await screen.findByRole('button', { name: 'Prepare authenticator challenge' }));
+  const prepare = await screen.findByRole('button', { name: 'Prepare authenticator challenge' });
+  // The retained journal renders before the asynchronous authority read finishes.
+  // Wait for that read to enable the action; a click on a disabled button is ignored.
+  await waitFor(() => expect(prepare.hasAttribute('disabled')).toBe(false));
+  fireEvent.click(prepare);
   await screen.findByText('Challenge reply lost');
   fireEvent.click(screen.getByRole('button', { name: 'Prepare authenticator challenge' }));
   await screen.findByText(/An earlier challenge may still be active/);

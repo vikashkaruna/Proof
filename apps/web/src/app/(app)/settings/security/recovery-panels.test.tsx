@@ -200,3 +200,25 @@ it('still renders for an overview without owners (pre-0156 server)', async () =>
   const select = screen.getByLabelText('Account to recover') as HTMLSelectElement;
   expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'f2']);
 });
+
+it('shows an unconfirmed result after a lost helper response instead of an unhandled rejection', async () => {
+  fetchMock.mockRejectedValueOnce(new Error('network disconnected'));
+  render(<RecoveryConsole tenantId="tenant-1" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open recovery console' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('could not be confirmed');
+  expect(screen.queryByRole('status')).toBeNull();
+});
+
+it('does not claim beneficiary recovery when the binding response is lost', async () => {
+  fetchMock.mockRejectedValueOnce(new Error('network disconnected'));
+  render(
+    <RecoveryBeneficiary
+      tenantId="tenant-1"
+      initial={{ caseId: 'case-1', state: 'opened', boundHere: false, sessionId: SESSION }}
+    />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Bind this sign-in' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('could not be confirmed');
+  expect(screen.queryByTestId('session-fingerprint')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Set up new authenticator' })).toBeNull();
+});

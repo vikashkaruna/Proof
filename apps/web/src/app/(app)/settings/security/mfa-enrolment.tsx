@@ -1,5 +1,7 @@
 'use client';
 
+import { AuthenticatorQrCode } from './authenticator-qr-code';
+
 import { useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { z } from 'zod';
@@ -531,6 +533,7 @@ export function MfaEnrolment({
               Add this to your authenticator, then enter the code it shows.
             </p>
             <div className="flex flex-col gap-1.5">
+              <AuthenticatorQrCode provisioningUri={pending.provisioningUri} />
               <Label htmlFor="setupKey">Setup key (for manual entry)</Label>
               <code
                 id="setupKey"
@@ -581,6 +584,15 @@ export function MfaEnrolment({
             >
               {status.enrolled ? 'Replace authenticator' : 'Enrol an authenticator'}
             </Button>
+            {status.enrolled && status.recoveryCodesRemaining > 0 && (
+              <Button
+                variant="ghost"
+                onClick={() => beginOrChallenge()}
+                disabled={!hydrated || busy || !statusVerified}
+              >
+                Use a saved recovery code
+              </Button>
+            )}
             {status.enrolled && (
               <Button
                 variant="ghost"

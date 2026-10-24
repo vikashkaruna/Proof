@@ -328,7 +328,10 @@ export function AppShell({
       // the server renders another is the worst possible failure here.
       const result = await switchTenantAction(t.slug || t.id);
       if (!result.ok) return;
-      router.refresh();
+      // Detail IDs belong to the previous organization. Start at the new
+      // organization's plan list rather than refreshing a now-foreign ID.
+      if (pathname.startsWith('/plans/')) router.replace('/plans');
+      else router.refresh();
     } finally {
       setSwitching(false);
     }

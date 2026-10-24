@@ -4,6 +4,7 @@ import { MfaEnrolment } from './mfa-enrolment';
 import { RecoveryBeneficiary, RecoveryConsole, type OwnRecovery } from './recovery-panels';
 import { DelegationManager, OwnerRecoveryPanel } from './delegation-panels';
 import { moduleBarProps } from '@/lib/module-bar';
+import { RecoveryRequests } from './recovery-requests';
 
 export const dynamic = 'force-dynamic';
 
@@ -130,6 +131,10 @@ export default async function SecuritySettingsPage({ searchParams }: PageProps) 
           initialStatus={initialStatus}
           enrolmentRequired={sentHere}
         />
+      )}
+
+      {!ownRecovery && initialStatus.enrolled && (
+        <RecoveryRequests key={`${ctx.userId}:${ctx.tenantId}:requests`} tenantId={ctx.tenantId} />
       )}
 
       {isPlatformFounder && !ownRecovery && initialStatus.enrolled && (
