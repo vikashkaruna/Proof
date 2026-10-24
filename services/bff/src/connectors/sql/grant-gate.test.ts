@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeDb, type FakeDb } from '../../test/fake-postgrest.js';
 vi.mock('@axiom/supabase', () => ({ createSupabaseAdmin: vi.fn() }));
 import { SqlDiscoveryGate, type SqlDiscoveryRequest } from './grant-gate.js';
-import type { SqlSession } from './postgres-read.js';
+import type { SqlSession, SqlSessionFactory } from './postgres-read.js';
 
 const NOW = Date.now();
 const SPIFFE = 'spiffe://axiom.test/agent/drishti';
@@ -499,4 +499,48 @@ describe('PostgreSQL original deadline cancels stalled work', () => {
       void operation;
     }
   });
+});
+
+describe('sandbox credential operation binding', () => {
+  it.each(
+    (['postgresql', 'mysql', 'mariadb'] as const).flatMap((engine) =>
+      (['enumerate', 'sample'] as const).map((operation) => ({ engine, operation })),
+    ),
+  )(
+    'preserves $engine $operation through the session credential lookup',
+    async ({ engine, operation }) => {
+      const open = vi.fn<SqlSessionFactory>(async (_context, _signal, requestedOperation) => {
+        // The sandbox password provider re-resolves the grant for this exact
+        // operation. Omitting it must refuse before a target session is opened.
+        if (requestedOperation !== operation) throw new Error('Operation-bound credential refused');
+        return {
+          query: async (text) => {
+            if (text.includes(' as read_only'))
+              return { rows: [{ read_only: true, privileged: false, can_write: false }] };
+            if (text.includes('from information_schema.tables'))
+              return {
+                rows: [{ tschema: 'crm', tname: 'customers', kind: 'r', estimated_rows: 0 }],
+              };
+            if (text.includes('select a.attname as name')) return { rows: [{ name: 'email' }] };
+            if (text.includes('from information_schema.columns'))
+              return { rows: [{ cname: 'email', ctype: 'text', nullable: 1 }] };
+            return { rows: [] };
+          },
+          end: async () => undefined,
+        };
+      });
+      const scoped = new SqlDiscoveryGate(identity, open, {
+        client: () => fake.client as never,
+        engine,
+        operation,
+        signal: new AbortController().signal,
+      });
+      const result =
+        operation === 'enumerate'
+          ? await scoped.enumerate(request)
+          : await scoped.sample(request, 'crm.customers', 1);
+      expect(Array.isArray(result.records)).toBe(true);
+      expect(open).toHaveBeenCalledWith(expect.anything(), expect.anything(), operation);
+    },
+  );
 });

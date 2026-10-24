@@ -150,7 +150,10 @@ export class SqlDiscoveryGate {
     const wait = <R>(operation: () => PromiseLike<R>): Promise<R> =>
       scope ? scope.run(operation) : Promise.resolve(operation());
     const sessions: SqlSessionFactory = !scope
-      ? this.sessions
+      ? (context, signal) =>
+          // Non-abortable engines still need the exact operation when the
+          // sandbox credential provider re-resolves its least-privilege grant.
+          this.sessions(context, signal ?? this.deps.signal, this.deps.operation)
       : async (context) => {
           const pending = this.sessions(context, scope.signal, this.deps.operation).then(
             async (raw) => {
